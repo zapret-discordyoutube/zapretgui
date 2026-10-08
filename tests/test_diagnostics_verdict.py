@@ -933,8 +933,10 @@ class EngineScenarioTests(unittest.TestCase):
         text = "\n".join(lines)
 
         discord_calls = [ip for host, ip in net.calls if host == "discord.com"]
-        # Оба адреса пробуются в общем залпе и ещё раз — при повторной проверке поодиночке.
-        self.assertEqual(sorted(discord_calls), sorted(DISCORD_REAL * 2))
+        # Оба адреса пробуются в общем залпе; при повторной проверке — один лёгкий запрос
+        # к тому адресу, на котором сайт не открылся: полный повтор нужен, только если он ожил.
+        self.assertEqual(len(discord_calls), len(DISCORD_REAL) + 1)
+        self.assertEqual(set(discord_calls), set(DISCORD_REAL))
         discord_target = result["services"][0]["targets"][0]
         self.assertEqual(discord_target["rechecked"], "same")
         self.assertIn("повторная проверка поодиночке дала то же", discord_target["text"])

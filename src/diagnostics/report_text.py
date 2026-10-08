@@ -25,6 +25,17 @@ QUIC_ICON = {
 }
 
 
+# Короткие названия шагов для строки «сколько шёл каждый шаг».
+STEP_TITLES = {
+    "sites": "сайты",
+    "hostings": "хостинги",
+    "voice": "звонки",
+    "ipv6": "IPv6",
+    "system": "компьютер и сеть",
+    "dns_servers": "DNS-серверы",
+    "filter": "место фильтра",
+}
+
 def timed_out_line(deadline: float) -> str:
     return (
         f"⚠️ Часть проверок не уложилась в {deadline:.0f} с и была прервана — "

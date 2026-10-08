@@ -67,3 +67,49 @@ class LaneTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StagesTests(unittest.TestCase):
+    def test_stages_run_one_after_another_and_report_start_and_end(self) -> None:
+        from diagnostics.run_context import Steps
+
+        run = Run(None, workers=10)
+        self.addCleanup(run.close)
+        log: list[str] = []
+        lock = threading.Lock()
+
+        def task(name: str) -> str:
+            with lock:
+                log.append(f"работа {name}")
+            return name.upper()
+
+        first = run.later("a", task, "a1")
+        twin = run.later("a", task, "a2")
+        second = run.later("b", task, "b1")
+        broken = run.later("b", lambda: 1 / 0)
+
+        def note(stage: str, done: bool) -> None:
+            with lock:
+                log.append(f"{'конец' if done else 'начало'} {stage}")
+
+        # Пока шаги не запущены, отложенное не выполняется.
+        self.assertEqual(log, [])
+        run.start_stages(("a", "b", "пустой"), note)
+
+        self.assertEqual((first.result(5), twin.result(5), second.result(5)), ("A1", "A2", "B1"))
+        with self.assertRaises(ZeroDivisionError):
+            broken.result(5)
+        deadline = threading.Event()
+        while "конец пустой" not in log and not deadline.wait(0.01):
+            pass
+        # Шаг «b» начинается только после конца шага «a»; задачи одного шага идут между его отметками.
+        self.assertEqual(log[0], "начало a")
+        self.assertEqual(sorted(log[1:3]), ["работа a1", "работа a2"])
+        self.assertEqual(log[3:5], ["конец a", "начало b"])
+        self.assertEqual(log[-3:], ["конец b", "начало пустой", "конец пустой"])
+
+        steps = Steps(None)
+        steps("sites", 0, 5)
+        steps("sites", 5, 5)
+        self.assertEqual(list(steps.seconds()), ["sites"])
+        self.assertIn("сайты", steps.line({"sites": "сайты"}))

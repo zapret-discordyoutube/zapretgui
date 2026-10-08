@@ -72,10 +72,8 @@ from diagnostics.limits import (
     SOURCE_SYSTEM,
     VIDEO_SERVERS,
 )
-from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME
-from diagnostics.run_context import Probe as _Probe
-from diagnostics.run_context import Run as _Run
-from diagnostics.run_context import Stopped as _Stopped
+from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe as _Probe, Run as _Run
+from diagnostics.run_context import Steps as _Steps, Stopped as _Stopped
 from diagnostics.services import (
     GOOGLEVIDEO_FALLBACK_HOST,
     SCOPE_ALL,
@@ -589,6 +587,13 @@ def _recheck_failed(run: _Run, services: dict[str, Service], done_probes: list) 
         key, target, first, _error = done_probes[index]
         if run.dns_cancelled():
             return None
+        # Сначала один лёгкий запрос к тому же адресу. Полная проверка сайта заново — это
+        # десяток запросов с ожиданием; на линии, где закрыта половина сайтов, она одна
+        # съедала больше минуты. Она нужна, только если сайт на этот раз открылся.
+        if first.reach is not None and first.reach.ip:
+            if not net_access.get(run, first.host, first.reach.ip, target.path).ok:
+                first.rechecked = "" if run.dns_cancelled() else RECHECK_SAME
+                return None
         again = _probe_target(run, target, key, full=True, volume=not services[key].control)
         if again.reach is None or again.reach.kind == KIND_CANCELLED:
             # Повтор не успел — остаётся первый результат, без пометки.
@@ -690,14 +695,7 @@ def run_blockcheck(
     full = scope == SCOPE_FULL
     services = build_services(scope, user_domains)
 
-    def step(name: str, done: int = 1, total: int = 1) -> None:
-        if progress is None:
-            return
-        try:
-            progress(name, done, total)
-        except Exception:
-            pass
-
+    step = _Steps(progress)
     targets_count = sum(len(service.targets) for service in services.values())
     run = _Run(
         should_stop,
@@ -723,9 +721,10 @@ def run_blockcheck(
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
 
         # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
-        voice_future = run.submit(check_voice, run.submit, _wait_plain)
-        burst_future = run.submit(sections.check_udp_burst, run)
-        freeze_future = run.submit(
+        voice_future = run.later(STEP_VOICE, check_voice, run.submit, _wait_plain)
+        burst_future = run.later(STEP_VOICE, sections.check_udp_burst, run)
+        freeze_future = run.later(
+            STEP_HOSTINGS,
             check_freeze,
             run.lane(EVERY_AT_ONCE).submit,
             _wait_plain,
@@ -735,10 +734,11 @@ def run_blockcheck(
             on_server=lambda _server, done, total: step(STEP_HOSTINGS, done, total),
         )
 
-        network_future = run.submit(sections.check_network, run, other_tools)
+        network_future = run.later(STEP_SYSTEM, sections.check_network, run, other_tools)
         # Дата-центры Telegram — часть списка «все сайты»: в коротком режиме их не трогаем.
         telegram_future = (
-            run.submit(
+            run.later(
+                STEP_SYSTEM,
                 telegram_check.check_telegram,
                 run.submit,
                 _wait_plain,
@@ -748,26 +748,27 @@ def run_blockcheck(
             if scope != SCOPE_MAIN
             else None
         )
-        ipv6_future = run.submit(sections.check_ipv6, run)
-        system_future = run.submit(sections.check_system, run, services, zapret_running)
+        ipv6_future = run.later(STEP_IPV6, sections.check_ipv6, run)
+        system_future = run.later(STEP_SYSTEM, sections.check_system, run, services, zapret_running)
 
+        step(STEP_SITES, 0, targets_count)
         collected = _run_probes(
             run, services, full=True, emit=emit, on_done=lambda done, total: step(STEP_SITES, done, total)
         )
-        # Тяжёлое идёт по очереди, а не разом с сайтами: проверка DNS-серверов — это сотни
-        # своих соединений, сборка списка реестра РКН — секунды счёта. Вместе с сайтами
-        # они забирали процессор у окна программы, и оно замирало.
-        dns_future = run.submit(check_dns_servers, should_stop=run.dns_cancelled) if full and check_dns_servers else None
+        # Шаги идут по очереди, как строки на экране, а не все разом: вместе они
+        # забирали процессор у окна программы, и оно замирало.
+        dns = full and check_dns_servers
+        dns_future = run.later(STEP_DNS_SERVERS, check_dns_servers, should_stop=run.dns_cancelled) if dns else None
+        # У хостингов свой счётчик «готово из всего» — им отметка шага не нужна.
+        run.start_stages(PROGRESS_STEPS[1:6], lambda name, done: name == STEP_HOSTINGS or step(name, int(done), 1))
         registry_wait = sections.start_registry()
 
         ipv6 = _settle(run, ipv6_future, emit, "IPv6")
-        step(STEP_IPV6)
         if ipv6 is not None:
             emit("━━━━━━━━ IPv6 ━━━━━━━━")
             emit(f"{sections.IPV6_ICON[ipv6.code]} IPv6 {ipv6.text}")
 
         system: tuple[system_state.SystemItem, ...] = tuple(_settle(run, system_future, emit, "Состояние системы") or ())
-        step(STEP_SYSTEM)
         if system:
             emit("")
             emit("━━━━━━━━ Состояние системы ━━━━━━━━")
@@ -776,7 +777,6 @@ def run_blockcheck(
 
         voice_facts = _settle(run, voice_future, emit, "Голосовые серверы")
         voice = summarize_voice(voice_facts) if voice_facts is not None else None
-        step(STEP_VOICE)
         if voice is not None:
             for line in report_text.section_lines(
                 "Голосовые звонки (UDP)",
@@ -827,7 +827,7 @@ def run_blockcheck(
 
         dns_servers = sections.finish_dns_servers(run, dns_future, emit) if dns_future is not None else None
         if full:
-            step(STEP_DNS_SERVERS)
+            step(STEP_FILTER, 0, 1)
         filter_place = (
             sections.find_filter_place(
                 run,
@@ -884,7 +884,7 @@ def run_blockcheck(
         registry.annotate(services_report, registry_index)
         for line in registry.lines(services_report, registry_index):
             emit(line)
-
+        emit(step.line(report_text.STEP_TITLES))
         elapsed = time.monotonic() - started
         for line in report_text.summary_lines(
             problems, working, timed_out=run.timed_out, deadline=run.deadline_seconds, elapsed=elapsed
@@ -915,6 +915,7 @@ def run_blockcheck(
             "other_bypass_tools": list(other_tools),
             "timed_out": run.timed_out,
             "elapsed": elapsed,
+            "step_seconds": step.seconds(),
             "dns_poisoning_detected": bool(spoofed),
         }
     except _Stopped:

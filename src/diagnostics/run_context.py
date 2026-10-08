@@ -116,6 +116,39 @@ class Probe:
         )
 
 
+class Steps:
+    """Ход проверки по шагам: сообщает экрану и запоминает, сколько шёл каждый шаг.
+
+    Вызывается как функция: ``step(шаг, готово, всего)``. Время шагов попадает в
+    конец отчёта — по нему видно, на что ушла проверка, а не приходится гадать.
+    """
+
+    def __init__(self, progress: Callable[[str, int, int], None] | None) -> None:
+        self._progress = progress
+        self._lock = threading.Lock()
+        # Шаг → [когда начался, когда отметился последний раз].
+        self._times: dict[str, list[float]] = {}
+
+    def __call__(self, name: str, done: int = 1, total: int = 1) -> None:
+        now = time.monotonic()
+        with self._lock:
+            self._times.setdefault(name, [now, now])[1] = now
+        if self._progress is None:
+            return
+        try:
+            self._progress(name, done, total)
+        except Exception:
+            pass
+
+    def seconds(self) -> dict[str, float]:
+        with self._lock:
+            return {name: round(last - first, 1) for name, (first, last) in self._times.items()}
+
+    def line(self, titles: dict[str, str]) -> str:
+        parts = [f"{titles.get(name, name)} {value:.0f} с" for name, value in self.seconds().items()]
+        return "⏱ По шагам: " + " · ".join(parts) if parts else ""
+
+
 class Lane:
     """Очередь задач с пределом «не больше ``limit`` одновременно».
 
@@ -199,6 +232,8 @@ class Run:
         self.deadline = time.monotonic() + self.deadline_seconds
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="diag")
         self._lanes: list[Lane] = []
+        # Шаг → отложенные задачи: (куда положить итог, функция, аргументы).
+        self._staged: dict[str, list[tuple[Future, Callable, tuple, dict]]] = {}
         # Вопросы к эталонным DNS-серверам: каждый — отдельное шифрованное соединение.
         self.reference_lane = self.lane(REFERENCE_AT_ONCE)
 
@@ -270,6 +305,40 @@ class Run:
         lane = Lane(self.pool, limit)
         self._lanes.append(lane)
         return lane
+
+    def later(self, stage: str, fn, *args, **kwargs) -> Future:
+        """Откладывает задачу до своего шага (см. ``start_stages``). Итог придёт в возвращённый Future."""
+        future: Future = Future()
+        self._staged.setdefault(stage, []).append((future, fn, args, kwargs))
+        return future
+
+    def start_stages(self, order, note: Callable[[str, bool], None]) -> None:
+        """Запускает отложенные задачи шаг за шагом: следующий шаг ждёт конца предыдущего.
+
+        Внутри шага его задачи идут вместе. ``note(шаг, закончен)`` зовётся в начале
+        и в конце шага — так экран показывает «идёт» и «готово» в тот момент, когда
+        это происходит, а шаги не мешают друг другу и не грузят компьютер все разом.
+        """
+
+        def work() -> None:
+            for stage in order:
+                tasks = self._staged.pop(stage, [])
+                note(stage, False)
+                try:
+                    started = [(target, self.pool.submit(fn, *args, **kwargs)) for target, fn, args, kwargs in tasks]
+                except RuntimeError as error:
+                    # Пул закрыт («Стоп» или конец прогона): шаг не состоится.
+                    started = []
+                    for target, *_rest in tasks:
+                        target.set_exception(error)
+                for target, future in started:
+                    try:
+                        target.set_result(future.result())
+                    except BaseException as error:
+                        target.set_exception(error)
+                note(stage, True)
+
+        self.submit(work)
 
     def wait(self, future: Future):
         """Ждёт результат, не пропуская «Стоп» и общий дедлайн."""
