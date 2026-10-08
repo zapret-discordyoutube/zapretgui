@@ -43,13 +43,18 @@ from ui.theme import get_theme_tokens
 
 @dataclass(frozen=True, slots=True)
 class NowState:
-    """Что показать в панели: заголовок, строка адресов и значок."""
+    """Что показать в панели: заголовок, строка адресов и значок.
+
+    busy — DNS сейчас применяется: вокруг значка бежит комета.
+    loading — настройки сети ещё читаются, что стоит на адаптерах, неизвестно.
+    """
 
     title: str
     detail: str = ""
     icon_name: str = "fa5s.globe"
     color: str = ""
     busy: bool = False
+    loading: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +74,8 @@ class DnsBadge(QWidget):
     Светится мягким ореолом своего цвета. Пока DNS применяется, вокруг бежит
     комета и всегда замыкает круг, даже если DNS встал мгновенно. При смене
     сервера значок переворачивается, как монетка (на обороте уже новый), и
-    от него расходится вспышка свечения.
+    от него расходится вспышка свечения. Переворот — ответ на смену DNS;
+    значок, который просто появился (flip=False), встаёт на место молча.
     """
 
     CIRCLE = 52
@@ -97,15 +103,16 @@ class DnsBadge(QWidget):
         self._ticker.setInterval(FRAME_MS)
         self._ticker.timeout.connect(self._tick)
 
-    def set_icon(self, icon_name: str, color: str) -> None:
+    def set_icon(self, icon_name: str, color: str, *, flip: bool = True) -> None:
         icon_name = icon_name or "fa5s.globe"
         color = color or ""
         if (icon_name, color) == (self._icon_name, self._color):
             return
         self._old_icon_name, self._old_color = self._icon_name, self._color
         self._icon_name, self._color = icon_name, color
-        if are_live_animations_enabled() and self.isVisible():
-            self._flip_anim.stop()
+        self._flip_anim.stop()
+        self._flip = -1.0
+        if flip and are_live_animations_enabled() and self.isVisible():
             self._flip_anim.start()
         self.update()
 
@@ -195,6 +202,8 @@ class DnsNowPanel(SimpleCardWidget):
         # Какие адаптеры отмечены изначально: к ним возвращает повторное нажатие «Все».
         self._default_checked: dict[str, bool] = {}
         self._bulk_toggle = False
+        # Показан ли уже настоящий DNS: только тогда смена значка — это смена DNS.
+        self._dns_shown = False
         self._adapters_caption_text = "Применять к:"
         self._adapters_empty_text = "Сетевые адаптеры не найдены"
 
@@ -290,7 +299,9 @@ class DnsNowPanel(SimpleCardWidget):
         self.title_label.setText(state.title)
         self.detail_label.setText(state.detail)
         self.detail_label.setVisible(bool(state.detail))
-        self.badge.set_icon(state.icon_name, state.color)
+        # Первый показ после загрузки — не смена DNS: значок встаёт без переворота.
+        self.badge.set_icon(state.icon_name, state.color, flip=self._dns_shown and not state.loading)
+        self._dns_shown = not state.loading
         self.badge.set_busy(state.busy)
         summary = f"Сейчас DNS: {state.title}" + (f", {state.detail}" if state.detail else "")
         set_control_accessibility(self, name="Текущий DNS", description=summary)

@@ -148,8 +148,25 @@ class DnsPageTests(unittest.TestCase):
         self.assertEqual(len(self._provider_tiles(page)), total)
         self.assertEqual(page.grid.tiles()[-1].kind, "add")
         self.assertEqual(page.now_panel.title_label.text(), "Загружаю настройки сети…")
-        self.assertTrue(page.now_panel.badge.is_busy())
         page._load_lane.request.assert_not_called()
+
+    def test_first_open_shows_current_dns_without_badge_motion(self) -> None:
+        """Комета и переворот значка — ответ на выбор сервера, а не на открытие страницы."""
+        page = self._page(load=False)
+        page.show()
+        badge = page.now_panel.badge
+        self.assertFalse(badge.is_busy())
+
+        page.on_page_activated()
+
+        self.assertNotEqual(page.now_panel.title_label.text(), "Загружаю настройки сети…")
+        self.assertFalse(badge.is_flipping())
+        self.assertFalse(badge.is_busy())
+
+        page.grid.activated.emit("Quad9")
+
+        self.assertTrue(badge.is_flipping())
+        self.assertTrue(badge.is_busy())
 
     def test_warmed_data_is_used_without_loading_again(self) -> None:
         page = self._page()

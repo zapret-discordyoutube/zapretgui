@@ -494,7 +494,10 @@ class NetworkPage(BasePage):
             data = self._provider(pending) or {}
             return NowState(pending, applying, data.get("icon", ""), data.get("color", ""), busy=True)
         if not self._loaded:
-            return NowState(self._t("page.network.now.loading", "Загружаю настройки сети…"), "", "fa5s.network-wired", busy=True)
+            # Загрузка — не действие пользователя: значок стоит спокойно, без кометы.
+            return NowState(
+                self._t("page.network.now.loading", "Загружаю настройки сети…"), "", "fa5s.network-wired", loading=True
+            )
         if plan.kind == "none":
             if not self.now_panel.adapter_keys():
                 return NowState(self._t("page.network.adapters.empty", "Сетевые адаптеры не найдены"), "", "fa5s.plug")

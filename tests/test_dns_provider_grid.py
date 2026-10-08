@@ -351,6 +351,29 @@ class DnsNowBadgeMotionTests(unittest.TestCase):
         badge.set_icon("fa5s.bolt", "#f48120")
         self.assertFalse(badge.is_flipping())
 
+    def test_badge_appears_quietly_and_flips_only_on_dns_change(self) -> None:
+        from dns.ui.now_panel import DnsNowPanel, NowState
+
+        self._badge()  # включает анимации
+        panel = DnsNowPanel()
+        self.addCleanup(panel.deleteLater)
+        panel.show()
+
+        panel.set_state(NowState("Загружаю настройки сети…", icon_name="fa5s.network-wired", loading=True))
+        self.assertFalse(panel.badge.is_flipping())
+        panel.set_state(NowState("Google DNS", icon_name="fa5b.google", color="#4285f4"))
+        self.assertFalse(panel.badge.is_flipping())
+        self.assertFalse(panel.badge.is_busy())
+
+        panel.set_state(NowState("Quad9", icon_name="fa5s.shield-alt", color="#e11d48"))
+        self.assertTrue(panel.badge.is_flipping())
+
+        # Переворот, оборванный значком без переворота, не застывает на полпути.
+        panel.badge._on_flip_value(0.4)
+        panel.badge.set_icon("fa5s.plug", "", flip=False)
+        self.assertFalse(panel.badge.is_flipping())
+        self.assertEqual(panel.badge._flip, -1.0)
+
     def test_comet_finishes_its_circle_after_busy_ends(self) -> None:
         from dns.ui.provider_grid import CHARGE_MS
 
