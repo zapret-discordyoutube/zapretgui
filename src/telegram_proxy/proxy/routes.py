@@ -6,7 +6,8 @@
    по зашитому адресу; если адрес подавлен — тот же домен через DNS;
 2. свой домен Cloudflare и свой Worker из настроек, если они заданы;
 3. фронты Cloudflare из CDN_FRONTS с курсором и запомненным рабочим адресом;
-4. туннель через воркер (для DC203 это единственная WSS-ступень);
+4. туннель через воркеры из TUNNEL_HOSTS по кругу, начиная со своего для
+   каждой установки (для DC203 это единственная WSS-ступень);
 5. внешний SOCKS5 (выбранный сервер страны) — запасной путь;
 6. прямой TCP — только когда внешнего SOCKS нет.
 
@@ -35,7 +36,7 @@ from telegram_proxy.proxy.obfs import DC_FIELD_PLUS, DC_FIELD_RANDOM, DC_FIELD_S
 from telegram_proxy.proxy.route_catalog import (
     CDN_FRONT_DCS,
     CDN_FRONTS,
-    TUNNEL_HOST,
+    TUNNEL_HOSTS,
     WSS_PATH,
     WSS_ROUTES,
     RouteStatus,
@@ -55,6 +56,8 @@ WS_KINDS = frozenset({KIND_RELAY, KIND_USER_DOMAIN, KIND_USER_WORKER, KIND_FRONT
 
 # Сколько фронтов пробовать внутри одного соединения Telegram.
 FRONTS_PER_CONNECTION = 3
+# Сколько воркеров-туннелей пробовать внутри одного соединения Telegram.
+TUNNELS_PER_CONNECTION = 3
 
 # Сколько байт от сервера доказывает, что маршрут действительно возит трафик.
 RELAY_PROOF_BYTES = 1
@@ -236,18 +239,28 @@ def _front_routes(dc: int, health: RouteHealth, *, ignore_suppression: bool = Fa
     return routes
 
 
-def _tunnel_route(dc: int, target_ip: str, health: RouteHealth) -> Route | None:
-    if not target_ip or health.is_suppressed(TUNNEL_HOST):
-        return None
-    return Route(
-        kind=KIND_TUNNEL,
-        connect_host=TUNNEL_HOST,
-        sni=TUNNEL_HOST,
-        path=_worker_path(target_ip, dc),
-        dc_field=DC_FIELD_SIGNED,
-        health_key=TUNNEL_HOST,
-        proof_bytes=TUNNEL_PROOF_BYTES,
-    )
+def _tunnel_routes(dc: int, target_ip: str, health: RouteHealth) -> list[Route]:
+    if not target_ip or not TUNNEL_HOSTS:
+        return []
+    routes: list[Route] = []
+    for step in range(len(TUNNEL_HOSTS)):
+        host = TUNNEL_HOSTS[(health.tunnel_start + step) % len(TUNNEL_HOSTS)]
+        if health.is_suppressed(host):
+            continue
+        routes.append(
+            Route(
+                kind=KIND_TUNNEL,
+                connect_host=host,
+                sni=host,
+                path=_worker_path(target_ip, dc),
+                dc_field=DC_FIELD_SIGNED,
+                health_key=host,
+                proof_bytes=TUNNEL_PROOF_BYTES,
+            )
+        )
+        if len(routes) >= TUNNELS_PER_CONNECTION:
+            break
+    return routes
 
 
 def _tcp_route(kind: str, target_host: str, target_port: int) -> Route:
@@ -277,14 +290,10 @@ def build_plan(request: PlanInput, health: RouteHealth) -> list[Route]:
         plan.extend(_user_domain_routes(dc, request.cloudflare, health))
         plan.extend(_user_worker_routes(dc, target_ip, request.cloudflare, health))
         plan.extend(_front_routes(dc, health))
-        tunnel = _tunnel_route(dc, target_ip, health)
-        if tunnel is not None:
-            plan.append(tunnel)
+        plan.extend(_tunnel_routes(dc, target_ip, health))
     elif dc == 203:
         plan.extend(_user_worker_routes(dc, target_ip, request.cloudflare, health))
-        tunnel = _tunnel_route(dc, target_ip, health)
-        if tunnel is not None:
-            plan.append(tunnel)
+        plan.extend(_tunnel_routes(dc, target_ip, health))
 
     all_wss_suppressed = not plan and dc in CDN_FRONT_DCS
     if upstream.enabled:
@@ -307,5 +316,6 @@ __all__ = [
     "KIND_USER_WORKER",
     "PlanInput",
     "Route",
+    "TUNNELS_PER_CONNECTION",
     "build_plan",
 ]

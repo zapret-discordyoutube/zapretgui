@@ -8,6 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
+from telegram_proxy.proxy import routes as routes_module
 from telegram_proxy.proxy import session as session_module
 from telegram_proxy.proxy import ws as ws_module
 from telegram_proxy.proxy.aes_ctr import AesCtrStream, aes_ctr_keystream
@@ -144,10 +145,17 @@ class SessionScenarioTests(unittest.IsolatedAsyncioTestCase):
         self.logs: list[str] = []
         self.refuse_ws = False
         self.relay_answer_delay: float | None = None
+        self.quota_hosts: set[str] = set()
+        self.dialled: list[str] = []
 
         async def fake_connect(target, **_kwargs):
+            self.dialled.append(target.connect_host)
             if self.refuse_ws:
                 raise ws_module.WsConnectError(ws_module.STAGE_TCP, "refused")
+            if target.connect_host in self.quota_hosts:
+                raise ws_module.WsConnectError(
+                    ws_module.STAGE_UPGRADE, "HTTP HTTP/1.1 429 Too Many Requests", status_code=429
+                )
             if target.connect_host == RELAY_IP:
                 delay = self.relay_answer_delay
                 sock = FakeTelegramWs(target, answer=delay is not None, answer_delay=delay or 0.0)
@@ -279,6 +287,30 @@ class SessionScenarioTests(unittest.IsolatedAsyncioTestCase):
         # а не второе 5,5-секундное ожидание свежего релея.
         self.assertFalse(any(sock.target.connect_host == RELAY_IP for sock in self.sockets))
         self.assertFalse(any("retry fresh" in line for line in self.logs))
+
+    async def test_worker_out_of_daily_quota_is_dropped_at_once_for_the_next_one(self) -> None:
+        hosts = ("a.workers.dev", "b.workers.dev")
+        patcher = patch.object(routes_module, "TUNNEL_HOSTS", hosts)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.quota_hosts = {"a.workers.dev"}
+        proxy = await self._start(mode="socks5")
+        proxy.route_health.tunnel_start = 0
+
+        for _ in range(2):
+            reader, writer = await self._socks5_connect("91.105.192.100", 443)
+            header, to_server, from_server = make_client_header(b"\xef" * 4, 203)
+            packet = rpc_packet(40)
+            writer.write(header + to_server.update(encode_packet(ABRIDGED, packet)))
+            await writer.drain()
+            self.assertEqual(await self._read_packets(reader, from_server, ABRIDGED, 1), [answer_for(packet)])
+            writer.close()
+
+        # Первое соединение наткнулось на 429 и ушло на второй воркер; второе
+        # к исчерпанному воркеру уже не ходит.
+        self.assertEqual(self.dialled, ["a.workers.dev", "b.workers.dev", "b.workers.dev"])
+        self.assertTrue(proxy.route_health.is_suppressed("a.workers.dev"))
+        self.assertFalse(proxy.route_health.is_suppressed("b.workers.dev"))
 
     async def test_country_socks_carries_traffic_when_wss_is_closed(self) -> None:
         requests: list[tuple[str, int]] = []

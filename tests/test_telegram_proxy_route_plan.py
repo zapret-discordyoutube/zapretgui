@@ -4,10 +4,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from telegram_proxy.proxy.cloudflare import AUTO_CLOUDFLARE_DOMAINS, CloudflareFallbackConfig
 from telegram_proxy.proxy.health import RouteHealth, address_key, cdn_key
-from telegram_proxy.proxy.route_catalog import CDN_FRONTS, TUNNEL_HOST
+from telegram_proxy.proxy import routes as routes_module
+from telegram_proxy.proxy.route_catalog import CDN_FRONTS, TUNNEL_HOSTS
 from telegram_proxy.proxy.routes import (
     KIND_DIRECT,
     KIND_FRONT,
@@ -61,7 +63,32 @@ class RoutePlanTests(unittest.TestCase):
     def test_dc203_uses_only_tunnel_before_fallbacks(self) -> None:
         plan = build_plan(PlanInput(dc=203, is_media=False, target_host="91.105.192.100", upstream=PRESET), self.health)
         self.assertEqual(kinds(plan), [KIND_TUNNEL, KIND_UPSTREAM])
-        self.assertEqual(plan[0].sni, TUNNEL_HOST)
+        self.assertIn(plan[0].sni, TUNNEL_HOSTS)
+
+    def test_tunnels_are_tried_in_a_circle_from_this_install_start(self) -> None:
+        hosts = ("a.workers.dev", "b.workers.dev", "c.workers.dev", "d.workers.dev")
+        health = RouteHealth(clock=self.clock, tunnel_start=2 + 4 * 10)
+        request = PlanInput(dc=203, is_media=False, target_host="91.105.192.100", upstream=PRESET)
+        with patch.object(routes_module, "TUNNEL_HOSTS", hosts):
+            plan = build_plan(request, health)
+            self.assertEqual([route.sni for route in plan[:-1]], ["c.workers.dev", "d.workers.dev", "a.workers.dev"])
+            self.assertEqual([route.health_key for route in plan[:-1]], [route.sni for route in plan[:-1]])
+            self.assertEqual(plan[-1].kind, KIND_UPSTREAM)
+
+            # Воркер с исчерпанным лимитом пропускается, его место занимает следующий.
+            self.assertTrue(health.note_failure("c.workers.dev", threshold=1))
+            plan = build_plan(request, health)
+            self.assertEqual([route.sni for route in plan[:-1]], ["d.workers.dev", "a.workers.dev", "b.workers.dev"])
+
+    def test_every_tunnel_suppressed_leaves_dc203_on_socks(self) -> None:
+        hosts = ("a.workers.dev", "b.workers.dev")
+        with patch.object(routes_module, "TUNNEL_HOSTS", hosts):
+            for host in hosts:
+                self.assertTrue(self.health.note_failure(host, threshold=1))
+            plan = build_plan(
+                PlanInput(dc=203, is_media=False, target_host="91.105.192.100", upstream=PRESET), self.health
+            )
+        self.assertEqual(kinds(plan), [KIND_UPSTREAM])
 
     def test_manual_always_server_takes_all_traffic(self) -> None:
         manual = UpstreamProxyConfig(enabled=True, host="5.6.7.8", port=1080, mode="always")
@@ -91,7 +118,8 @@ class RoutePlanTests(unittest.TestCase):
 
     def test_all_wss_suppressed_goes_socks_then_fronts_anyway(self) -> None:
         self._suppress(cdn_key(1))
-        self._suppress(TUNNEL_HOST)
+        for host in TUNNEL_HOSTS:
+            self._suppress(host)
         plan = build_plan(PlanInput(dc=1, is_media=False, target_host="149.154.175.50", upstream=PRESET), self.health)
         self.assertEqual(kinds(plan), [KIND_UPSTREAM, KIND_FRONT, KIND_FRONT, KIND_FRONT])
 

@@ -60,7 +60,7 @@ class TelegramProxyRouteCatalogTests(unittest.TestCase):
         self.assertEqual(route_status_for_dc(4), "stable")
 
     def test_cdn_fronts_have_two_cloudflare_addresses_each(self) -> None:
-        from telegram_proxy.proxy.route_catalog import CDN_FRONTS, TUNNEL_HOST
+        from telegram_proxy.proxy.route_catalog import CDN_FRONTS, TUNNEL_HOSTS
 
         self.assertEqual(len(CDN_FRONTS), 20)
         self.assertEqual(len({front.domain for front in CDN_FRONTS}), 20)
@@ -70,7 +70,12 @@ class TelegramProxyRouteCatalogTests(unittest.TestCase):
                 self.assertTrue(front.addresses[0].startswith("104.21."))
                 self.assertTrue(front.addresses[1].startswith("172.67."))
         self.assertEqual(CDN_FRONTS[0].host_for(2), "kws2.pclead.co.uk")
-        self.assertEqual(TUNNEL_HOST, "edge.amberwick.workers.dev")
+        self.assertIn("edge.amberwick.workers.dev", TUNNEL_HOSTS)
+        self.assertEqual(len(set(TUNNEL_HOSTS)), len(TUNNEL_HOSTS))
+        for host in TUNNEL_HOSTS:
+            with self.subTest(tunnel=host):
+                self.assertTrue(host.endswith(".workers.dev"))
+                self.assertEqual(host, host.strip().lower())
 
 if __name__ == "__main__":
     unittest.main()

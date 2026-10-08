@@ -131,7 +131,14 @@ CDN_FRONT_DCS: tuple[int, ...] = (1, 2, 3, 4, 5)
 
 # Туннель через воркер Cloudflare (zastogram-ws-worker/worker.js):
 # wss://<host>/apiws?dst=<IPv4 DC>, дальше воркер идёт на DC обычным TCP.
-TUNNEL_HOST = "edge.amberwick.workers.dev"
+# Воркеры лежат на разных учётных записях Cloudflare: у бесплатной записи
+# 100 000 запросов в сутки, после них воркер до 00:00 UTC отвечает 429
+# (error code: 1027). Каждая установка начинает перебор со случайного воркера,
+# так нагрузка делится между записями. Новый воркер — новая строка здесь и в
+# ZaStoGram (jni/tgnet/wss/WssSocket.cpp, mtproto/proxy/wss/socket.cpp).
+TUNNEL_HOSTS: tuple[str, ...] = (
+    "edge.amberwick.workers.dev",
+)
 
 
 FALLBACK_ONLY_REASONS: dict[int, str] = {
@@ -198,7 +205,7 @@ __all__ = [
     "CdnFront",
     "FALLBACK_ONLY_REASONS",
     "RouteStatus",
-    "TUNNEL_HOST",
+    "TUNNEL_HOSTS",
     "WSS_PATH",
     "WSS_RELAY_IP",
     "WSS_ROUTES",

@@ -96,10 +96,20 @@ class SessionHost(Protocol):
 
 
 class _RouteFailed(Exception):
-    def __init__(self, reason: str, *, tcp_reached: bool = True, counted: bool = True, silent: bool = False):
+    def __init__(
+        self,
+        reason: str,
+        *,
+        tcp_reached: bool = True,
+        counted: bool = True,
+        silent: bool = False,
+        quota_exhausted: bool = False,
+    ):
         self.tcp_reached = tcp_reached
         self.counted = counted
         self.silent = silent
+        # Воркер Cloudflare ответил 429: суточный лимит запросов исчерпан.
+        self.quota_exhausted = quota_exhausted
         super().__init__(reason)
 
 
@@ -296,7 +306,11 @@ class TelegramSession:
             try:
                 ws = await ws_transport.connect(target, buffer_size=host.buffer_size)
             except ws_transport.WsConnectError as exc:
-                raise _RouteFailed(f"{exc.stage}: {exc}", tcp_reached=exc.tcp_reached) from exc
+                raise _RouteFailed(
+                    f"{exc.stage}: {exc}",
+                    tcp_reached=exc.tcp_reached,
+                    quota_exhausted=exc.status_code == 429 and route.kind in (KIND_TUNNEL, KIND_USER_WORKER),
+                ) from exc
             if route.pool_key:
                 host.ws_pool.remember(route)
             return _ServerConn(ws=ws)
@@ -478,7 +492,7 @@ class TelegramSession:
             if route.health_key:
                 suppressed = health.note_failure(
                     route.health_key,
-                    threshold=route.health_threshold,
+                    threshold=1 if exc.quota_exhausted else route.health_threshold,
                     tcp_reached=exc.tcp_reached,
                     address=route.connect_host,
                 )

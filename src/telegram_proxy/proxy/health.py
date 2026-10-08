@@ -9,11 +9,13 @@
   последние 30 с: провайдер съел один поток, соседний пройдёт;
 * срок подавления удваивается: 2 → 4 → 8 → 16 → 30 минут. Счётчик подавлений
   сбрасывают только настоящие данные от сервера;
+* воркер, ответивший 429, исчерпал суточный лимит запросов Cloudflare: он
+  подавляется с первого же отказа, соединение сразу идёт к следующему воркеру;
 * подавления сохраняются между запусками, но после загрузки держатся не
   дольше 10 минут, чтобы старая сеть не мешала новой.
 
 Ключи: домен релея (kws2.web.telegram.org), адрес релея (addr-149.154.167.220),
-все фронты одного DC (cdn-kws2), туннель (имя хоста воркера).
+все фронты одного DC (cdn-kws2), туннель (имя хоста воркера, у каждого своё).
 """
 
 from __future__ import annotations
@@ -64,6 +66,7 @@ class RouteHealth:
         clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
         front_count: int = 0,
+        tunnel_start: int | None = None,
     ) -> None:
         self._path = Path(path) if path else None
         self._clock = clock
@@ -74,6 +77,8 @@ class RouteHealth:
         self._front_cursor = int.from_bytes(os.urandom(2), "little") % self._front_slots if self._front_slots else 0
         self._front_family: int | None = None
         self._front_family_failures = 0
+        # С какого воркера-туннеля эта установка начинает перебор.
+        self.tunnel_start = int.from_bytes(os.urandom(2), "little") if tunnel_start is None else int(tunnel_start)
         self._load()
 
     # ---- подавление ----
