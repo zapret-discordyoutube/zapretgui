@@ -110,9 +110,20 @@ class TargetTests(unittest.TestCase):
 
         google = by_address["8.8.4.4"]
         self.assertEqual((google.dot_host, google.doh_host, google.doh_port, google.doh_path), ("dns.google", "dns.google", 443, "/dns-query"))
-        self.assertEqual(by_address["194.180.189.33"].doh_port, 444)
+        # DoH у dnsdoh.art — на обычном порту: прежний 444 молчит.
+        self.assertEqual(by_address["194.180.189.33"].doh_port, 443)
+        # У Xbox DNS порт 853 принимает только второй адрес: DoT у сервера не проверяется.
+        xbox = by_address["111.88.96.54"]
+        self.assertEqual((xbox.dot_host, xbox.doh_host), ("", "xbox-dns.ru"))
         # У этого сервера ни DoT, ни DoH не отвечают: проверять их нельзя.
         self.assertEqual((by_address["87.228.47.200"].dot_host, by_address["87.228.47.200"].doh_host), ("", ""))
+
+    def test_doh_port_and_path_come_from_the_template(self) -> None:
+        providers = {"Свои": {"Пример": {"ipv4": ["192.0.2.1"], "doh": "https://dns.example.com:444/q"}}}
+
+        (target,) = sc.build_targets(providers)
+
+        self.assertEqual((target.doh_host, target.doh_port, target.doh_path), ("dns.example.com", 444, "/q"))
 
     def test_servers_without_plain_dns_are_marked(self) -> None:
         by_address = {target.address: target for target in sc.build_targets(DNS_PROVIDERS, ipv6=True)}
