@@ -2142,6 +2142,8 @@ class ResultDetailView(QWidget):
         self.blocks: list[_SectionBlock] = []
         self._flows: list[_BlocksFlow] = []
         self.road = None
+        # Кому отдать шаг вглубь вместо показа внутри себя; None — отчёт показывает его сам.
+        self.child_handler = None
 
     def card(self) -> Card | None:
         return self._card
@@ -2160,6 +2162,10 @@ class ResultDetailView(QWidget):
     def open_child(self, card: Card) -> None:
         """Шаг вглубь: отчёт по одному серверу. Строка пути получает ещё один шаг, «назад» ведёт к списку."""
         if self._card is None:
+            return
+        if self.child_handler is not None:
+            # Отчёт встроен в чужую страницу (прошлая проверка): шаг вглубь открывает она — своей страницей.
+            self.child_handler(card)
             return
         area = self._scroll_area()
         scroll = area.verticalScrollBar().value() if area is not None else 0

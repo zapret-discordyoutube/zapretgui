@@ -2,17 +2,18 @@
 
 Главная вкладка BlockCheck показывает прошлую проверку своим видом
 (``past_check_view``: итог с группами проблем). Остальным вкладкам — «Проверке
-домена» и подобным — хватает карточек: их и показывает эта страница. Сырой
-текст проверки открывается только кнопкой «Отчёт».
+домена» и подобным — хватает карточек. Страница отдана одной проверке, поэтому
+карточки показаны сразу раскрытыми: шапка каждой и все её разделы. Сырой текст
+проверки открывается только кнопкой «Отчёт».
 """
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, BreadcrumbBar, FluentIcon, PushButton, SubtitleLabel
 
-from blockcheck.ui.result_cards import CardsGrid
+from blockcheck.ui.result_cards import ResultDetailView
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip
 from ui.widgets.tone_group import mute
@@ -57,9 +58,17 @@ class PastCardsView(QWidget):
         header.addWidget(self.report_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
 
-        self.cards = CardsGrid(300, self)
-        self.cards.opened.connect(self.card_opened)
-        layout.addWidget(self.cards)
+        # Страница целиком отдана одной проверке, поэтому карточки показаны сразу раскрытыми:
+        # шапка каждой и её разделы — строки целиком, узлы и серверы плитками.
+        self._reports: list[ResultDetailView] = []
+        self._waiting: list = []
+        self._reports_layout = QVBoxLayout()
+        self._reports_layout.setContentsMargins(0, 0, 0, 0)
+        self._reports_layout.setSpacing(18)
+        layout.addLayout(self._reports_layout)
+        self._build_timer = QTimer(self)
+        self._build_timer.setSingleShot(True)
+        self._build_timer.timeout.connect(self._build_next)
         # Вместо карточек — готовый вид вкладки (итог и её собственные карточки), см. show_content.
         self._content: QWidget | None = None
         self._content_layout = QVBoxLayout()
@@ -76,7 +85,6 @@ class PastCardsView(QWidget):
     def show_content(self, title: str, headline: str, widget: QWidget, text: str = "", *, root_title: str = "BlockCheck") -> None:
         """Прошлая проверка тем же видом, что у её вкладки: ``widget`` собирает сама вкладка по сохранённому отчёту."""
         self.show_run(title, headline, [], text, root_title=root_title)
-        self.cards.setVisible(False)
         self._content = widget
         self._content_layout.addWidget(widget)
         widget.show()
@@ -88,7 +96,7 @@ class PastCardsView(QWidget):
             self._content.setParent(None)
             self._content.deleteLater()
             self._content = None
-        self.cards.setVisible(True)
+        self._clear_reports()
         self._title = str(title)
         self._text = str(text or "")
         self.breadcrumb.blockSignals(True)
@@ -102,12 +110,44 @@ class PastCardsView(QWidget):
         self.title_label.setText(self._title)
         self.headline_label.setText(str(headline or ""))
         self.headline_label.setVisible(bool(headline))
-        self.cards.show_cards(list(cards), animate=True)
+        # Первый отчёт строится сразу, остальные — по одному в паузах: окно не замирает на длинной проверке.
+        self._waiting = list(cards)
+        self._build_next()
         self.report_button.setEnabled(bool(self._text))
         hint = "Открыть полный текст той проверки." if self._text else _NO_TEXT
         set_tooltip(self.report_button, hint)
         set_control_accessibility(self.report_button, name="Отчёт прошлой проверки", description=hint)
         set_state_text(self, f"Прошлая проверка {self._title}: {headline}")
+
+    def reports(self) -> list:
+        """Раскрытые отчёты карточек — все, включая ещё не построенные."""
+        while self._waiting:
+            self._build_next()
+        return list(self._reports)
+
+    def _clear_reports(self) -> None:
+        self._build_timer.stop()
+        self._waiting = []
+        for report in self._reports:
+            self._reports_layout.removeWidget(report)
+            report.setParent(None)
+            report.deleteLater()
+        self._reports = []
+
+    def _build_next(self) -> None:
+        if not self._waiting:
+            return
+        card = self._waiting.pop(0)
+        report = ResultDetailView(self)
+        # Путь наверху у страницы один — свой у каждого отчёта не нужен.
+        report.breadcrumb.setVisible(False)
+        report.child_handler = self.card_opened.emit
+        report.text_opened.connect(self.text_opened)
+        self._reports_layout.addWidget(report)
+        report.show_card(card)
+        self._reports.append(report)
+        if self._waiting:
+            self._build_timer.start(0)
 
     def _on_breadcrumb(self, key: str) -> None:
         if key == self.ROOT_KEY:

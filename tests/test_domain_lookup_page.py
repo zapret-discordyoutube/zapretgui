@@ -458,11 +458,21 @@ class PastCheckTextTests(unittest.TestCase):
             view.show()
             view.show_run(title, headline, cards, text, root_title="Проверка домена")
             self.assertEqual((view.title_label.text(), view.headline_label.text()), (title, headline))
-            self.assertEqual([widget.card for widget in view.cards.cards()], cards)
+            # Страница отдана одной проверке: карточки показаны раскрытыми — шапка и все разделы, а не превью.
+            reports = view.reports()
+            self.assertEqual([report.card() for report in reports], cards)
+            self.assertTrue(all(report.breadcrumb.isHidden() for report in reports))
+            self.assertTrue(all(report.blocks for report in reports))
+            dns = next(report for report in reports if report.card().key == lookup_cards.KEY_DNS)
+            self.assertIsNotNone(dns.blocks[1].grid)
             self.assertEqual(view.breadcrumb.count(), 2)
             view.report_button.click()
-            view.cards.cards()[0].opened.emit(cards[0])
-            self.assertEqual(got, [(f"Отчёт: {title}", text), cards[0]])
+            # Плитка DNS-сервера открывает его страницу у хозяина вкладки, а не внутри встроенного отчёта.
+            page_of_server = dns.card().sections[1].lines[0].page
+            grid = dns.blocks[1].grid
+            QTest.mouseClick(grid, Qt.MouseButton.LeftButton, pos=grid.tile_rect(0).center().toPoint())
+            self.assertEqual(got, [(f"Отчёт: {title}", text), page_of_server])
+            self.assertEqual(dns.card().key, lookup_cards.KEY_DNS)
             # Без текста кнопка «Отчёт» выключена.
             view.show_run(title, headline, cards, "")
             self.assertFalse(view.report_button.isEnabled())
@@ -493,7 +503,7 @@ class OtherTabsPastChecksTests(unittest.TestCase):
         view.show_content("DNS подмена · 08.10 12:00", "Подмены нет", first, "текст", root_title="DNS подмена")
         self.assertIs(view.content(), first)
         self.assertIs(first.parentWidget(), view)
-        self.assertTrue(view.cards.isHidden())
+        self.assertEqual(view.reports(), [])
         self.assertEqual((view.title_label.text(), view.headline_label.text()), ("DNS подмена · 08.10 12:00", "Подмены нет"))
         self.assertTrue(view.report_button.isEnabled())
         # Следующая проверка заменяет вид; страница с карточками возвращает сетку.
@@ -503,7 +513,7 @@ class OtherTabsPastChecksTests(unittest.TestCase):
         self.assertFalse(view.report_button.isEnabled())
         view.show_run("example.com", "Готово", [])
         self.assertIsNone(view.content())
-        self.assertFalse(view.cards.isHidden())
+        self.assertEqual(view.reports(), [])
 
     def test_dns_spoofing_tab_opens_a_saved_check_and_falls_back_to_the_record(self) -> None:
         from dns.ui.dns_check_page import DNSCheckPage
