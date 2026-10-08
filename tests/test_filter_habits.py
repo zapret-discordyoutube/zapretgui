@@ -194,6 +194,25 @@ class SplitJudgeTests(unittest.TestCase):
         self.assertIn("Дробление здесь бесполезно", way.meaning)
         self.assertNotIn("фильтр его режет", way.meaning)
 
+    def test_cut_matching_the_whole_hello_cut_is_not_asked_twice(self) -> None:
+        # Приветствие целиком обрезано сбросом дважды. Тот же сброс на разрезе — уже повторное
+        # наблюдение: вторая попытка только удваивала время шага.
+        network = _Filter(joins_packets=True, joins_records=True)
+        facts = _facts(network)
+        by_way = {item.way: item for item in facts.ways}
+
+        self.assertEqual(len(by_way[fh.WAY_WHOLE].real), 2)
+        self.assertTrue(all(len(by_way[way].real) == 1 for way in fh.WAYS if way != fh.WAY_WHOLE))
+        self.assertEqual(fh.judge_split(facts).code, fh.HABIT_NONE)
+
+    def test_outcome_unlike_the_whole_hello_cut_is_still_rechecked(self) -> None:
+        # Проходящий способ — другой исход: ему одного раза мало.
+        facts = _facts(_Filter(joins_packets=False))
+        by_way = {item.way: item for item in facts.ways}
+
+        self.assertGreaterEqual(len(by_way[fh.WAY_TCP_NAME].real), 2)
+        self.assertEqual(fh.judge_split(facts).code, fh.HABIT_TCP)
+
     def test_whole_hello_failing_with_harmless_name_still_gives_no_verdict(self) -> None:
         # Не проходит даже целое приветствие с безобидным именем — сравнивать не с чем.
         verdict = _verdict(_Filter(joins_packets=True, joins_records=True, server_takes=lambda parts: False))
@@ -307,7 +326,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("записи шифрования — нет", report["headline"])
         self.assertIn("tlsrec", report["advice"])
         text = "\n".join(fh.lines(report))
-        self.assertIn("❌ Разрез пакета посреди имени — режется: с именем сайта: сброс ×2 · с безобидным именем: прошло", text)
+        self.assertIn("❌ Разрез пакета посреди имени — режется: с именем сайта: сброс · с безобидным именем: прошло", text)
         self.assertIn("✅ Две записи TLS, граница посреди имени — проходит", text)
         self.assertIn("не испытываются", text)
 

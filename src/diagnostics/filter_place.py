@@ -354,6 +354,31 @@ def _sites_word(count: int) -> str:
     return f"{count} сайтам"
 
 
+def _consensus(found: list[SiteVerdict]) -> tuple[int, int, int] | None:
+    """(ближайшее место, сколько сайтов его назвали, самое дальнее место). None — согласия нет.
+
+    Места считаются по каждому способу отдельно: QUIC и сброс TCP — разные
+    механизмы и могут стоять на разных устройствах. Внутри способа место
+    берётся по большинству сайтов; один сайт с другим узлом — это его дорога
+    или его CDN, а не повод отказаться от вывода. Ничья согласием не считается.
+    """
+    by_method: dict[str, Counter] = {}
+    for item in found:
+        parts = [part for part in item.methods if part.code == FILTER_FOUND and part.hop]
+        for method, hop in [(part.method, part.hop) for part in parts] or [("", item.hop)]:
+            by_method.setdefault(method, Counter())[hop] += 1
+    places: list[tuple[int, int]] = []
+    for counter in by_method.values():
+        top = counter.most_common(2)
+        if len(top) == 1 or top[0][1] > top[1][1]:
+            places.append(top[0])
+    if not places:
+        return None
+    hop = min(place for place, _votes in places)
+    votes = max(count for place, count in places if place == hop)
+    return hop, votes, max(place for place, _votes in places)
+
+
 def aggregate(
     verdicts: Iterable[SiteVerdict],
     hops: tuple[HopInfo, ...] = (),
@@ -394,7 +419,8 @@ def aggregate(
             reasons=tuple(f"{item.host}: {item.text}" for item in verdicts),
         )
     counts = Counter(item.hop for item in found)
-    hop, votes = counts.most_common(1)[0]
+    agreed = _consensus(found)
+    hop, votes, far = agreed if agreed is not None else (*counts.most_common(1)[0], 0)
     reasons = [
         f"{item.host}: узел {item.hop}"
         + (f", сервер на узле {item.distance}" if item.distance else "")
@@ -409,7 +435,7 @@ def aggregate(
             "и своя программа обхода. Остановите её и повторите проверку: тогда будет видно место фильтра провайдера.",
             reasons=tuple(reasons),
         )
-    if len(counts) > 1:
+    if agreed is None:
         spread = ", ".join(f"узел {value}" for value in sorted(counts))
         return Placement(
             STATE_DISAGREE,
@@ -427,7 +453,7 @@ def aggregate(
     distance = min((item.distance for item in found if item.distance), default=0)
     whose = _whose(hop, hops)
     # Подделка должна дожить до самого дальнего фильтра: ближний её пропустит, а дальний иначе не увидит.
-    far = max((item.far_hop or item.hop for item in found), default=hop)
+    far = max(far, hop)
     where = "не дальше первого узла от вас" if hop == 1 else f"между узлами {hop - 1} и {hop} от вас"
     basis = f"совпало по {_sites_word(votes)}" if votes > 1 else "найдено по одному сайту"
     if local:

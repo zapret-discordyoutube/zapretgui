@@ -215,6 +215,9 @@ def _settled(outcomes: Iterable[str]) -> str:
         return PASSED
     if cut >= 2 and cut > passed:
         return CUT
+    # Единственная попытка бывает только у способа, обрезанного тем же исходом, что и приветствие целиком.
+    if len(kinds) == 1 and cut:
+        return CUT
     return ""
 
 
@@ -227,6 +230,8 @@ def check_split(
     способы не делаются: вывода из них всё равно не будет.
     """
     done: list[WayFacts] = []
+    # Чем фильтр режет приветствие целиком (сброс или молчание), если оба раза одинаково.
+    known_cut = ""
 
     def ask(name: str, way: str) -> str:
         parts, gap = _parts(name, way)
@@ -246,14 +251,21 @@ def check_split(
             return finish(cancelled=True)
         real: list[str] = []
         if any(_answered(kind) for kind in control):
-            real = [ask(host, way) for _attempt in range(REPEATS)]
-            if not _settled(real) and HELLO_CANCELLED not in real:
-                real.append(ask(host, way))
+            real = [ask(host, way)]
+            # Тот же исход, каким фильтр дважды обрезал приветствие целиком, — уже повторное
+            # наблюдение, а не единичный сбой. Любой другой исход перепроверяется как обычно.
+            if not (known_cut and real[0] == known_cut):
+                real += [ask(host, way) for _attempt in range(REPEATS - 1)]
+                if not _settled(real) and HELLO_CANCELLED not in real:
+                    real.append(ask(host, way))
         done.append(WayFacts(way, tuple(control), tuple(real)))
         if HELLO_CANCELLED in real:
             return finish(cancelled=True)
-        if way == WAY_WHOLE and _settled(real) != CUT:
-            return finish()
+        if way == WAY_WHOLE:
+            if _settled(real) != CUT:
+                return finish()
+            cuts = {kind for kind in real if _cut(kind)}
+            known_cut = cuts.pop() if len(cuts) == 1 else ""
     final = ask(NEUTRAL_NAME, WAY_WHOLE)
     return finish(final, cancelled=final == HELLO_CANCELLED)
 

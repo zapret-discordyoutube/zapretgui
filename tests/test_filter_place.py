@@ -163,6 +163,20 @@ class AggregateTests(unittest.TestCase):
         # Узлы неизвестны — место названо числом, без догадок о владельце.
         self.assertNotIn("провайдер", fp.aggregate(self._verdicts(4), ()).sentence)
 
+    def test_one_site_with_another_hop_does_not_cancel_the_majority(self) -> None:
+        # Живой случай (стенд): QUIC у трёх сайтов на узле 6, у четвёртого — на 12, а TCP у него же на 9.
+        def site(host, quic, tcp=None):
+            methods = [fp.MethodVerdict("quic", pt.FILTER_FOUND, quic, "текст")]
+            if tcp:
+                methods.append(fp.MethodVerdict("tcp", pt.FILTER_FOUND, tcp, "текст"))
+            return fp.SiteVerdict(host, "45.1.0.1", pt.FILTER_FOUND, min(quic, tcp or quic), 20, "текст", tuple(methods))
+
+        place = fp.aggregate([site("fb", 12, 9), site("a", 6), site("b", 6), site("c", 6)], _hops())
+
+        self.assertEqual((place.state, place.hop, place.confidence), ("found", 6, "high"))
+        self.assertIn("Ближайший фильтр", place.sentence)
+        self.assertIn("ещё один — на узле 9", place.sentence)
+
     def test_sites_disagreeing_give_no_single_place(self) -> None:
         place = fp.aggregate(self._verdicts(3, 5), _hops())
 
