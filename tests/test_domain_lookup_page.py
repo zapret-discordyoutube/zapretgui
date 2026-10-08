@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QApplication
 
 from blockcheck.ui.page import BlockcheckPage
 from dns import domain_lookup as engine
+from dns.ui import domain_lookup_cards as lookup_cards
 from dns.ui.domain_lookup_page import DomainLookupPage
 
 
@@ -114,22 +115,48 @@ class DomainLookupPageTests(unittest.TestCase):
         self.assertFalse(page._running)
         self.assertTrue(page.start_button.isEnabled())
         self.assertTrue(page.report_button.isEnabled())
-        self.assertFalse(page.ping_card.isHidden())
-        self.assertFalse(page.dns_card.isHidden())
-        self.assertFalse(page.neighbors_card.isHidden())
-        [answers] = page.dns_rows.groups()
-        self.assertEqual(len(answers.rows), 2)
-        self.assertIn("заглушка (Ростелеком)", answers.rows[1].text)
-        self.assertEqual(answers.rows[1].state, "fail")
-        self.assertIn("a.example", _names(page.neighbors_rows))
-        self.assertIn("AS64500", page.network_lines._lines[-1].text)
+        # Итог — тремя карточками (пути в этом отчёте нет); строк-виджетов на каждый сервер нет.
+        cards = {card.key: card for card in page.result_cards()}
+        self.assertEqual(list(cards), [lookup_cards.KEY_PING, lookup_cards.KEY_DNS, lookup_cards.KEY_NEIGHBORS])
+        self.assertEqual([widget.card.key for widget in page.cards.cards()], list(cards))
+        self.assertFalse(page.cards.isHidden())
+        ping = cards[lookup_cards.KEY_PING]
+        self.assertEqual((ping.title, ping.level, ping.status), ("Пинг и сеть", "ok", "Сервер отвечает"))
+        self.assertIn(("ASN", "AS64500"), [(line.name, line.text) for line in ping.sections[1].lines])
+        dns = cards[lookup_cards.KEY_DNS]
+        self.assertEqual((dns.level, dns.status), ("fail", "Адрес назвали 2 из 2 серверов"))
+        answers = dns.sections[1]
+        self.assertTrue(answers.tiles)
+        self.assertEqual(len(answers.lines), 2)
+        self.assertIn("заглушка (Ростелеком)", answers.lines[1].text)
+        self.assertEqual(answers.lines[1].state, "fail")
+        # На самой карточке — только сервер, ответивший не как все.
+        self.assertIn(answers.lines[1], dns.lines)
+        self.assertNotIn(answers.lines[0], dns.lines)
+        neighbors = cards[lookup_cards.KEY_NEIGHBORS]
+        self.assertEqual(neighbors.status, "Найдено доменов: 2")
+        self.assertEqual([line.name for line in neighbors.sections[1].lines], ["a.example", "b.example"])
+        # Нажатие на карточку открывает её подробности страницей с хлебными крошками.
+        page.cards.cards()[1].opened.emit(dns)
+        detail = host._detail_view
+        self.assertFalse(detail.isHidden())
+        self.assertTrue(page.isHidden())
+        self.assertEqual(detail.card(), dns)
+        summary_block, answers_block = detail.blocks
+        self.assertEqual([tile.title for tile in answers_block.grid.tiles()], ["Хороший", "Провайдер"])
+        self.assertEqual(answers_block.rows, [])
+        # Назад — на ту же вкладку.
+        host._close_subpage()
+        self.assertTrue(detail.isHidden())
+        self.assertFalse(page.isHidden())
         # Законченная проверка сразу попадает в «Прошлые проверки» на этой вкладке.
         self.assertFalse(page.history_card.isHidden())
         [past] = page.history_rows.groups()
         self.assertEqual(past.title, "Прошлые проверки")
         self.assertTrue(past.rows[0].name.startswith(_report().target))
-        # Пути в этом отчёте нет — карточка скрыта.
-        self.assertTrue(page.path_card.isHidden())
+        # Прошлые проверки — плитками одной рисующей сетки, а не строкой-виджетом на запись.
+        [block] = page.history_rows.blocks()
+        self.assertEqual(block.grid.tiles()[0].title, _report().target)
 
         # Отчёт с путём и найденным фильтром: карточка видна, в таблице узлов стоит отметка.
         from diagnostics.path_trace import FilterFacts, Hop, RouteTrace
@@ -145,26 +172,28 @@ class DomainLookupPageTests(unittest.TestCase):
                 filter_facts=FilterFacts(True, True, 3, 3),
             )
         )
-        self.assertFalse(page.path_card.isHidden())
-        self.assertEqual(page.path_title.text(), "Путь до сервера")
-        self.assertIn("Фильтр стоит между узлом 2 (10.0.0.2) и узлом 3 (10.0.0.3).", [line.text for line in page.path_lines._lines])
-        [road] = page.path_rows.groups()
-        self.assertEqual([row.name for row in road.rows], ["Узел 1", "Узел 2", lookup_plans.FILTER_MARK, "Узел 3", "Узел 4"])
-        self.assertEqual((road.rows[2].state, road.rows[-1].state), ("fail", "info"))
-        self.assertIn("сам сервер", road.rows[-1].text)
+        path = next(card for card in page.result_cards() if card.key == lookup_cards.KEY_PATH)
+        self.assertEqual((path.title, path.level, path.status), ("Путь до сервера", "fail", "Найден фильтр по дороге"))
+        self.assertIn("Фильтр стоит между узлом 2 (10.0.0.2) и узлом 3 (10.0.0.3).", [line.name for line in path.lines])
+        road = path.sections[-1]
+        self.assertTrue(road.tiles)
+        self.assertEqual([row.name for row in road.lines], ["Узел 1", "Узел 2", lookup_plans.FILTER_MARK, "Узел 3", "Узел 4"])
+        self.assertEqual((road.lines[2].state, road.lines[-1].state), ("fail", "info"))
+        self.assertIn("сам сервер", road.lines[-1].text)
         page._on_finished(_report())
-        self.assertTrue(page.path_card.isHidden())
+        self.assertNotIn(lookup_cards.KEY_PATH, [card.key for card in page.result_cards()])
 
         # Проверка адреса (не домена): таблицы DNS нет.
         page._on_finished(_report(kind=engine.KIND_IP, target="93.184.216.34", answers=()))
-        self.assertTrue(page.dns_card.isHidden())
+        self.assertNotIn(lookup_cards.KEY_DNS, [card.key for card in page.result_cards()])
 
         # Повторная проверка того же домена: поле соседей очищается и заполняется заново,
         # хотя текст совпадает с прошлым.
         page.start_lookup()
-        self.assertEqual(page.neighbors_rows.groups(), ())
+        self.assertEqual((page.result_cards(), page.cards.cards()), ([], []))
+        self.assertTrue(page.cards.isHidden())
         page._on_finished(_report())
-        self.assertIn("a.example", _names(page.neighbors_rows))
+        self.assertEqual(len(page.cards.cards()), 3)
 
         # Смена языка переводит подписи и не теряет результат.
         host.set_ui_language("en")

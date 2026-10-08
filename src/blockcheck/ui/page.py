@@ -567,6 +567,7 @@ class BlockcheckPage(BasePage):
                 embedded=True,
             )
             self._domain_lookup_tab_page.report_requested.connect(self._open_log_report)
+            self._domain_lookup_tab_page.card_opened.connect(self._open_card_detail)
             self._push_tab_histories()
             self._domain_lookup_tab_page.setVisible(False)
             self.add_widget(self._domain_lookup_tab_page)

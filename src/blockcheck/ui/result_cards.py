@@ -981,6 +981,8 @@ class Tile:
     result: str
     seconds: str
     hint: str
+    # Свой значок вместо значка состояния (узел дороги, сайт).
+    icon: str = ""
 
 
 _SECONDS = re.compile(r"^(.*) · (\d+(?:[.,]\d+)? с)$")
@@ -1006,6 +1008,19 @@ def line_tile(line: Line) -> Tile:
         result = result.partition(separator)[0]
     result = f"{result[:1].upper()}{result[1:]}"
     return Tile(line.state, title, tag, result, seconds, f"{line.name}\n{line.text}\nНажмите, чтобы открыть страницу сервера")
+
+
+def plain_tile(line: Line, icon: str = "") -> Tile:
+    """Строка перечня → плитка без своей страницы: «Cloudflare · 1.1.1.1» и «адреса · 38 мс» по частям."""
+    title, _separator, tag = line.name.partition(" · ")
+    # Отметка-разделитель «── здесь стоит фильтр ──» на плитке — обычной фразой.
+    if title.startswith("─"):
+        title = title.strip("─ ").capitalize()
+    parts = [part for part in line.text.split(" · ") if part and part != "—"]
+    seconds = next((part for part in parts if part.endswith(" мс")), "")
+    result = " · ".join(part for part in parts if part != seconds)
+    hint = "\n".join(part for part in (line.name.strip("─ "), line.text) if part)
+    return Tile(line.state, title, tag, result, seconds, hint, icon if line.state == "info" else "")
 
 
 _SERVER_MEANING = {
@@ -1130,6 +1145,8 @@ def finding_card(line: Line, parent=None) -> FindingCard:
 
 def wants_tiles(section: Section, card: Card) -> bool:
     """Раздел — перечень однотипных серверов (хостинги): такие идут сеткой карточек, а не строками."""
+    if section.tiles:
+        return bool(section.lines)
     return card.key == "hostings" and bool(section.lines) and all(" · " in line.name and line.text for line in section.lines)
 
 
@@ -1147,11 +1164,16 @@ class TilesGrid(QWidget):
     # Нажали карточку: её номер.
     opened = pyqtSignal(int)
 
-    def __init__(self, tiles: list[Tile], parent=None) -> None:
+    def __init__(self, tiles: list[Tile], parent=None, *, clickable: bool = True, min_width: int = 0) -> None:
         super().__init__(parent)
         self._tiles = list(tiles)
         self._hover = -1
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Плитке без своей страницы открывать нечего: курсор обычный, нажатие ничего не делает.
+        self._clickable = clickable
+        if min_width:
+            self.MIN_WIDTH = int(min_width)
+        if clickable:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
@@ -1212,7 +1234,7 @@ class TilesGrid(QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         index = self.tile_at(event.position().x(), event.position().y())
         self._hint.hide()
-        if event.button() == Qt.MouseButton.LeftButton and index >= 0:
+        if self._clickable and event.button() == Qt.MouseButton.LeftButton and index >= 0:
             self.opened.emit(index)
         super().mouseReleaseEvent(event)
 
@@ -1246,23 +1268,26 @@ class TilesGrid(QWidget):
             painter.drawRoundedRect(rect, 6, 6)
             color = state_color(tile.state)
             try:
-                icon = get_cached_qta_pixmap(_STATE_ICONS.get(tile.state, _STATE_ICONS["unknown"]), color=color, size=15)
+                name = tile.icon or _STATE_ICONS.get(tile.state, _STATE_ICONS["unknown"])
+                icon = get_cached_qta_pixmap(name, color=state_color("unknown") if tile.icon else color, size=15)
                 painter.drawPixmap(int(rect.left() + 11), int(rect.top() + (self.HEIGHT - 15) / 2), 15, 15, icon)
             except Exception:
                 pass
             left = rect.left() + 36
             right = rect.right() - 10
+            second = " · ".join(part for part in (tile.tag, tile.result) if part)
+            # Плитка из одного названия (имя сайта): оно стоит по центру, а не прижато к верху.
+            first_top = rect.top() + (6 if second else (self.HEIGHT - 17) / 2)
             # Время — справа в первой строке; название занимает остальное.
             painter.setFont(small_font)
             painter.setPen(muted)
             seconds_width = small_metrics.horizontalAdvance(tile.seconds) + 8 if tile.seconds else 0
             if tile.seconds:
                 painter.drawText(
-                    QRectF(right - seconds_width, rect.top() + 6, seconds_width, 17),
+                    QRectF(right - seconds_width, first_top, seconds_width, 17),
                     int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                     tile.seconds,
                 )
-            second = f"{tile.tag} · {tile.result}" if tile.tag else tile.result
             painter.drawText(
                 QRectF(left, rect.top() + 24, right - left, 17),
                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
@@ -1272,7 +1297,7 @@ class TilesGrid(QWidget):
             painter.setPen(text)
             title_width = right - left - seconds_width
             painter.drawText(
-                QRectF(left, rect.top() + 6, title_width, 17),
+                QRectF(left, first_top, title_width, 17),
                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
                 title_metrics.elidedText(tile.title, Qt.TextElideMode.ElideRight, int(title_width)),
             )
@@ -1333,8 +1358,12 @@ class _SectionBlock(QWidget):
         self.rows: list = []
         self.findings_flow: CardsFlow | None = None
         if tiles:
-            self.grid = TilesGrid([line_tile(line) for line in section.lines], self)
-            self.grid.opened.connect(lambda index: self.child_opened.emit(server_card(section.lines[index], section)))
+            if section.tiles:
+                tiles_list = [plain_tile(line, section.tile_icon) for line in section.lines]
+                self.grid = TilesGrid(tiles_list, self, clickable=False)
+            else:
+                self.grid = TilesGrid([line_tile(line) for line in section.lines], self)
+                self.grid.opened.connect(lambda index: self.child_opened.emit(server_card(section.lines[index], section)))
             layout.addSpacing(2)
             layout.addWidget(self.grid)
             layout.addSpacing(6)

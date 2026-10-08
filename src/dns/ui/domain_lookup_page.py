@@ -22,8 +22,10 @@ from qfluentwidgets import (
 import dns.domain_lookup_plans as plans
 from app.ui_texts import tr as tr_catalog
 from blockcheck.ui.check_results import _HeightKeeper
-from blockcheck.ui.result_cards import _SectionBlock
-from blockcheck.ui.result_cards_model import Line, Section
+from blockcheck.ui.brand_icons import BrandIcon
+from blockcheck.ui.result_cards import CardsGrid, TilesGrid, plain_tile
+from blockcheck.ui.result_cards_model import Line
+from dns.ui import domain_lookup_cards as lookup_cards
 from log.log import log
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.widgets.check_hero import CheckHero
@@ -88,11 +90,30 @@ class _InfoLines(_HeightKeeper, QWidget):
             label.setStyleSheet(f"color: {_tone_color(line.tone)};")
 
 
-class RowsView(QWidget):
-    """Группы строк карточками-разделами — тем же видом, что подробности проверки BlockCheck.
+class _TilesGroup(QWidget):
+    """Группа строк: заголовок со значком и сетка плиток, которую рисует один виджет."""
 
-    Заменяет таблицу и окна с моноширинным текстом: у каждой строки значок
-    состояния, подпись и значение, длинные значения переносятся.
+    def __init__(self, group, icon: str, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addWidget(BrandIcon(icon, "", self, size=15), 0, Qt.AlignmentFlag.AlignVCenter)
+        self.title_label = StrongBodyLabel(group.title, self)
+        header.addWidget(self.title_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(header)
+        tiles = [plain_tile(Line(row.state, row.name, row.text)) for row in group.rows]
+        self.grid = TilesGrid(tiles, self, clickable=False, min_width=TILE_MIN_WIDTH)
+        layout.addWidget(self.grid)
+
+
+class RowsView(QWidget):
+    """Группы строк плитками: значок состояния, подпись и значение; полный текст — в подсказке.
+
+    Плитки группы рисует один виджет. Строка-виджет на каждую запись (а их
+    десятки) делала вкладку тяжёлой: долго строилась и дёргалась при прокрутке.
     """
 
     def __init__(self, parent=None, *, icon: str = "fa5s.list-ul") -> None:
@@ -102,10 +123,13 @@ class RowsView(QWidget):
         self._blocks: list[QWidget] = []
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(6)
+        self._layout.setSpacing(12)
 
     def groups(self) -> tuple:
         return self._shown
+
+    def blocks(self) -> list[QWidget]:
+        return list(self._blocks)
 
     def show_groups(self, groups) -> None:
         groups = tuple(groups)
@@ -122,13 +146,16 @@ class RowsView(QWidget):
         self._blocks = self._blocks[:same]
         self._shown = groups
         for group in groups[same:]:
-            section = Section(group.title, tuple(Line(row.state, row.name, row.text) for row in group.rows))
-            block = _SectionBlock(section, self, icon=self._icon)
+            block = _TilesGroup(group, self._icon, self)
             self._layout.addWidget(block)
             self._blocks.append(block)
         set_state_text(self, "; ".join(f"{group.title}: строк {len(group.rows)}" for group in groups) or "нет данных")
 
 
+# Карточек итога немного, и они широкие: в ряд встают две-четыре.
+CARD_MIN_WIDTH = 300
+# Плитка прошлой проверки шире обычной: в ней адрес, время и фраза итога.
+TILE_MIN_WIDTH = 340
 # Как часто экран перерисовывается, пока идут промежуточные ответы.
 STAGE_REDRAW_MS = 300
 
@@ -149,6 +176,8 @@ class DomainLookupPage(BasePage):
 
     # Просят показать отчёт страницей: её открывает страница-хозяин вкладки (LogReport).
     report_requested = pyqtSignal(object)
+    # Нажали карточку итога: её подробности страницей открывает страница-хозяин вкладки.
+    card_opened = pyqtSignal(object)
 
     def __init__(self, parent=None, *, dns_feature, embedded: bool = False):
         super().__init__(
@@ -222,39 +251,12 @@ class DomainLookupPage(BasePage):
         self.control_card.add_widget(self.ticker)
         self.layout.addWidget(self.control_card)
 
-        self.ping_card = SettingsCard()
-        self.ping_title = StrongBodyLabel("", self.ping_card)
-        self.ping_card.add_widget(self.ping_title)
-        self.ping_lines = _InfoLines(self.ping_card)
-        self.ping_card.add_widget(self.ping_lines)
-        self.network_lines = _InfoLines(self.ping_card)
-        self.ping_card.add_widget(self.network_lines)
-        self.layout.addWidget(self.ping_card)
-
-        self.path_card = SettingsCard()
-        self.path_title = StrongBodyLabel("", self.path_card)
-        self.path_card.add_widget(self.path_title)
-        self.path_lines = _InfoLines(self.path_card)
-        self.path_card.add_widget(self.path_lines)
-        self.path_rows = RowsView(self.path_card, icon="fa5s.route")
-        self.path_card.add_widget(self.path_rows)
-        self.layout.addWidget(self.path_card)
-
-        self.neighbors_card = SettingsCard()
-        self.neighbors_title = StrongBodyLabel("", self.neighbors_card)
-        self.neighbors_card.add_widget(self.neighbors_title)
-        self.neighbors_rows = RowsView(self.neighbors_card, icon="fa5s.sitemap")
-        self.neighbors_card.add_widget(self.neighbors_rows)
-        self.layout.addWidget(self.neighbors_card)
-
-        self.dns_card = SettingsCard()
-        self.dns_title = StrongBodyLabel("", self.dns_card)
-        self.dns_card.add_widget(self.dns_title)
-        self.dns_summary = _InfoLines(self.dns_card)
-        self.dns_card.add_widget(self.dns_summary)
-        self.dns_rows = RowsView(self.dns_card, icon="fa5s.network-wired")
-        self.dns_card.add_widget(self.dns_rows)
-        self.layout.addWidget(self.dns_card)
+        # Итог — несколькими карточками; всё подробное открывается по нажатию на карточку.
+        self.cards = CardsGrid(CARD_MIN_WIDTH, self)
+        self.cards.opened.connect(self.card_opened)
+        self.cards.setVisible(False)
+        self._cards_shown: list = []
+        self.layout.addWidget(self.cards)
 
         # Прошлые проверки: что проверяли и чем кончилось. Видна, пока есть записи.
         self.history_card = SettingsCard()
@@ -262,8 +264,7 @@ class DomainLookupPage(BasePage):
         self.history_card.add_widget(self.history_rows)
         self.layout.addWidget(self.history_card)
 
-        for card in (self.ping_card, self.path_card, self.dns_card, self.neighbors_card, self.history_card):
-            card.setVisible(False)
+        self.history_card.setVisible(False)
         self.layout.addStretch()
 
     def _apply_texts(self) -> None:
@@ -309,27 +310,16 @@ class DomainLookupPage(BasePage):
                 "остаются обратное имя, сертификат и владелец сети.",
             ),
         )
-        self.ping_title.setText(self._t("section.ping", "Пинг и сеть"))
-        self.path_title.setText(self._t("section.path", "Путь до сервера"))
+        self._card_titles = {
+            lookup_cards.KEY_PING: self._t("section.ping", "Пинг и сеть"),
+            lookup_cards.KEY_PATH: self._t("section.path", "Путь до сервера"),
+            lookup_cards.KEY_DNS: self._t("section.dns", "Адреса с разных DNS-серверов"),
+            lookup_cards.KEY_NEIGHBORS: self._t("section.neighbors", "Кто ещё на этом адресе"),
+        }
         set_control_accessibility(
-            self.path_rows,
-            name=self._t("path.name", "Узлы по дороге до сервера"),
-            description=self._t(
-                "path.description",
-                "Номер узла, его адрес и время ответа. Отметка показывает, за каким узлом стоит фильтр.",
-            ),
-        )
-        self.dns_title.setText(self._t("section.dns", "Адреса с разных DNS-серверов"))
-        self.neighbors_title.setText(self._t("section.neighbors", "Кто ещё на этом адресе"))
-        set_control_accessibility(
-            self.dns_rows,
-            name=self._t("table.name", "Ответы DNS-серверов"),
-            description=self._t("table.description", "Для каждого сервера: какие адреса он назвал и за сколько."),
-        )
-        set_control_accessibility(
-            self.neighbors_rows,
-            name=self._t("neighbors.name", "Домены на том же адресе"),
-            description=self._t("neighbors.description", "Списки доменов по источникам."),
+            self.cards,
+            name=self._t("cards.name", "Итог проверки домена"),
+            description=self._t("cards.description", "Карточки частей проверки; нажатие открывает подробности."),
         )
         if self._report is None:
             self.status_lines.set_lines(
@@ -385,10 +375,9 @@ class DomainLookupPage(BasePage):
             return
         # Старые результаты не копим: каждая проверка начинается с чистого экрана.
         self._report = None
-        for card in (self.ping_card, self.path_card, self.dns_card, self.neighbors_card):
-            card.setVisible(False)
-        for view in (self.dns_rows, self.neighbors_rows, self.path_rows):
-            view.show_groups(())
+        self.cards.clear()
+        self.cards.setVisible(False)
+        self._cards_shown = []
         self.status_lines.set_lines((plans.InfoLine(f"Проверяем {target}…", plans.TONE_ACCENT),))
         self._set_running(True)
         self._lane.request({"target": target, "use_external": self.external_check.isChecked()})
@@ -454,28 +443,16 @@ class DomainLookupPage(BasePage):
         self._report = report
         self.status_lines.set_lines((plans.build_status(report),))
 
-        ping_lines = plans.build_ping_lines(report)
-        self.ping_lines.set_lines(ping_lines)
-        self.network_lines.set_lines(plans.build_network_lines(report))
-        self.ping_card.setVisible(bool(ping_lines))
+        cards = lookup_cards.build_lookup_cards(report, getattr(self, "_card_titles", None))
+        if cards != self._cards_shown:
+            # Выплывают только при первом показе: промежуточные ответы обновляют карточки молча.
+            self.cards.show_cards(cards, animate=not self._cards_shown)
+            self._cards_shown = cards
+        self.cards.setVisible(bool(cards))
 
-        path_lines = plans.build_path_lines(report)
-        self.path_card.setVisible(bool(path_lines))
-        if path_lines:
-            self.path_lines.set_lines(path_lines)
-        path_rows = plans.build_path_rows(report)
-        self.path_rows.setVisible(bool(path_rows))
-        self.path_rows.show_groups((plans.RowGroup("Узлы по дороге до сервера", path_rows),) if path_rows else ())
-
-        groups = plans.build_answer_groups(report)
-        self.dns_card.setVisible(bool(groups))
-        if groups:
-            self.dns_summary.set_lines((plans.build_dns_summary(report),))
-        self.dns_rows.show_groups(groups)
-
-        neighbors = plans.build_neighbor_groups(report)
-        self.neighbors_card.setVisible(bool(neighbors))
-        self.neighbors_rows.show_groups(neighbors)
+    def result_cards(self) -> list:
+        """Карточки итога, как они сейчас показаны."""
+        return list(self._cards_shown)
 
     def _open_report(self) -> None:
         if self._report is None:

@@ -609,3 +609,30 @@ class LightAndFittingTests(unittest.TestCase):
         label.hide()
         self.assertEqual(label._anim.state(), label._anim.State.Stopped)
         self.assertEqual(label.text(), "12")
+
+    def test_plain_tiles_split_a_row_and_open_nothing(self) -> None:
+        from blockcheck.ui.result_cards import TilesGrid, plain_tile
+        from blockcheck.ui.result_cards_model import Line
+
+        answer = plain_tile(Line("ok", "Cloudflare · 1.1.1.1", "8.6.112.0, 8.47.69.0 · 38 мс"))
+        self.assertEqual((answer.title, answer.tag, answer.result, answer.seconds), ("Cloudflare", "1.1.1.1", "8.6.112.0, 8.47.69.0", "38 мс"))
+        self.assertEqual(answer.hint, "Cloudflare · 1.1.1.1\n8.6.112.0, 8.47.69.0 · 38 мс")
+        silent = plain_tile(Line("unknown", "AdGuard · 94.140.14.140", "сервер не ответил · —"))
+        self.assertEqual((silent.result, silent.seconds), ("сервер не ответил", ""))
+        # Свой значок — только у строки без оценки; отметка-разделитель становится обычной фразой.
+        hop = plain_tile(Line("info", "Узел 1", "192.168.1.1 · < 1 мс"), "fa5s.network-wired")
+        self.assertEqual((hop.icon, hop.result, hop.seconds), ("fa5s.network-wired", "192.168.1.1", "< 1 мс"))
+        mark = plain_tile(Line("fail", "── здесь стоит фильтр ──"), "fa5s.network-wired")
+        self.assertEqual((mark.title, mark.icon), ("Здесь стоит фильтр", ""))
+        self.assertEqual(plain_tile(Line("info", "example.com")).title, "example.com")
+
+        opened = []
+        grid = TilesGrid([answer, hop], clickable=False)
+        self.addCleanup(grid.deleteLater)
+        grid.opened.connect(opened.append)
+        grid.resize(600, 60)
+        grid.show()
+        QTest.mouseClick(grid, Qt.MouseButton.LeftButton, pos=grid.tile_rect(0).center().toPoint())
+        self.assertEqual(opened, [])
+        self.assertEqual(grid.cursor().shape(), Qt.CursorShape.ArrowCursor)
+        grid.grab()
