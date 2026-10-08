@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.09.1")
+        self.assertEqual(catalog.catalog_version, "2026.10.09.2")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -113,7 +113,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(catalog.service_icons["Grok"], ("own:grok:GR", None))
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 106)
-        self.assertEqual(len(catalog.dns_profiles), 6)
+        self.assertEqual(len(catalog.dns_profiles), 7)
         for removed in ("xbox_dns_old", "malw_dns", "malw_dns_v2"):
             self.assertNotIn(removed, catalog.dns_profiles)
         self.assertNotIn("fin_dns", catalog.dns_profiles)
@@ -131,7 +131,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 954)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 4836)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 5784)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -235,6 +235,32 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         for added in ("Cursor", "Groq", "MongoDB", "Brave", "Arduino", "Crunchyroll", "LEGO", "IKEA", "Chess"):
             self.assertIn(added, index["services"], added)
             self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles(added), added)
+
+    def test_zapret_dns_profile_leads_through_the_project_server(self) -> None:
+        """Свой сервер проекта: профиль стоит первым и ведёт главные имена через 144.31.82.230."""
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            first = dict(
+                connection.execute(
+                    "SELECT d.hostname, a.ip_address FROM dns_answers a JOIN domains d USING(domain_id)"
+                    " WHERE a.profile_id = 'zapret_dns' AND a.priority = 0"
+                ).fetchall()
+            )
+            services = connection.execute(
+                "SELECT COUNT(DISTINCT d.service_id) FROM dns_answers a JOIN domains d USING(domain_id)"
+                " WHERE a.profile_id = 'zapret_dns'"
+            ).fetchone()[0]
+            order = [row[0] for row in connection.execute("SELECT profile_id FROM dns_profiles ORDER BY sort_order")]
+        finally:
+            connection.close()
+        self.assertEqual(order[0], "zapret_dns")
+        self.assertGreaterEqual(services, 80)
+        for hostname in ("chatgpt.com", "claude.ai", "gemini.google.com", "open.spotify.com", "www.notion.so"):
+            self.assertEqual(first[hostname], "144.31.82.230", hostname)
+        # Раздача Spotify идёт напрямую: у неё нет гео-ограничения.
+        self.assertNotEqual(first["image-cdn-fa.spotifycdn.com"], "144.31.82.230")
+        for service in ("ChatGPT & Sora (OpenAI)", "Claude", "Gemini AI", "Spotify"):
+            self.assertEqual(self.proxy_domains.get_service_available_dns_profiles(service)[0], "zapret_dns", service)
 
     def test_geohide_opens_spotify_through_its_relays(self) -> None:
         """Имена Spotify с гео-ограничением идут через посредников GeoHide, раздача — напрямую."""

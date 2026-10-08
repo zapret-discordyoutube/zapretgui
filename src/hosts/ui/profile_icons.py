@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 _PROFILE_ICONS: dict[str, tuple[str, str]] = {
+    "zapret_dns": ("fa5s.rocket", "#60CDFF"),
     "xbox_dns": ("fa5b.xbox", "#107C10"),
     "comss_dns": ("fa5s.shield-alt", "#2F80ED"),
     "astracat": ("fa5s.cat", "#F59E0B"),
