@@ -1,32 +1,42 @@
 """Сброс сети Windows: то, что лежит за плиткой «Сбросить сеть Windows».
 
-Чинит только то, что ломается на самом деле, и только вызовами WinAPI
-(windows_features.internet_cleanup_winapi) — без запуска netsh и разбора его
-текста. Всё выполняется за доли секунды и не требует перезагрузки:
+Всё, для чего у Windows есть готовые функции, делается прямыми вызовами
+WinAPI (windows_features.internet_cleanup_winapi):
 
-- кэш DNS и кэш адресов с маршрутами очищаются всегда: Windows сразу
-  узнаёт всё заново;
+- кэш DNS и кэш адресов с маршрутами очищаются всегда;
 - прокси WinHTTP сбрасывается, только если он задан;
 - системный прокси отключается, только если он смотрит на этот же компьютер
   и там никто не отвечает — так бывает после аварийно закрытого VPN или
   прокси-клиента. Работающий прокси не трогается;
 - из каталога Winsock удаляются надстройки посторонних программ (LSP).
 
-Адреса, DNS-серверы и прочие настройки сетевых адаптеров не меняются.
+У сброса TCP/IP и у диапазона динамических портов открытых функций нет,
+поэтому для них запускается netsh — три команды по десятой доле секунды.
+Сброс TCP/IP вступает в силу после перезагрузки Windows.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 import socket
+import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
+from utils.subproc import get_system_exe, run_hidden
 from windows_features import internet_cleanup_winapi as winapi
+
+NETSH_TIMEOUT_SECONDS = 30
+# netsh запускается без консоли и в этом случае пишет в кодировке Windows (ANSI),
+# а не в консольной (OEM): для русской Windows это 1251, а не 866.
+NETSH_ENCODING = "mbcs" if os.name == "nt" else "utf-8"
+DYNAMIC_TCP_PORT_START = 10000
+DYNAMIC_TCP_PORT_COUNT = 30000
 
 # Столько ждём ответа от прокси на этом же компьютере. Работающая программа
 # отвечает мгновенно, а на закрытый порт Windows стучится около двух секунд.
@@ -42,11 +52,13 @@ class CleanupStep:
     """Один шаг сброса.
 
     `run` возвращает фразу о том, что сделано, или пустую строку, если менять
-    было нечего. Ошибку Windows он отдаёт исключением.
+    было нечего. Ошибку Windows он отдаёт исключением. `needs_reboot` — шаг
+    подействует только после перезагрузки Windows.
     """
 
     label: str
     run: Callable[[], str]
+    needs_reboot: bool = False
 
 
 @dataclass(slots=True)
@@ -59,7 +71,83 @@ class InternetCleanupActionResult:
     duration_ms: int = RESULT_DURATION_MS
 
 
-# ── шаги ──────────────────────────────────────────────────────────────────
+# ── шаги через netsh ──────────────────────────────────────────────────────
+
+
+def _run_netsh(*args: str) -> tuple[int, str]:
+    """Скрыто запускает netsh и возвращает его код завершения и текст."""
+    try:
+        completed = run_hidden(
+            (get_system_exe("netsh.exe"), *args),
+            capture_output=True,
+            timeout=NETSH_TIMEOUT_SECONDS,
+            encoding=NETSH_ENCODING,
+        )
+    except subprocess.TimeoutExpired:
+        raise OSError(f"netsh не ответил за {NETSH_TIMEOUT_SECONDS} секунд") from None
+    return int(completed.returncode), f"{completed.stdout or ''}\n{completed.stderr or ''}"
+
+
+def _netsh_problem(code: int, text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    detail = next((line for line in lines if not line.endswith("OK!")), "")
+    if len(detail) > 160:
+        detail = detail[:157] + "..."
+    return f"netsh вернул код {code}" + (f": {detail}" if detail else "")
+
+
+def _count_reset_items(text: str) -> tuple[int, int]:
+    """Сколько пунктов netsh сбросил и в скольких ему отказано.
+
+    Каждый пункт — строка вида «Сброс Маршрут - OK!» либо «Сброс  - сбой.»
+    (в английской Windows «Resetting Route, OK!»). Слова зависят от языка
+    Windows, поэтому опираемся только на «OK!» и общее первое слово.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    done = [line for line in lines if line.endswith("OK!")]
+    if not done:
+        return 0, 0
+    first_word = done[0].split()[0]
+    items = [line for line in lines if line.split()[0] == first_word]
+    return len(done), len(items) - len(done)
+
+
+def _reset_tcpip(family: str) -> str:
+    code, text = _run_netsh("interface", family.lower(), "reset")
+    done, refused = _count_reset_items(text)
+    log(f"Сброс сети: TCP/IP {family} — код {code}, сброшено пунктов: {done}, отказано: {refused}", "INFO")
+    # На исправной Windows netsh всегда возвращает код 1: один защищённый системный
+    # пункт сбросить нельзя («Отказано в доступе»), остальные три десятка сброшены.
+    if code != 0 and done <= refused:
+        raise OSError(_netsh_problem(code, text))
+    return f"TCP/IP {family} сброшен."
+
+
+def _reset_tcpip_v4() -> str:
+    return _reset_tcpip("IPv4")
+
+
+def _reset_tcpip_v6() -> str:
+    return _reset_tcpip("IPv6")
+
+
+def _set_dynamic_tcp_ports() -> str:
+    code, text = _run_netsh(
+        "interface",
+        "ipv4",
+        "set",
+        "dynamicport",
+        "tcp",
+        f"start={DYNAMIC_TCP_PORT_START}",
+        f"num={DYNAMIC_TCP_PORT_COUNT}",
+    )
+    if code != 0:
+        raise OSError(_netsh_problem(code, text))
+    last_port = DYNAMIC_TCP_PORT_START + DYNAMIC_TCP_PORT_COUNT - 1
+    return f"Динамические TCP-порты: {DYNAMIC_TCP_PORT_START}–{last_port}."
+
+
+# ── шаги через WinAPI ─────────────────────────────────────────────────────
 
 
 def _flush_dns_cache() -> str:
@@ -157,6 +245,10 @@ def _remove_winsock_addons() -> str:
 
 def default_cleanup_steps() -> tuple[CleanupStep, ...]:
     return (
+        CleanupStep("сброс TCP/IP IPv4", _reset_tcpip_v4, needs_reboot=True),
+        CleanupStep("сброс TCP/IP IPv6", _reset_tcpip_v6, needs_reboot=True),
+        # Порты — после сброса TCP/IP, как и в прежнем порядке команд.
+        CleanupStep("динамические TCP-порты", _set_dynamic_tcp_ports),
         CleanupStep("кэш DNS", _flush_dns_cache),
         CleanupStep("кэш адресов и маршрутов", _flush_address_caches),
         CleanupStep("прокси WinHTTP", _reset_winhttp_proxy),
@@ -184,6 +276,7 @@ def run_internet_cleanup(steps: Sequence[CleanupStep] | None = None) -> Internet
     done: list[str] = []
     untouched: list[str] = []
     failed: list[str] = []
+    needs_reboot = False
     for step in default_cleanup_steps() if steps is None else steps:
         try:
             note = str(step.run() or "")
@@ -193,10 +286,14 @@ def run_internet_cleanup(steps: Sequence[CleanupStep] | None = None) -> Internet
             continue
         log(f"Сброс сети: {step.label} — {note or 'менять нечего'}", "INFO")
         (done if note else untouched).append(note or step.label)
+        needs_reboot = needs_reboot or (bool(note) and step.needs_reboot)
 
-    lines = list(done)
+    # Сделанное — одним абзацем: сообщение само переносит длинные строки.
+    lines = [" ".join(done)] if done else []
     if untouched:
         lines.append(f"Менять не пришлось: {', '.join(untouched)}.")
+    if needs_reboot:
+        lines.append("Перезагрузите Windows, чтобы сброс TCP/IP подействовал.")
     if not failed:
         return InternetCleanupActionResult(
             level="success",

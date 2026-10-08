@@ -355,7 +355,7 @@ class ControlAccessibilityTests(unittest.TestCase):
         self.assertEqual(kwargs["docs_card"].accessible_name, "Открыть документацию")
         self.assertEqual(kwargs["test_card"].title, "Тест соединения")
         self.assertEqual(kwargs["internet_cleanup_card"].title, "Сбросить сеть Windows")
-        self.assertIn("Без перезагрузки", kwargs["internet_cleanup_card"].content)
+        self.assertIn("перезагрузка", kwargs["internet_cleanup_card"].content)
         self.assertEqual(kwargs["folder_card"].title, "Открыть папку")
         self.assertEqual(kwargs["docs_card"].title, "Документация")
 
@@ -390,7 +390,7 @@ class ControlAccessibilityTests(unittest.TestCase):
         self.assertEqual(kwargs["docs_card"].accessible_name, "Открыть документацию")
         self.assertEqual(kwargs["test_card"].title, "Тест соединения")
         self.assertEqual(kwargs["internet_cleanup_card"].title, "Сбросить сеть Windows")
-        self.assertIn("Без перезагрузки", kwargs["internet_cleanup_card"].content)
+        self.assertIn("перезагрузка", kwargs["internet_cleanup_card"].content)
         self.assertEqual(kwargs["folder_card"].title, "Открыть папку")
         self.assertEqual(kwargs["docs_card"].title, "Документация")
 
