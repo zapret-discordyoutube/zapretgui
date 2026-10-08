@@ -745,6 +745,8 @@ class UnstableSiteTests(unittest.TestCase):
         self.assertEqual((service["level"], service["headline"]), ("warn", "Discord открывается через раз"))
         problem = next(item for item in result["problems"] if item["target"] == "discord.com")
         self.assertEqual((problem["level"], problem["action"]), ("warn", "strategy"))
+        # Вид исхода назван в самом отчёте: экран не должен его угадывать.
+        self.assertEqual((service["kind"], problem["kind"]), ("unstable", "unstable"))
         self.assertTrue(any("трёх попыток подряд прошла одна" in line for line in problem["advice"]))
         self.assertNotIn("Discord", result["working"])
 

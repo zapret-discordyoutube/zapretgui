@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from diagnostics.block_kind import KIND_CUT, KIND_IP, KIND_NO_CONNECT, kind_info, site_kind
+from diagnostics.block_kind import KIND_CUT, KIND_IP, KIND_NO_CONNECT, KIND_UNSTABLE, kind_info, site_kind
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -405,6 +405,8 @@ def summarize_service(
     secondary_broken = [item for item in targets if item is not main and item.reach in _BROKEN]
     if main.reach == ReachState.OK:
         advice: tuple[str, ...] = ()
+        # Вид исхода, который не следует из сломанных адресов: «через раз».
+        own_kind = ""
         stale = [item.host for item in targets if item.hosts_stale and item.reach == ReachState.OK]
         if stale and not secondary_broken:
             # Проверка дошла до сайта по настоящему адресу, а браузер и программы возьмут адрес из
@@ -421,6 +423,7 @@ def summarize_service(
             level = Level.WARN
             headline = f"{label} открывается через раз"
             advice = (_ADVICE_START if zapret_running is False else _ADVICE_STRATEGY, ADVICE_UNSTABLE)
+            own_kind = KIND_UNSTABLE
         elif not secondary_broken:
             level = Level.WARN if spoofed else Level.OK
             headline = f"{label} открывается"
@@ -435,7 +438,7 @@ def summarize_service(
             )
         if spoofed and _ADVICE_DNS not in advice:
             advice = advice + (_ADVICE_DNS,)
-        return ServiceVerdict(level, headline, advice, dns_note, _leading_kind(secondary_broken))
+        return ServiceVerdict(level, headline, advice, dns_note, own_kind or _leading_kind(secondary_broken))
 
     if main.reach in _BROKEN:
         broken = [main, *secondary_broken]
