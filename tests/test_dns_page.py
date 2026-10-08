@@ -318,6 +318,32 @@ class DnsPageTests(unittest.TestCase):
         page.grid.activated.emit("AdGuard")
         self.info_bar.warning.assert_not_called()
 
+    def test_encrypted_only_server_is_applied_where_windows_can_encrypt(self) -> None:
+        page = self._page()
+
+        page.grid.activated.emit("Wikimedia DNS")
+
+        self.assertEqual(page._apply_lane.request.call_args.args[0]["name"], "Wikimedia DNS")
+        self.info_bar.warning.assert_not_called()
+        tile = {tile.key: tile for tile in self._provider_tiles(page)}["Wikimedia DNS"]
+        self.assertIn("Принимает только шифрованные запросы: Windows 11 спрашивает его по DoH", tile.tooltip)
+
+    def test_encrypted_only_server_is_refused_where_windows_cannot_encrypt(self) -> None:
+        """Обычный DNS такой сервер не принимает: на Windows 10 с ним пропал бы весь интернет."""
+        page = self._page(state=replace(STATE, doh_supported=False))
+
+        page.grid.activated.emit("DNS-AI")
+
+        page._apply_lane.request.assert_not_called()
+        self.assertIsNone(page._pending_choice)
+        self.assertEqual(self.info_bar.warning.call_args.kwargs["title"], "DNS-AI работает только в Windows 11")
+        tile = {tile.key: tile for tile in self._provider_tiles(page)}["DNS-AI"]
+        self.assertIn("здесь сервер работать не будет", tile.tooltip)
+
+        # Обычный сервер на той же Windows применяется как всегда.
+        page.grid.activated.emit("Quad9")
+        self.assertEqual(page._apply_lane.request.call_args.args[0]["name"], "Quad9")
+
     def test_encrypted_dns_tile_is_selected_by_the_running_mode(self) -> None:
         local = replace(ETHERNET, static_ipv4=("127.0.0.1",), static_ipv6=("::1",))
         adapters = (local, WIFI_ADAPTER, SPARE_ADAPTER)
@@ -449,8 +475,15 @@ class DnsPageTests(unittest.TestCase):
         self.assertTrue(all(":" not in server for server in servers))
         self.assertFalse(page.now_panel.measure_button.isEnabled())
         self.assertNotIn("127.0.0.1", servers)
-        network_tiles = [tile for tile in self._provider_tiles(page) if tile.address != "127.0.0.1"]
+        unmeasured = {"Wikimedia DNS", "DNS-AI"}
+        network_tiles = [
+            tile for tile in self._provider_tiles(page) if tile.address != "127.0.0.1" and tile.key not in unmeasured
+        ]
         self.assertEqual({tile.latency for tile in network_tiles}, {"measuring"})
+        # Серверы только с шифрованием на обычный запрос замера не отвечают: их не спрашивают.
+        self.assertEqual({tile.latency for tile in self._provider_tiles(page) if tile.key in unmeasured}, {""})
+        self.assertNotIn("185.71.138.138", servers)
+        self.assertNotIn("192.144.59.14", servers)
         # Режимы шифрованного DNS живут на этом компьютере и не замеряются.
         self.assertEqual({tile.latency for tile in self._provider_tiles(page) if tile.address == "127.0.0.1"}, {""})
 

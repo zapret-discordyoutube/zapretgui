@@ -14,6 +14,12 @@ SVG "own:<имя>:<буквы>". У серверов из раздела «Дл�
 этому способу (проверено запросом 2026-10-07); у остальных проверка DoT не
 делается, чтобы не выдавать «не поддерживает» за «заблокирован».
 
+"encrypted_only": True — сервер принимает только шифрованные запросы (DoH,
+DoT), а обычный DNS на порту 53 у него закрыт намеренно (проверено запросом
+2026-10-08). Спрашивать такой сервер сама умеет только Windows 11, поэтому на
+Windows без DoH плитка не применяется, а замер скорости и проверка обычного
+DNS такие серверы пропускают: молчание порта 53 здесь не блокировка.
+
 "dnssec": True — сервер проверяет подписи DNSSEC: на имя с заведомо
 испорченной подписью (dnssec-failed.org) он отвечает отказом, а не адресом
 (проверено запросом 2026-10-07). На плитке это метка «DNSSEC».
@@ -133,7 +139,7 @@ DNS_PROVIDERS = {
             "desc": "Без рекламы",
             "icon": "simple:adguard:AG",
             "color": "#68bc71",
-            "doh": "https://dns.adguard.com/dns-query",
+            "doh": "https://dns.adguard-dns.com/dns-query",
             "dot": "dns.adguard-dns.com",
             "dnssec": True,
             "status": STATUS_AT_RISK,
@@ -345,6 +351,18 @@ DNS_PROVIDERS = {
             "doh": "https://dns.surfsharkdns.com/dns-query",
             "dot": "dns.surfsharkdns.com",
         },
+        # Сервер фонда «Викимедиа» (Википедия). Обычный DNS не принимает вовсе.
+        "Wikimedia DNS": {
+            "ipv4": ["185.71.138.138"],
+            "ipv6": ["2001:67c:930::1"],
+            "desc": "Без фильтров, Википедия",
+            "icon": "fa5b.wikipedia-w",
+            "color": "#94a3b8",
+            "doh": "https://wikimedia-dns.org/dns-query",
+            "dot": "wikimedia-dns.org",
+            "dnssec": True,
+            "encrypted_only": True,
+        },
     },
     "Для ИИ": {
         "Xbox DNS": {
@@ -414,6 +432,20 @@ DNS_PROVIDERS = {
             "doh": "https://geohide.ru/dns-query",
             "dot": "geohide.ru"
         },
+        # Адреса и шаблон — с официального dns-ai.ru. Обычный DNS наружу не отдаёт.
+        # Адреса сайтов ИИ подменяет только для России и Беларуси; рекламные имена
+        # отвечают пустым адресом (doubleclick.net → 0.0.0.0, проверено 2026-10-08).
+        "DNS-AI": {
+            "ipv4": ["192.144.59.14", "186.246.49.127"],
+            "ipv6": ["2a0d:8480:0:67c::14", "2a0a:2b41:0:500d::53"],
+            "desc": "Нейросети, без рекламы",
+            "icon": "fa5s.robot",
+            "color": "#d946ef",
+            "doh": "https://dns.dns-ai.ru/dns-query",
+            "dot": "dns.dns-ai.ru",
+            "dnssec": True,
+            "encrypted_only": True,
+        },
     }
 }
 
@@ -436,6 +468,11 @@ def network_providers(providers: dict | None = None) -> dict:
     return result
 
 
+def is_encrypted_only(data: dict) -> bool:
+    """Сервер не отвечает на обычный DNS: спросить его можно только шифрованным запросом."""
+    return bool(data.get("encrypted_only"))
+
+
 def find_provider_by_address(address: str) -> tuple[str, str, dict] | None:
     """(группа, название, данные) сервера, которому принадлежит адрес (IPv4 или IPv6)."""
     wanted = str(address or "").strip().lower()
@@ -455,7 +492,8 @@ def catalog_problems() -> list[str]:
 
     Проверяет то, от чего зависит работа программы: адреса — настоящие IPv4 и
     IPv6 без повторов, основной адрес не занят другим сервером, шифрованный
-    DoH задан адресом https, пометка состояния — из известных.
+    DoH задан адресом https (у сервера только с шифрованием он обязателен),
+    пометка состояния — из известных.
     """
     from dns.local_proxy_catalog import MODES
 
@@ -502,6 +540,8 @@ def catalog_problems() -> list[str]:
         dot = str(data.get("dot", ""))
         if dot and ("/" in dot or ":" in dot):
             problems.append(f"{name}: в «dot» нужно только имя сервера")
+        if data.get("encrypted_only") and not doh:
+            problems.append(f"{name}: сервер только с шифрованием должен иметь адрес DoH")
         if data.get("status", "") not in ("", *STATUSES):
             problems.append(f"{name}: неизвестная пометка состояния «{data.get('status')}»")
         if not str(data.get("desc", "")).strip() or not str(data.get("icon", "")).strip():

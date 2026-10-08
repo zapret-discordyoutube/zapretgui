@@ -32,7 +32,13 @@ from app.ui_texts import tr as tr_catalog
 from dns import page_plans as dns_page_plans
 from dns import custom_servers
 from dns.custom_servers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
-from dns.dns_providers import DNS_PROVIDERS, LOCAL_PROXY_GROUP, STATUS_AT_RISK, STATUS_BLOCKED
+from dns.dns_providers import (
+    DNS_PROVIDERS,
+    LOCAL_PROXY_GROUP,
+    STATUS_AT_RISK,
+    STATUS_BLOCKED,
+    is_encrypted_only,
+)
 from dns.ui.now_panel import AdapterChip, DnsNowPanel, NowState
 from dns.ui.provider_grid import ADD_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts
 from log.log import log
@@ -537,8 +543,9 @@ class NetworkPage(BasePage):
 
     def _all_addresses(self, data: dict) -> list[str]:
         """Все адреса сервера, которые имеет смысл замерять в этой сети."""
-        if data.get("local_proxy"):
-            # Режим шифрованного DNS живёт на этом компьютере: замерять дорогу до него незачем.
+        if data.get("local_proxy") or is_encrypted_only(data):
+            # Режим шифрованного DNS живёт на этом компьютере: замерять дорогу до него
+            # незачем. А сервер только с шифрованием на обычный запрос замера не ответит.
             return []
         addresses = dns_page_plans.normalize_dns_list(data.get("ipv4", []))
         if self._ipv6_available:
@@ -598,7 +605,8 @@ class NetworkPage(BasePage):
             for name, data in items.items():
                 address = self._primary_address(data)
                 local_proxy = bool(data.get("local_proxy"))
-                if local_proxy:
+                encrypted_only = is_encrypted_only(data)
+                if local_proxy or encrypted_only:
                     latency, latency_ms = "", 0.0
                 elif self._measuring and address not in self._latency:
                     latency, latency_ms = "measuring", 0.0
@@ -620,6 +628,20 @@ class NetworkPage(BasePage):
                             "page.network.tile.local_proxy",
                             "Программа запустит на компьютере службу dnscrypt-proxy и пропишет адаптеру "
                             "адрес 127.0.0.1. Если шифрованные серверы не ответят, DNS не изменится.",
+                        )
+                    )
+                if encrypted_only:
+                    tooltip_lines.append(
+                        self._t(
+                            "page.network.tile.encrypted_only",
+                            "Принимает только шифрованные запросы: Windows 11 спрашивает его по DoH, "
+                            "скорость обычным запросом не замерить.",
+                        )
+                        if self._doh_supported
+                        else self._t(
+                            "page.network.tile.encrypted_only.unsupported",
+                            "Принимает только шифрованные запросы, а эта Windows сама шифровать DNS не умеет "
+                            "(нужна Windows 11): здесь сервер работать не будет.",
                         )
                     )
                 group_note = self._group_note(group)
@@ -742,6 +764,18 @@ class NetworkPage(BasePage):
             return
         adapters = self._ready_adapters()
         if adapters is None:
+            return
+        if is_encrypted_only(data) and not self._doh_supported:
+            # Обычный DNS такой сервер не принимает: с ним не открылся бы ни один сайт.
+            self._info(
+                "warning",
+                self._t("page.network.encrypted_only.refused.title", "{name} работает только в Windows 11", name=name),
+                self._t(
+                    "page.network.encrypted_only.refused.content",
+                    "Сервер принимает только шифрованные запросы, а эта Windows сама шифровать DNS не умеет. "
+                    "DNS не изменён. Шифрование без Windows 11 даёт группа «Шифрованные».",
+                ),
+            )
             return
         self._pending_choice = name
         self.grid.flash(name)

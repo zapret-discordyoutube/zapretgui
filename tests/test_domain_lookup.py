@@ -522,6 +522,10 @@ class WiringTests(unittest.TestCase):
         self.assertGreaterEqual(sum(1 for server in servers if server.kind == engine.SERVER_DOH), 3)
         self.assertIn(("Мой", "10.9.8.7", engine.SERVER_CUSTOM), [(s.label, s.address, s.kind) for s in servers])
         self.assertEqual(len(engine._unique_servers(servers)), len(unique))
+        # Серверы списка спрашиваются обычным DNS, а Wikimedia и DNS-AI его не принимают.
+        labels = {server.label for server in servers}
+        self.assertIn("Quad9", labels)
+        self.assertFalse({"Wikimedia DNS", "DNS-AI"} & labels)
 
     def test_worker_receives_action_from_facade(self) -> None:
         feature_source = inspect.getsource(build_dns_feature)

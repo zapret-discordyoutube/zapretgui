@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import unittest
 from contextlib import ExitStack
+from dataclasses import replace
 from unittest.mock import patch
 
 from dns import server_check as sc
@@ -28,6 +29,10 @@ from utils.windows_icmp import WindowsPingResult
 GOOGLE = sc.CheckTarget("Google DNS", "8.8.8.8", dot_host="dns.google", doh_host="dns.google")
 QUAD9 = sc.CheckTarget("Quad9", "9.9.9.9", dot_host="dns.quad9.net", doh_host="dns.quad9.net")
 PLAIN = sc.CheckTarget("Свой", "10.0.0.53")
+# Обычный DNS (порт 53) этот сервер не открывает сам.
+WIKIMEDIA = sc.CheckTarget(
+    "Wikimedia DNS", "185.71.138.138", dot_host="wikimedia-dns.org", doh_host="wikimedia-dns.org", encrypted_only=True
+)
 
 OWNERS = {
     "1.1.1.1": IpOwner(asn="13335", owner="CLOUDFLARENET"),
@@ -108,6 +113,15 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(by_address["194.180.189.33"].doh_port, 444)
         # У этого сервера DoT не подтверждён: проверять его нельзя.
         self.assertEqual(by_address["87.228.47.200"].dot_host, "")
+
+    def test_servers_without_plain_dns_are_marked(self) -> None:
+        by_address = {target.address: target for target in sc.build_targets(DNS_PROVIDERS, ipv6=True)}
+
+        for address in ("185.71.138.138", "192.144.59.14", "186.246.49.127", "2a0a:2b41:0:500d::53"):
+            with self.subTest(address=address):
+                self.assertTrue(by_address[address].encrypted_only)
+        self.assertEqual(by_address["185.71.138.138"], replace(WIKIMEDIA, icon="fa5b.wikipedia-w", color="#94a3b8"))
+        self.assertFalse(by_address["9.9.9.9"].encrypted_only)
 
     def test_users_own_server_has_only_plain_transports(self) -> None:
         targets = sc.build_targets({"Свои": {"Мой": {"ipv4": ["10.0.0.53"], "ipv6": [], "custom_id": "1"}}})
@@ -194,6 +208,20 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(row.cell(sc.TRANSPORT_DOT).state, sc.STATE_SKIP)
         self.assertEqual(row.cell(sc.TRANSPORT_DOH).state, sc.STATE_SKIP)
         self.assertEqual(set(net.kinds(sc.PROBE_DOMAIN)), {"tcp", "udp"})
+
+    def test_server_without_plain_dns_is_not_asked_the_plain_way(self) -> None:
+        """Порт 53 у такого сервера закрыт им самим: молчание там — не блокировка провайдера."""
+        net = _Net(udp=lambda address, name: TIMEOUT, tcp=lambda address, name: TIMEOUT)
+        row = net.probe(WIKIMEDIA)
+
+        for transport in (sc.TRANSPORT_UDP, sc.TRANSPORT_TCP):
+            self.assertEqual(row.cell(transport).state, sc.STATE_SKIP)
+            self.assertEqual(row.cell(transport).reason, "сервер принимает только шифрованные запросы")
+        self.assertEqual(row.cell(sc.TRANSPORT_DOT).state, sc.STATE_OK)
+        self.assertEqual(row.cell(sc.TRANSPORT_DOH).state, sc.STATE_OK)
+        self.assertEqual({call[0] for call in net.calls}, {"dot", "doh"})
+        self.assertEqual(row.secure_via, sc.TRANSPORT_DOH)
+        self.assertEqual(_judged(row).findings, ())
 
     def test_silence_is_retried_once_and_refusal_is_not(self) -> None:
         net = _Net(udp=lambda address, name: TIMEOUT, tcp=lambda address, name: DnsQueryResult(status=STATUS_ERROR, failure=FAILURE_REFUSED))

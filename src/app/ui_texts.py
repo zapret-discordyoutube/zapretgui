@@ -2105,6 +2105,22 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "DNSSEC: сервер проверяет подписи ответов и не отдаёт подделанные.",
         "en": "DNSSEC: the server verifies answer signatures and drops forged ones.",
     },
+    "page.network.tile.encrypted_only": {
+        "ru": "Принимает только шифрованные запросы: Windows 11 спрашивает его по DoH, скорость обычным запросом не замерить.",
+        "en": "Accepts encrypted queries only: Windows 11 asks it over DoH, so a plain query cannot measure its speed.",
+    },
+    "page.network.tile.encrypted_only.unsupported": {
+        "ru": "Принимает только шифрованные запросы, а эта Windows сама шифровать DNS не умеет (нужна Windows 11): здесь сервер работать не будет.",
+        "en": "Accepts encrypted queries only, and this Windows cannot encrypt DNS itself (Windows 11 is required): the server will not work here.",
+    },
+    "page.network.encrypted_only.refused.title": {
+        "ru": "{name} работает только в Windows 11",
+        "en": "{name} works on Windows 11 only",
+    },
+    "page.network.encrypted_only.refused.content": {
+        "ru": "Сервер принимает только шифрованные запросы, а эта Windows сама шифровать DNS не умеет. DNS не изменён. Шифрование без Windows 11 даёт группа «Шифрованные».",
+        "en": "The server accepts encrypted queries only, and this Windows cannot encrypt DNS itself. The DNS was not changed. The “Encrypted” group gives encryption without Windows 11.",
+    },
     "page.network.adapters.all": {
         "ru": "Все",
         "en": "All",

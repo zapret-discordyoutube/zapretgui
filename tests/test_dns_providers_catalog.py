@@ -12,6 +12,7 @@ from dns.dns_providers import (
     catalog_problems,
     doh_templates,
     find_provider_by_address,
+    is_encrypted_only,
     iter_providers,
     network_providers,
 )
@@ -84,6 +85,19 @@ class DnsProvidersCatalogTests(unittest.TestCase):
         self.assertEqual(marks["OpenDNS"], STATUS_AT_RISK)
         self.assertEqual(marks["Quad9"], "")
 
+    def test_servers_without_plain_dns_are_marked_and_must_have_doh(self) -> None:
+        """Wikimedia и DNS-AI порт 53 не открывают: спросить их можно только шифрованным запросом."""
+        marked = {name for _group, name, data in iter_providers() if is_encrypted_only(data)}
+
+        self.assertEqual(marked, {"Wikimedia DNS", "DNS-AI"})
+        self.assertIn("Wikimedia DNS", DNS_PROVIDERS["Малоизвестные"])
+        self.assertIn("DNS-AI", DNS_PROVIDERS["Для ИИ"])
+
+        broken = copy.deepcopy(DNS_PROVIDERS)
+        del broken["Для ИИ"]["DNS-AI"]["doh"]
+        with patch.object(dns_providers, "DNS_PROVIDERS", broken):
+            self.assertIn("DNS-AI: сервер только с шифрованием должен иметь адрес DoH", catalog_problems())
+
     def test_dns_sb_is_not_among_popular_servers(self) -> None:
         self.assertNotIn("Dns.SB", DNS_PROVIDERS["Популярные"])
         self.assertIn("Dns.SB", DNS_PROVIDERS["Малоизвестные"])
@@ -100,6 +114,18 @@ class DnsProvidersCatalogTests(unittest.TestCase):
         self.assertEqual(templates["77.88.8.1"], "https://common.dot.dns.yandex.net/dns-query")
         self.assertEqual(templates["2a13:1001::86:54:11:200"], "https://unfiltered.joindns4.eu/dns-query")
         self.assertNotIn("84.200.69.80", templates)
+        # Серверу только с шифрованием шаблон нужен на каждом адресе: без шаблона
+        # Windows спросит адрес обычным DNS, а там никто не отвечает.
+        for address in ("192.144.59.14", "186.246.49.127", "2a0d:8480:0:67c::14", "2a0a:2b41:0:500d::53"):
+            self.assertEqual(templates[address], "https://dns.dns-ai.ru/dns-query")
+        self.assertEqual(templates["2001:67c:930::1"], "https://wikimedia-dns.org/dns-query")
+
+    def test_adguard_doh_uses_its_current_name(self) -> None:
+        """Старое имя dns.adguard.com при проверке с Windows 2026-10-08 на DoH не отвечало."""
+        templates = doh_templates()
+
+        self.assertEqual(templates["94.140.14.14"], "https://dns.adguard-dns.com/dns-query")
+        self.assertEqual(templates["2a10:50c0::ad2:ff"], "https://dns.adguard-dns.com/dns-query")
 
 
 if __name__ == "__main__":

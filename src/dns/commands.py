@@ -241,7 +241,7 @@ def duplicate_custom_server(server_id: str) -> CustomServerResult:
 def build_domain_lookup_servers():
     """Серверы для вкладки «Проверка домена»: системные, шифрованные, из списка программы и свои."""
     from dns.custom_servers import build_dns_providers_with_custom
-    from dns.dns_providers import network_providers
+    from dns.dns_providers import is_encrypted_only, network_providers
     from dns.domain_lookup import (
         EXTRA_SERVERS,
         SERVER_CUSTOM,
@@ -271,6 +271,9 @@ def build_domain_lookup_servers():
     for category, group in providers.items():
         kind = SERVER_CUSTOM if category == CUSTOM_DNS_CATEGORY else SERVER_PROVIDER
         for name, data in group.items():
+            if is_encrypted_only(data):
+                # Вкладка спрашивает серверы списка обычным DNS, а такой сервер его не принимает.
+                continue
             addresses = list(data.get("ipv4") or ()) or list(data.get("ipv6") or ())
             if addresses:
                 servers.append(DnsServer(label=str(name), address=str(addresses[0]), kind=kind))

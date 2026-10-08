@@ -11,6 +11,10 @@
 Провайдер может закрыть любой из способов отдельно и для отдельного адреса
 (8.8.8.8 закрыт, 8.8.4.4 работает), поэтому проверяется каждая пара.
 
+Сервер только с шифрованием (``encrypted_only`` в списке программы) обычный
+DNS не принимает сам. Обычным путём его не спрашивают вовсе: молчание порта 53
+у такого сервера — его устройство, а не блокировка на линии.
+
 Каждым способом сервер спрашивается несколько раз подряд (``PROBE_ATTEMPTS``),
 каждый раз новым соединением: блокировка иногда включается не с первого
 запроса. Способ, который ответил лишь на часть запросов, остаётся рабочим, но
@@ -144,6 +148,8 @@ class CheckTarget:
     doh_host: str = ""
     doh_port: int = 443
     doh_path: str = "/dns-query"
+    # Сервер сам не отвечает на обычный DNS (порт 53): только DoT и DoH.
+    encrypted_only: bool = False
     # Значок и цвет сервера из каталога — только для показа.
     icon: str = ""
     color: str = ""
@@ -293,6 +299,7 @@ def build_targets(providers: dict, *, ipv6: bool = False) -> tuple[CheckTarget, 
                         doh_host=doh.hostname or "",
                         doh_port=doh.port or 443,
                         doh_path=doh.path or "/dns-query",
+                        encrypted_only=bool(data.get("encrypted_only")),
                         icon=str(data.get("icon") or "").strip(),
                         color=str(data.get("color") or "").strip(),
                     )
@@ -439,6 +446,7 @@ def _first_address(result: DnsQueryResult | None) -> str:
 def probe_address(target: CheckTarget, cancel: SocketCancel, should_stop: ShouldStop) -> Observation:
     """Все факты об одном адресе. Сеть — только здесь."""
     skip = Cell(state=STATE_SKIP, reason="сервер не объявлял этот способ")
+    no_plain = Cell(state=STATE_SKIP, reason="сервер принимает только шифрованные запросы")
     with ThreadPoolExecutor(max_workers=10, thread_name_prefix="dns-server") as pool:
         # DoH без имени сервера нужен, только если по имени он не ответил. Чтобы
         # молчащий адрес не ждал два срока подряд, этот запрос уходит, как только
@@ -458,8 +466,10 @@ def probe_address(target: CheckTarget, cancel: SocketCancel, should_stop: Should
             return _once_doh(target, PROBE_DOMAIN, cancel, by_name=False)
 
         icmp = pool.submit(_ping, target.address, should_stop)
-        udp = pool.submit(_series, lambda: _once_udp(target.address, PROBE_DOMAIN, cancel), retry_silence=True)
-        tcp = pool.submit(_series, lambda: _once_tcp(target, PROBE_DOMAIN, cancel))
+        udp = tcp = None
+        if not target.encrypted_only:
+            udp = pool.submit(_series, lambda: _once_udp(target.address, PROBE_DOMAIN, cancel), retry_silence=True)
+            tcp = pool.submit(_series, lambda: _once_tcp(target, PROBE_DOMAIN, cancel))
         dot = pool.submit(_series, lambda: _once_dot(target, PROBE_DOMAIN, cancel)) if target.dot_host else None
         doh = without_name = None
         if target.doh_host:
@@ -476,8 +486,8 @@ def probe_address(target: CheckTarget, cancel: SocketCancel, should_stop: Should
             target=target,
             cells=(
                 (TRANSPORT_ICMP, icmp.result()),
-                (TRANSPORT_UDP, udp.result()),
-                (TRANSPORT_TCP, tcp.result()),
+                (TRANSPORT_UDP, udp.result() if udp is not None else no_plain),
+                (TRANSPORT_TCP, tcp.result() if tcp is not None else no_plain),
                 (TRANSPORT_DOT, dot.result() if dot is not None else skip),
                 (TRANSPORT_DOH, doh_cell),
             ),
