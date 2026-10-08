@@ -778,7 +778,7 @@ class LightAndFittingTests(unittest.TestCase):
         # Предупреждение стоит в шапке итога и называет программы; сравнение помечено как неточное.
         self.assertFalse(panel.bypass_label.isHidden())
         self.assertIn("sing-box, Cloudflare WARP", panel.bypass_label.text())
-        self.assertIn("остановите их и повторите", panel.bypass_label.text())
+        self.assertIn("отключите это и повторите", panel.bypass_label.text())
         self.assertTrue(panel.compare_band.headline().startswith("Неточно — работал VPN"))
         self.assertIn(compare["headline"], panel.compare_band.headline())
         panel.compare_band.grab()
@@ -791,8 +791,9 @@ class LightAndFittingTests(unittest.TestCase):
         self.assertNotIn("Внимание", panel.bypass_label.text())
         self.assertEqual(panel.compare_band.headline(), compare["headline"])
         # На дороге проверки стоит только одна из запущенных — называем её, и сравнение помечает сама проверка.
-        panel.show_report({**aside, "tools_in_path": ["WireGuard"], "compare": {**compare, "disturbed": True}})
-        self.assertIn("Внимание: во время проверки работали WireGuard.", panel.bypass_label.text())
+        # Имя здесь — подключение, а не программа из списка запущенных: списки по именам не сверяются.
+        panel.show_report({**aside, "tools_in_path": ["VPN-подключение «wg0»"], "compare": {**compare, "disturbed": True}})
+        self.assertIn("Внимание: проверка шла через VPN-подключение «wg0».", panel.bypass_label.text())
         self.assertTrue(panel.compare_band.headline().startswith("Неточно"))
         # Новая проверка предупреждение снимает.
         panel.set_pending()
