@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from PyQt6.QtWidgets import QVBoxLayout
 from qfluentwidgets import FluentIcon, PasswordLineEdit, SettingCardGroup, SpinBox
 
 from ui.fluent_widgets import enable_setting_card_group_auto_height
@@ -19,40 +16,8 @@ from telegram_proxy.ui.settings_build import (
 from telegram_proxy.ui.text_plan import TELEGRAM_PROXY_SETTINGS_TEXT
 
 
-@dataclass(slots=True)
-class TelegramProxyAdvancedWidgets:
-    upstream_card: object
-    upstream_toggle: object
-    upstream_preset_row: object
-    upstream_address_row: object
-    upstream_host_edit: object
-    upstream_port_spin: object
-    upstream_user_row: object
-    upstream_user_edit: object
-    upstream_pass_row: object
-    upstream_pass_edit: object
-    mtproxy_action_card: object
-    mtproxy_action_btn: object
-    upstream_mode_toggle: object
-    upstream_udp_toggle: object
-    cloudflare_card: object
-    cloudflare_toggle: object
-    cloudflare_domains_row: object
-    cloudflare_domains_edit: object
-    cloudflare_test_btn: object
-    cloudflare_dns_btn: object
-    cloudflare_worker_toggle: object
-    cloudflare_worker_domains_row: object
-    cloudflare_worker_domains_edit: object
-    cloudflare_worker_test_btn: object
-    cloudflare_worker_code_btn: object
-    network_card: object
-    dc_ip_row: object
-    dc_ip_edit: object
-    pool_size_row: object
-    pool_size_spin: object
-    buffer_kb_row: object
-    buffer_kb_spin: object
+# Страница собирает три группы по отдельности, блоками (см. ui.block_build):
+# каждая функция возвращает словарь «имя виджета → виджет».
 
 
 def _build_spin_box(*, minimum: int, maximum: int, value: int, name: str, description: str) -> SpinBox:
@@ -64,7 +29,7 @@ def _build_spin_box(*, minimum: int, maximum: int, value: int, name: str, descri
     return spin
 
 
-def _build_upstream_group(*, content_parent, upstream_catalog, on_open_mtproxy) -> dict:
+def build_upstream_group(*, content_parent, upstream_catalog, on_open_mtproxy) -> dict:
     text = TELEGRAM_PROXY_SETTINGS_TEXT
     card = SettingCardGroup(text.upstream_group_title, content_parent)
 
@@ -190,7 +155,7 @@ def _build_upstream_group(*, content_parent, upstream_catalog, on_open_mtproxy) 
     }
 
 
-def _build_cloudflare_group(
+def build_cloudflare_group(
     *,
     content_parent,
     on_test_cloudflare,
@@ -300,7 +265,7 @@ def _build_cloudflare_group(
     }
 
 
-def _build_network_group(*, content_parent) -> dict:
+def build_network_group(*, content_parent) -> dict:
     text = TELEGRAM_PROXY_SETTINGS_TEXT
     card = SettingCardGroup(text.network_group_title, content_parent)
 
@@ -346,34 +311,3 @@ def _build_network_group(*, content_parent) -> dict:
         "buffer_kb_row": buffer_kb_row,
         "buffer_kb_spin": buffer_kb_spin,
     }
-
-
-def build_telegram_proxy_advanced_panel(
-    layout: QVBoxLayout,
-    *,
-    content_parent,
-    upstream_catalog,
-    on_open_mtproxy,
-    on_test_cloudflare,
-    on_copy_cloudflare_dns,
-    on_test_cloudflare_worker,
-    on_copy_cloudflare_worker_code,
-) -> TelegramProxyAdvancedWidgets:
-    upstream = _build_upstream_group(
-        content_parent=content_parent,
-        upstream_catalog=upstream_catalog,
-        on_open_mtproxy=on_open_mtproxy,
-    )
-    layout.addWidget(upstream["upstream_card"])
-    cloudflare = _build_cloudflare_group(
-        content_parent=content_parent,
-        on_test_cloudflare=on_test_cloudflare,
-        on_copy_cloudflare_dns=on_copy_cloudflare_dns,
-        on_test_cloudflare_worker=on_test_cloudflare_worker,
-        on_copy_cloudflare_worker_code=on_copy_cloudflare_worker_code,
-    )
-    layout.addWidget(cloudflare["cloudflare_card"])
-    network = _build_network_group(content_parent=content_parent)
-    layout.addWidget(network["network_card"])
-    layout.addStretch()
-    return TelegramProxyAdvancedWidgets(**upstream, **cloudflare, **network)

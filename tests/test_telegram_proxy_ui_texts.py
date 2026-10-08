@@ -57,9 +57,9 @@ class TelegramProxyUiTextsTests(unittest.TestCase):
     def test_advanced_page_exposes_cloudflare_test_and_copy_actions(self) -> None:
         from telegram_proxy.ui import advanced_build, settings_build
 
-        signature = inspect.signature(advanced_build.build_telegram_proxy_advanced_panel)
+        signature = inspect.signature(advanced_build.build_cloudflare_group)
         source = inspect.getsource(advanced_build)
-        main_signature = inspect.signature(settings_build.build_telegram_proxy_settings_panel)
+        main_signature = inspect.signature(settings_build.build_telegram_proxy_settings_card)
 
         self.assertIn("on_test_cloudflare", signature.parameters)
         self.assertIn("on_copy_cloudflare_dns", signature.parameters)

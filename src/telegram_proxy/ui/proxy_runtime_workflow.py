@@ -298,12 +298,15 @@ def apply_status_changed(
     stats_label,
     status_label,
     btn_toggle,
-    port_spin,
-    host_edit,
     relay_check_gen: int,
     set_speed_state,
     set_generation,
-) -> None:
+):
+    """Показывает состояние прокси в верхней карточке и возвращает план.
+
+    Поля адреса и порта лежат в блоке настроек, который собирается позже:
+    можно ли их менять, страница применяет сама по возвращённому плану.
+    """
     plan = telegram_proxy_page_runtime.build_status_plan(
         running=bool(running),
         restarting=bool(restarting),
@@ -339,8 +342,7 @@ def apply_status_changed(
             name="Запустить Telegram Proxy",
             description="Запускает локальный Telegram Proxy.",
         )
-    port_spin.setEnabled(plan.port_spin_enabled)
-    host_edit.setEnabled(plan.host_edit_enabled)
+    return plan
 
 
 def apply_stats_updated(

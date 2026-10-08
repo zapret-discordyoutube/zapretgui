@@ -2,9 +2,9 @@
 """Базовый класс для страниц — использует qfluentwidgets ScrollArea."""
 
 import time as _time
-from PyQt6.QtCore import Qt, QEvent, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, QPoint, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QFrame, QSizePolicy,
+    QApplication, QBoxLayout, QWidget, QVBoxLayout, QFrame, QSizePolicy,
 )
 from qfluentwidgets import (
     BodyLabel,
@@ -17,7 +17,7 @@ from qfluentwidgets import (
 
 from app.ui_texts import tr as tr_catalog, normalize_language
 from ui.accessibility import remove_scrollbar_arrow_buttons_from_tab_order, set_state_text
-from ui.block_build import LazyBlock, block_build_queue
+from ui.block_build import OPEN_BUDGET_MS, LazyBlock, block_build_queue
 from ui.navigation.history import ScreenState
 from ui.performance_metrics import log_page_timing
 from ui.smooth_scroll import (
@@ -63,6 +63,14 @@ class ScrollBlockingTextEdit(_FluentTextEdit):
 
     def wheelEvent(self, event):
         event.accept()
+
+
+# Блок, которого нет в раскладке страницы или который лежит на скрытой
+# вкладке: «начинается» заведомо ниже любого окна.
+_FAR_BELOW = 10 ** 6
+# Показ страницы считается продолжением щелчка, если от щелчка прошло меньше
+# этого: тогда время её сборки идёт в счёт времени на открытие.
+_OPEN_CLICK_WINDOW_MS = 2_000.0
 
 
 class BasePage(_FluentScrollArea):
@@ -147,6 +155,11 @@ class BasePage(_FluentScrollArea):
         self._cleanup_in_progress = False
         # Блоки страницы, которые собираются позже (см. add_lazy_block).
         self._lazy_blocks: dict[str, LazyBlock] = {}
+        # Какой блок создаёт какой атрибут страницы: обращение к атрибуту
+        # несобранного блока достраивает блок (см. __getattr__).
+        self._lazy_attr_blocks: dict[str, str] = {}
+        # Блоки, достроенные обращением к их атрибуту: (блок, атрибут).
+        self._forced_blocks: list[tuple[str, str]] = []
         # Раскладка блока, который собирается прямо сейчас: в неё кладут
         # add_widget, add_spacing и add_section_title.
         self._block_layouts: list[QVBoxLayout] = []
@@ -470,7 +483,15 @@ class BasePage(_FluentScrollArea):
     # Блоки, которые собираются позже (см. ui.block_build)
     # ------------------------------------------------------------------
 
-    def add_lazy_block(self, name: str, build, *, estimated_height: int) -> LazyBlock:
+    def add_lazy_block(
+        self,
+        name: str,
+        build,
+        *,
+        estimated_height: int,
+        provides: tuple[str, ...] = (),
+        layout=None,
+    ) -> LazyBlock:
         """Отводит на странице место под блок, который соберётся позже.
 
         ``build()`` вызывается, когда блок понадобился: при показе страницы,
@@ -481,24 +502,49 @@ class BasePage(_FluentScrollArea):
         ``estimated_height`` — примерная высота блока: столько места он
         занимает, пока не собран.
 
-        Виджеты блока появляются позже страницы. Код, который обращается к
-        ним в любой момент (применение настроек, смена языка), должен либо
-        сам достроить блок (``ensure_block``), либо уметь его дождаться:
-        строитель блока применяет текущее состояние в конце сборки.
+        ``provides`` — имена атрибутов страницы, которые создаёт строитель
+        (``self._host_edit`` и т.п.). Обращение к такому атрибуту, пока блок
+        не собран, достраивает блок на месте — код страницы не обязан знать,
+        собран ли блок. Это страховка от ошибок, а не способ работы: блок,
+        который так достраивается при открытии страницы, ничего не экономит.
+        Поэтому то, что нужно виджетам блока при рождении (подключить
+        сигналы, подставить текущие настройки и тексты), делает сам
+        строитель в конце сборки.
+
+        ``layout`` — раскладка, в которую встаёт блок, если он лежит не прямо
+        на странице, а внутри её вкладки или карточки.
         """
         if name in self._lazy_blocks:
             raise ValueError(f"Блок {name!r} уже есть на странице")
+        target = layout if layout is not None else self.vBoxLayout
+        holder = target.parentWidget() if layout is not None else self.content
         block = LazyBlock(
             name,
             lambda built_block: self._fill_lazy_block(built_block, build),
             estimated_height=estimated_height,
-            spacing=self.vBoxLayout.spacing(),
+            spacing=target.spacing(),
             after_built=self._after_lazy_block_built,
-            parent=self.content,
+            parent=holder if holder is not None else self.content,
         )
         self._lazy_blocks[name] = block
-        self.vBoxLayout.addWidget(block)
+        for attr in provides:
+            self._lazy_attr_blocks[str(attr)] = name
+        target.addWidget(block)
         return block
+
+    def __getattr__(self, name: str):
+        # Сюда Python приходит, только когда обычный поиск атрибута ничего
+        # не нашёл. Если этот атрибут создаёт несобранный блок — достраиваем.
+        owners = self.__dict__.get("_lazy_attr_blocks")
+        if owners:
+            block_name = owners.get(name)
+            if block_name is not None:
+                block = self.__dict__["_lazy_blocks"].get(block_name)
+                if block is not None and block.ensure_built():
+                    self.__dict__["_forced_blocks"].append((block_name, name))
+                    if name in self.__dict__:
+                        return self.__dict__[name]
+        return super().__getattr__(name)
 
     def _fill_lazy_block(self, block: LazyBlock, build) -> None:
         self._height_of_block_above = self._block_height_if_above_viewport(block)
@@ -523,7 +569,11 @@ class BasePage(_FluentScrollArea):
             if not self.isVisible():
                 return None
             scrolled = int(self.verticalScrollBar().value())
-            if scrolled <= 0 or block.geometry().bottom() >= scrolled:
+            if scrolled <= 0:
+                return None
+            # Блок может лежать не прямо на странице, а внутри её вкладки.
+            bottom = block.mapTo(self.content, QPoint(0, block.height())).y()
+            if bottom > scrolled:
                 return None
             return int(block.height())
         except Exception:
@@ -562,26 +612,49 @@ class BasePage(_FluentScrollArea):
         """Все блоки страницы собраны (у страницы без блоков — всегда)."""
         return all(block.is_built() for block in self._lazy_blocks.values())
 
-    def build_first_screen_blocks(self) -> None:
+    def build_first_screen_blocks(self, *, budget_ms: float | None = None) -> None:
         """Собирает блоки, которые попадают в первый экран.
 
-        Вызывается при показе страницы — сразу, без таймеров: человек видит
-        готовый экран. Фоновая подготовка страницы про запас вызывает это
-        заранее, чтобы щелчок по ней не платил за первый экран.
+        Вызывается при показе страницы — сразу, без таймеров. Фоновая
+        подготовка страницы про запас вызывает это заранее, чтобы щелчок по
+        ней не платил за первый экран.
+
+        ``budget_ms`` — сколько времени на это осталось. Когда оно вышло,
+        остальные блоки первого экрана остаются пустыми местами: после
+        первого кадра они сами попросятся в очередь (их место перерисовалось)
+        и выплывут. Без него первый экран собирается целиком.
         """
         pending = [block for block in self._lazy_blocks.values() if not block.is_built()]
         if not pending:
             return
         width, limit = self._first_screen_size()
+        deadline = None if budget_ms is None else _time.perf_counter() + float(budget_ms) / 1000.0
         self._building_first_screen = True
         try:
             for block in pending:
+                if block.is_built():
+                    # Достроен попутно: к его виджету обратился другой блок.
+                    continue
                 if self._estimated_block_top(block, width) >= limit:
-                    # Блоки идут сверху вниз: следующие ещё ниже.
+                    # Ниже края окна или на скрытой вкладке.
+                    continue
+                if deadline is not None and _time.perf_counter() >= deadline:
                     break
                 block.ensure_built()
         finally:
             self._building_first_screen = False
+
+    def _open_budget_left_ms(self) -> float:
+        """Сколько времени на открытие у страницы осталось к моменту показа.
+
+        Счёт идёт от щелчка (``_begin_page_open_metric``): сборка страницы
+        уже потратила часть времени. Страница, собранная заранее или
+        показанная без щелчка, начинает с полного запаса.
+        """
+        spent_ms = (_time.perf_counter() - float(self._page_open_metric_started_at)) * 1000.0
+        if not 0.0 <= spent_ms < _OPEN_CLICK_WINDOW_MS:
+            spent_ms = 0.0
+        return float(OPEN_BUDGET_MS) - spent_ms
 
     def _first_screen_size(self) -> tuple[int, int]:
         """Ширина и высота видимой области, какой она будет на экране.
@@ -602,24 +675,53 @@ class BasePage(_FluentScrollArea):
         return 900, 700
 
     def _estimated_block_top(self, block: LazyBlock, page_width: int = 0) -> int:
-        """Где примерно начинается блок, пока раскладка страницы ещё не посчитана."""
-        layout = self.vBoxLayout
+        """Где примерно начинается блок, пока раскладка страницы ещё не посчитана.
+
+        Блок на скрытой вкладке страницы «начинается» далеко за краем окна:
+        в первый экран он не попадает.
+        """
+        top = self._top_inside_layout(self.vBoxLayout, block, max(0, int(page_width)))
+        return _FAR_BELOW if top is None else top
+
+    @classmethod
+    def _top_inside_layout(cls, layout, block: LazyBlock, width: int) -> int | None:
+        """Отступ блока от верха раскладки. None — блока в ней нет или он скрыт."""
         margins = layout.contentsMargins()
         top = int(margins.top())
-        spacing = max(0, int(layout.spacing()))
-        width = max(0, int(page_width) - margins.left() - margins.right())
+        inner_width = max(0, int(width) - margins.left() - margins.right())
+        # Высоты соседей складываются только в вертикальной раскладке: в
+        # строке и в стопке вкладок сосед стоит сбоку или на том же месте.
+        vertical = isinstance(layout, QBoxLayout) and layout.direction() in (
+            QBoxLayout.Direction.TopToBottom,
+            QBoxLayout.Direction.BottomToTop,
+        )
+        spacing = max(0, int(layout.spacing())) if vertical else 0
         for index in range(layout.count()):
             item = layout.itemAt(index)
             if item is None:
                 continue
-            if item.widget() is block:
-                break
-            height = self._estimated_item_height(item, width)
+            widget = item.widget()
+            if widget is block:
+                return top
+            inside = None
+            if widget is not None:
+                if widget.isHidden() and widget.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide):
+                    continue
+                child_layout = widget.layout()
+                if child_layout is not None and widget.isAncestorOf(block):
+                    inside = cls._top_inside_layout(child_layout, block, inner_width)
+            elif item.layout() is not None:
+                inside = cls._top_inside_layout(item.layout(), block, inner_width)
+            if inside is not None:
+                return top + inside
+            if not vertical:
+                continue
+            height = cls._estimated_item_height(item, inner_width)
             if height is not None:
                 # Промежуток раскладка ставит только между виджетами:
                 # отступ-распорка занимает свою высоту и ничего сверх неё.
-                top += height + (spacing if item.widget() is not None else 0)
-        return top
+                top += height + (spacing if widget is not None else 0)
+        return None
 
     @classmethod
     def _estimated_item_height(cls, item, width: int = 0) -> int | None:
@@ -735,7 +837,7 @@ class BasePage(_FluentScrollArea):
         self._log_show_step_timing("qt_show.sync_width", step_started_at)
         if self._lazy_blocks and not self.is_page_built():
             step_started_at = _time.perf_counter()
-            self.build_first_screen_blocks()
+            self.build_first_screen_blocks(budget_ms=self._open_budget_left_ms())
             self._log_show_step_timing("qt_show.first_screen_blocks", step_started_at)
             # Остальные блоки достроятся в паузах, пока страница открыта.
             block_build_queue().page_shown()

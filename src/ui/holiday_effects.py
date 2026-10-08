@@ -40,6 +40,8 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QWidget
 
+from ui.frame_clock import frame_clock
+
 FRAME_INTERVAL_MS = 33
 _MAX_FRAME_DT = 0.1
 _FADE_IN_SECONDS = 0.45
@@ -794,9 +796,10 @@ class HolidayEffectsManager(QObject):
         self._overlay = HolidayOverlayWindow(host_window, self._paint)
 
         self._clock = QElapsedTimer()
-        self._timer = QTimer(self)
-        self._timer.setInterval(FRAME_INTERVAL_MS)
-        self._timer.timeout.connect(self._on_frame)
+        # Кадры — от общего такта приложения: при заблокированном сеансе и
+        # выключенном экране он стоит, и снег не идёт в пустоту; перерисовка
+        # сливается с остальными живыми анимациями окна.
+        self._timer = frame_clock().subscribe(self._on_frame, interval_ms=FRAME_INTERVAL_MS, owner=self)
 
         host_window.installEventFilter(self)
 

@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.pages.base_page import BasePage
+from ui.widgets.stagger_float_in import float_in_by_parts
 from ui.log_limits import TELEGRAM_PROXY_LOG_VIEW_MAX_LINES
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.performance_metrics import log_ui_timing_since
@@ -48,7 +49,11 @@ from telegram_proxy.ui.runtime_helpers import (
 )
 from telegram_proxy.ui.text_plan import TELEGRAM_PROXY_SETTINGS_TEXT
 from telegram_proxy.ui.upstream_workflow import schedule_upstream_restart
-from telegram_proxy.ui.settings_build import build_telegram_proxy_settings_panel
+from telegram_proxy.ui.settings_build import (
+    build_telegram_proxy_hosts_card,
+    build_telegram_proxy_settings_card,
+    build_telegram_proxy_status_card,
+)
 from telegram_proxy.ui.worker_state import (
     TelegramProxyPageQueuedWorkerState,
     TelegramProxyPageWorkerState,
@@ -95,6 +100,35 @@ class _StatusDot(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(1, 1, 10, 10)
         p.end()
+
+
+# Вкладка «Настройки» собирается блоками (см. ui.block_build): карточка
+# состояния с кнопкой запуска — сразу, карточка настроек и карточка hosts —
+# позже. Высоты — замер при окне 1280x720 в режиме SOCKS5.
+SETTINGS_BLOCK = "settings"
+HOSTS_BLOCK = "hosts"
+_SETTINGS_BLOCK_HEIGHT = 322
+_HOSTS_BLOCK_HEIGHT = 106
+# Атрибуты страницы, которые создаёт каждый блок: обращение к ним до сборки
+# блока достраивает его на месте.
+_SETTINGS_BLOCK_ATTRS = (
+    "_settings_card",
+    "_host_port_row",
+    "_host_edit",
+    "_port_spin",
+    "_proxy_mode_row",
+    "_mtproxy_secret_row",
+    "_mtproxy_secret_edit",
+    "_mtproxy_generate_btn",
+    "_fake_tls_domain_row",
+    "_fake_tls_domain_edit",
+    "_fake_tls_nginx_btn",
+    "_proxy_protocol_toggle",
+    "_auto_deeplink_toggle",
+    "_advanced_nav_row",
+    "_advanced_nav_btn",
+)
+_HOSTS_BLOCK_ATTRS = ("_hosts_card", "_hosts_row", "_hosts_btn")
 
 
 class TelegramProxyPage(BasePage):
@@ -145,6 +179,10 @@ class TelegramProxyPage(BasePage):
         self._auto_deeplink_last_running = False
         self._auto_deeplink_due = False
         self._initial_state_applied = False
+        # Загруженные настройки: блок настроек, собранный позже, берёт их отсюда.
+        self._loaded_settings_state = None
+        # Можно ли сейчас менять адрес и порт (нельзя, пока прокси работает).
+        self._status_plan = None
         # Запуск ждёт, пока очередь сохранений допишет настройки в хранилище.
         self._start_after_settings_flush = False
         self._initial_state_runtime = OneShotWorkerRuntime()
@@ -272,7 +310,26 @@ class TelegramProxyPage(BasePage):
         self._stacked = shell.stacked
         self._settings_layout = shell.settings_layout
 
-        self._build_settings_panel(shell.settings_layout)
+        self._build_status_card(shell.settings_layout)
+        self.add_lazy_block(
+            SETTINGS_BLOCK,
+            self._build_settings_block,
+            estimated_height=_SETTINGS_BLOCK_HEIGHT,
+            provides=_SETTINGS_BLOCK_ATTRS,
+            layout=shell.settings_layout,
+        )
+        self.add_lazy_block(
+            HOSTS_BLOCK,
+            self._build_hosts_block,
+            estimated_height=_HOSTS_BLOCK_HEIGHT,
+            provides=_HOSTS_BLOCK_ATTRS,
+            layout=shell.settings_layout,
+        )
+        shell.settings_layout.addStretch()
+        # Карточки вкладки выплывают по одной, а не вся вкладка одним куском:
+        # блок, собранный на кадр позже, появляется в свой черёд.
+        float_in_by_parts(shell.stacked)
+        float_in_by_parts(shell.settings_panel)
         self._built_panel_indexes.add(0)
         self._logs_layout = shell.logs_layout
         self._diag_layout = shell.diag_layout
@@ -315,20 +372,15 @@ class TelegramProxyPage(BasePage):
         elif not should_run and self._log_timer.isActive():
             self._log_timer.stop()
 
-    def _build_settings_panel(self, layout: QVBoxLayout):
-        widgets = build_telegram_proxy_settings_panel(
-            layout,
-            content_parent=self.content,
+    def _build_status_card(self, layout: QVBoxLayout) -> None:
+        widgets = build_telegram_proxy_status_card(
             status_dot_cls=_StatusDot,
             on_toggle_proxy=self._on_toggle_proxy,
             on_open_in_telegram=self._on_open_in_telegram,
             on_copy_link=self._on_copy_link,
             on_open_zastogram=self._on_open_zastogram,
-            on_generate_mtproxy_secret=self._on_generate_mtproxy_secret,
-            on_copy_fake_tls_nginx_config=self._on_copy_fake_tls_nginx_config,
-            on_open_advanced_settings=self._on_open_advanced_settings,
-            on_telegram_hosts_action=self._on_telegram_hosts_button_clicked,
         )
+        layout.addWidget(widgets.status_card)
         self._status_card = widgets.status_card
         self._status_dot = widgets.status_dot
         self._status_label = widgets.status_label
@@ -338,6 +390,15 @@ class TelegramProxyPage(BasePage):
         self._setup_open_btn = widgets.setup_open_btn
         self._setup_copy_btn = widgets.setup_copy_btn
         self._setup_zastogram_btn = widgets.setup_zastogram_btn
+
+    def _build_settings_block(self) -> None:
+        widgets = build_telegram_proxy_settings_card(
+            content_parent=self.content,
+            on_generate_mtproxy_secret=self._on_generate_mtproxy_secret,
+            on_copy_fake_tls_nginx_config=self._on_copy_fake_tls_nginx_config,
+            on_open_advanced_settings=self._on_open_advanced_settings,
+        )
+        self.add_widget(widgets.settings_card)
         self._settings_card = widgets.settings_card
         self._host_port_row = widgets.host_port_row
         self._host_edit = widgets.host_edit
@@ -353,9 +414,27 @@ class TelegramProxyPage(BasePage):
         self._auto_deeplink_toggle = widgets.auto_deeplink_toggle
         self._advanced_nav_row = widgets.advanced_nav_row
         self._advanced_nav_btn = widgets.advanced_nav_btn
+
+        # Блок родился позже страницы: всё, что страница делала со своими
+        # виджетами при сборке, для него делается здесь.
+        self._connect_settings_signals()
+        self._apply_ui_texts()
+        state = self._loaded_settings_state
+        if state is not None:
+            self._apply_settings_state_to_widgets(state)
+        self._apply_settings_inputs_enabled()
+
+    def _build_hosts_block(self) -> None:
+        widgets = build_telegram_proxy_hosts_card(
+            content_parent=self.content,
+            on_telegram_hosts_action=self._on_telegram_hosts_button_clicked,
+        )
+        self.add_widget(widgets.hosts_card)
         self._hosts_card = widgets.hosts_card
         self._hosts_row = widgets.hosts_row
         self._hosts_btn = widgets.hosts_btn
+        # Файл hosts мог быть прочитан раньше, чем собрался блок.
+        self._apply_hosts_row()
 
     def _build_logs_panel(self, layout: QVBoxLayout):
         widgets = build_telegram_proxy_logs_panel(
@@ -442,39 +521,42 @@ class TelegramProxyPage(BasePage):
         mgr = self._proxy_manager()
         refresh_status_texts(
             manager=mgr,
-            status_label=getattr(self, "_status_label", None),
-            btn_toggle=getattr(self, "_btn_toggle", None),
+            status_label=self.__dict__.get("_status_label"),
+            btn_toggle=self.__dict__.get("_btn_toggle"),
             restarting=bool(getattr(self, "_restarting", False)),
             starting=bool(getattr(self, "_starting", False)),
         )
 
     def _apply_ui_texts(self) -> None:
+        # Виджеты берём из уже собранного (``__dict__``): тексты несобранного
+        # блока подставит его строитель, достраивать блок ради них незачем.
+        built = self.__dict__.get
         apply_ui_texts(
             refresh_pivot_texts_callback=self._refresh_pivot_texts,
             refresh_status_texts_callback=self._refresh_status_texts,
-            settings_card=getattr(self, "_settings_card", None),
-            setup_title_label=getattr(self, "_setup_title_label", None),
-            host_port_row=getattr(self, "_host_port_row", None),
-            mtproxy_secret_row=getattr(self, "_mtproxy_secret_row", None),
-            fake_tls_domain_row=getattr(self, "_fake_tls_domain_row", None),
-            advanced_nav_row=getattr(self, "_advanced_nav_row", None),
-            diag_desc_label=getattr(self, "_diag_desc_label", None),
-            setup_open_btn=getattr(self, "_setup_open_btn", None),
-            setup_copy_btn=getattr(self, "_setup_copy_btn", None),
-            fake_tls_nginx_btn=getattr(self, "_fake_tls_nginx_btn", None),
-            btn_copy_logs=getattr(self, "_btn_copy_logs", None),
-            btn_open_log_file=getattr(self, "_btn_open_log_file", None),
-            btn_clear_logs=getattr(self, "_btn_clear_logs", None),
-            btn_copy_diag=getattr(self, "_btn_copy_diag", None),
-            btn_run_diag=getattr(self, "_btn_run_diag", None),
-            host_edit=getattr(self, "_host_edit", None),
-            mtproxy_secret_edit=getattr(self, "_mtproxy_secret_edit", None),
-            fake_tls_domain_edit=getattr(self, "_fake_tls_domain_edit", None),
-            log_edit=getattr(self, "_log_edit", None),
-            diag_edit=getattr(self, "_diag_edit", None),
-            auto_deeplink_toggle=getattr(self, "_auto_deeplink_toggle", None),
-            proxy_mode_row=getattr(self, "_proxy_mode_row", None),
-            proxy_protocol_toggle=getattr(self, "_proxy_protocol_toggle", None),
+            settings_card=built("_settings_card"),
+            setup_title_label=built("_setup_title_label"),
+            host_port_row=built("_host_port_row"),
+            mtproxy_secret_row=built("_mtproxy_secret_row"),
+            fake_tls_domain_row=built("_fake_tls_domain_row"),
+            advanced_nav_row=built("_advanced_nav_row"),
+            diag_desc_label=built("_diag_desc_label"),
+            setup_open_btn=built("_setup_open_btn"),
+            setup_copy_btn=built("_setup_copy_btn"),
+            fake_tls_nginx_btn=built("_fake_tls_nginx_btn"),
+            btn_copy_logs=built("_btn_copy_logs"),
+            btn_open_log_file=built("_btn_open_log_file"),
+            btn_clear_logs=built("_btn_clear_logs"),
+            btn_copy_diag=built("_btn_copy_diag"),
+            btn_run_diag=built("_btn_run_diag"),
+            host_edit=built("_host_edit"),
+            mtproxy_secret_edit=built("_mtproxy_secret_edit"),
+            fake_tls_domain_edit=built("_fake_tls_domain_edit"),
+            log_edit=built("_log_edit"),
+            diag_edit=built("_diag_edit"),
+            auto_deeplink_toggle=built("_auto_deeplink_toggle"),
+            proxy_mode_row=built("_proxy_mode_row"),
+            proxy_protocol_toggle=built("_proxy_protocol_toggle"),
         )
 
     def set_ui_language(self, language: str) -> None:
@@ -504,6 +586,10 @@ class TelegramProxyPage(BasePage):
         mgr = self._proxy_manager()
         mgr.status_changed.connect(self._on_manager_status_changed)
 
+        # Прокси мог уже работать (например, запущен из трея или при старте программы).
+        self._on_manager_status_changed(bool(mgr.is_running))
+
+    def _connect_settings_signals(self) -> None:
         self._port_spin.valueChanged.connect(self._on_port_changed)
         self._host_edit.editingFinished.connect(self._on_host_changed)
         self._proxy_mode_row.currentIndexChanged.connect(self._on_proxy_mode_changed)
@@ -512,15 +598,22 @@ class TelegramProxyPage(BasePage):
         self._proxy_protocol_toggle.toggled.connect(self._on_proxy_protocol_changed)
         self._auto_deeplink_toggle.toggled.connect(self._on_auto_deeplink_toggled)
 
-        # Прокси мог уже работать (например, запущен из трея или при старте программы).
-        self._on_manager_status_changed(bool(mgr.is_running))
-
     def _on_manager_status_changed(self, running: bool) -> None:
         self._on_status_changed(running)
         self._note_proxy_running_for_auto_deeplink(bool(running))
 
     def _apply_initial_settings_state(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> None:
         started_at = time.perf_counter()
+        self._loaded_settings_state = state
+        block = self.lazy_block(SETTINGS_BLOCK)
+        if block is None or block.is_built():
+            self._apply_settings_state_to_widgets(state)
+        # Несобранный блок настроек возьмёт их при сборке.
+        self._initial_state_applied = True
+        self._log_ui_timing("telegram_proxy_ui.settings.apply", started_at)
+        self._run_due_auto_deeplink()
+
+    def _apply_settings_state_to_widgets(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> None:
         self._port_spin.blockSignals(True)
         self._port_spin.setValue(state.port)
         self._port_spin.blockSignals(False)
@@ -532,9 +625,16 @@ class TelegramProxyPage(BasePage):
         self._proxy_protocol_toggle.setChecked(state.proxy_protocol, block_signals=True)
         self._auto_deeplink_toggle.setChecked(state.auto_deeplink, block_signals=True)
         self._apply_mtproxy_rows_visibility()
-        self._initial_state_applied = True
-        self._log_ui_timing("telegram_proxy_ui.settings.apply", started_at)
-        self._run_due_auto_deeplink()
+
+    def _apply_settings_inputs_enabled(self) -> None:
+        """Адрес и порт нельзя менять, пока прокси работает."""
+        plan = self._status_plan
+        port_spin = self.__dict__.get("_port_spin")
+        host_edit = self.__dict__.get("_host_edit")
+        if plan is None or port_spin is None or host_edit is None:
+            return
+        port_spin.setEnabled(plan.port_spin_enabled)
+        host_edit.setEnabled(plan.host_edit_enabled)
 
     def _apply_mtproxy_rows_visibility(self) -> None:
         """Строки MTProxy видны только в режиме MTProxy."""
@@ -1216,7 +1316,7 @@ class TelegramProxyPage(BasePage):
 
     def _on_status_changed(self, running: bool):
         mgr = self._proxy_manager()
-        apply_status_changed(
+        self._status_plan = apply_status_changed(
             manager=mgr,
             running=bool(running),
             restarting=bool(getattr(self, "_restarting", False)),
@@ -1225,8 +1325,6 @@ class TelegramProxyPage(BasePage):
             stats_label=self._stats_label,
             status_label=self._status_label,
             btn_toggle=self._btn_toggle,
-            port_spin=self._port_spin,
-            host_edit=self._host_edit,
             relay_check_gen=getattr(self, "_relay_check_gen", 0),
             set_speed_state=lambda prev_sent, prev_recv, up, down: (
                 setattr(self, "_prev_bytes_sent", prev_sent),
@@ -1236,6 +1334,7 @@ class TelegramProxyPage(BasePage):
             ),
             set_generation=lambda value: setattr(self, "_relay_check_gen", value),
         )
+        self._apply_settings_inputs_enabled()
         if self._stats_timer is not None:
             if running and self.isVisible() and not self._stats_timer.isActive():
                 self._stats_timer.start(2000)

@@ -286,6 +286,72 @@ class BlockFloatInTests(unittest.TestCase):
         pixel = container.grab().toImage().pixelColor(card.geometry().center())
         self.assertGreater(pixel.green(), pixel.red())
 
+    def test_block_does_not_vanish_between_the_end_of_the_flight_and_landing(self) -> None:
+        # Полёт закончился, а такт кадров ещё не пришёл открыть настоящий
+        # блок: картинка должна стоять на месте, иначе блок на кадр пропадает.
+        card = _Card("#ff0000")
+        container = self._container(card)
+        container.show()
+        _wait(0.05)
+        float_in(card)
+        _wait(0.05)
+        self.assertTrue(is_floating_in(card))
+
+        engine = float_module._engine_of(container, create=False)
+        block = engine.block_of(card)
+        block.starts_at = time.monotonic() - _FLIGHT_S - 0.05
+        # Ни одного оборота цикла событий: кадр такта ещё не пришёл.
+        self.assertFalse(card.mask().isEmpty(), "настоящий блок пока спрятан")
+        image = container.grab().toImage()
+        center = card.geometry().center()
+        self.assertEqual(image.pixelColor(center).name(), "#ff0000")
+
+    def test_group_built_after_the_show_takes_its_place_in_the_queue(self) -> None:
+        # Блок первого экрана, собранный на кадр позже страницы, не должен
+        # появиться раньше карточек над ним.
+        cards = [_Card("#202020") for _ in range(4)]
+        group = QWidget()
+        float_module.float_in_by_parts(group)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(0, 0, 0, 0)
+        container = self._container(*cards, group, size=(320, 600))
+        attach_stagger_float_in(container)
+        container.show()
+        _wait(0.03)
+
+        late = [_Card("#404040"), _Card("#404040")]
+        for card in late:
+            group_layout.addWidget(card)
+        float_module.float_in_group(group)
+
+        engine = float_module._engine_of(group, create=False)
+        starts = [engine.block_of(card).starts_at for card in late]
+        above = float_module._engine_of(container, create=False).block_of(cards[-1]).starts_at
+        step = float_module.FLOAT_IN_STEP_MS / 1000.0
+        self.assertAlmostEqual(starts[0] - above, step, delta=0.03, msg="первый виджет группы идёт следом за карточкой над ним")
+        self.assertAlmostEqual(starts[1] - starts[0], step, delta=0.01)
+
+    def test_group_built_long_after_the_show_starts_at_once(self) -> None:
+        cards = [_Card("#202020") for _ in range(4)]
+        group = QWidget()
+        float_module.float_in_by_parts(group)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(0, 0, 0, 0)
+        container = self._container(*cards, group, size=(320, 600))
+        controller = attach_stagger_float_in(container)
+        container.show()
+        _wait(0.03)
+        # Очередь страницы давно отыграла: до блока долистали.
+        controller._played_at -= 5.0
+
+        late = _Card("#404040")
+        group_layout.addWidget(late)
+        before = time.monotonic()
+        float_module.float_in_group(group)
+
+        start = float_module._engine_of(group, create=False).block_of(late).starts_at
+        self.assertLess(start - before, 0.02)
+
     def test_deleted_block_is_forgotten(self) -> None:
         card = _Card("#ff0000")
         keep = _Card("#0000ff")

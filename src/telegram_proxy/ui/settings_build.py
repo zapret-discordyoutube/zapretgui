@@ -24,8 +24,13 @@ from ui.widgets.win11_controls import Win11ComboRow, Win11ControlRow, Win11Toggl
 from telegram_proxy.ui.text_plan import TELEGRAM_PROXY_SETTINGS_TEXT
 
 
+# Вкладка «Настройки» состоит из трёх частей, и каждая собирается отдельно:
+# карточка состояния нужна сразу (в ней кнопка запуска), карточка настроек и
+# карточка hosts — блоками, позже (см. ui.block_build).
+
+
 @dataclass(slots=True)
-class TelegramProxySettingsPanelWidgets:
+class TelegramProxyStatusCardWidgets:
     status_card: object
     status_dot: object
     status_label: object
@@ -35,6 +40,10 @@ class TelegramProxySettingsPanelWidgets:
     setup_open_btn: object
     setup_copy_btn: object
     setup_zastogram_btn: object
+
+
+@dataclass(slots=True)
+class TelegramProxySettingsCardWidgets:
     settings_card: object
     host_port_row: object
     host_edit: object
@@ -50,6 +59,10 @@ class TelegramProxySettingsPanelWidgets:
     auto_deeplink_toggle: object
     advanced_nav_row: object
     advanced_nav_btn: object
+
+
+@dataclass(slots=True)
+class TelegramProxyHostsCardWidgets:
     hosts_card: object
     hosts_row: object
     hosts_btn: object
@@ -133,7 +146,15 @@ def build_action_row(
     return row, button
 
 
-def _build_status_card(*, status_dot_cls, on_toggle_proxy, on_open_in_telegram, on_copy_link, on_open_zastogram):
+def build_telegram_proxy_status_card(
+    *,
+    status_dot_cls,
+    on_toggle_proxy,
+    on_open_in_telegram,
+    on_copy_link,
+    on_open_zastogram,
+) -> TelegramProxyStatusCardWidgets:
+    """Верхняя карточка: состояние прокси, запуск и подключение Telegram."""
     text = TELEGRAM_PROXY_SETTINGS_TEXT
     status_card = SettingsCard()
 
@@ -224,53 +245,28 @@ def _build_status_card(*, status_dot_cls, on_toggle_proxy, on_open_in_telegram, 
     zastogram_row.addWidget(setup_zastogram_btn)
     status_card.add_layout(zastogram_row)
 
-    return (
-        status_card,
-        status_dot,
-        status_label,
-        btn_toggle,
-        stats_label,
-        setup_title_label,
-        setup_open_btn,
-        setup_copy_btn,
-        setup_zastogram_btn,
+    return TelegramProxyStatusCardWidgets(
+        status_card=status_card,
+        status_dot=status_dot,
+        status_label=status_label,
+        btn_toggle=btn_toggle,
+        stats_label=stats_label,
+        setup_title_label=setup_title_label,
+        setup_open_btn=setup_open_btn,
+        setup_copy_btn=setup_copy_btn,
+        setup_zastogram_btn=setup_zastogram_btn,
     )
 
 
-def build_telegram_proxy_settings_panel(
-    layout: QVBoxLayout,
+def build_telegram_proxy_settings_card(
     *,
     content_parent,
-    status_dot_cls,
-    on_toggle_proxy,
-    on_open_in_telegram,
-    on_copy_link,
-    on_open_zastogram,
     on_generate_mtproxy_secret,
     on_copy_fake_tls_nginx_config,
     on_open_advanced_settings,
-    on_telegram_hosts_action,
-) -> TelegramProxySettingsPanelWidgets:
+) -> TelegramProxySettingsCardWidgets:
+    """Карточка «Настройки»: адрес и порт, режим, строки MTProxy, авто-настройка."""
     text = TELEGRAM_PROXY_SETTINGS_TEXT
-    (
-        status_card,
-        status_dot,
-        status_label,
-        btn_toggle,
-        stats_label,
-        setup_title_label,
-        setup_open_btn,
-        setup_copy_btn,
-        setup_zastogram_btn,
-    ) = _build_status_card(
-        status_dot_cls=status_dot_cls,
-        on_toggle_proxy=on_toggle_proxy,
-        on_open_in_telegram=on_open_in_telegram,
-        on_copy_link=on_copy_link,
-        on_open_zastogram=on_open_zastogram,
-    )
-    layout.addWidget(status_card)
-
     settings_card = SettingCardGroup(text.settings_title, content_parent)
 
     host_port_row = build_settings_row("fa5s.plug", text.host_port_title, text.host_port_description)
@@ -387,38 +383,7 @@ def build_telegram_proxy_settings_panel(
     settings_card.addSettingCard(advanced_nav_row)
     enable_setting_card_group_auto_height(settings_card)
 
-    layout.addWidget(settings_card)
-
-    # Записи сайтов Telegram в hosts меняются только этой кнопкой.
-    # Состояние и текст кнопки страница подставляет после чтения файла.
-    hosts_card = SettingCardGroup(text.hosts_group_title, content_parent)
-    hosts_row, hosts_btn = build_action_row(
-        icon_name="fa5s.file-alt",
-        title=text.hosts_title,
-        description=f"{text.hosts_state_checking}\n{text.hosts_hint}",
-        button_text=text.hosts_add_button,
-        button_icon=FluentIcon.ADD,
-        accessible_name=text.hosts_add_accessible_name,
-        on_click=on_telegram_hosts_action,
-    )
-    set_tooltip(hosts_btn, text.hosts_hint)
-    hosts_btn.setEnabled(False)
-    hosts_card.addSettingCard(hosts_row)
-    enable_setting_card_group_auto_height(hosts_card)
-    layout.addWidget(hosts_card)
-
-    layout.addStretch()
-
-    return TelegramProxySettingsPanelWidgets(
-        status_card=status_card,
-        status_dot=status_dot,
-        status_label=status_label,
-        btn_toggle=btn_toggle,
-        stats_label=stats_label,
-        setup_title_label=setup_title_label,
-        setup_open_btn=setup_open_btn,
-        setup_copy_btn=setup_copy_btn,
-        setup_zastogram_btn=setup_zastogram_btn,
+    return TelegramProxySettingsCardWidgets(
         settings_card=settings_card,
         host_port_row=host_port_row,
         host_edit=host_edit,
@@ -434,7 +399,28 @@ def build_telegram_proxy_settings_panel(
         auto_deeplink_toggle=auto_deeplink_toggle,
         advanced_nav_row=advanced_nav_row,
         advanced_nav_btn=advanced_nav_btn,
-        hosts_card=hosts_card,
-        hosts_row=hosts_row,
-        hosts_btn=hosts_btn,
     )
+
+
+def build_telegram_proxy_hosts_card(*, content_parent, on_telegram_hosts_action) -> TelegramProxyHostsCardWidgets:
+    """Карточка записей Telegram в hosts.
+
+    Записи меняются только её кнопкой. Состояние и текст кнопки страница
+    подставляет после чтения файла.
+    """
+    text = TELEGRAM_PROXY_SETTINGS_TEXT
+    hosts_card = SettingCardGroup(text.hosts_group_title, content_parent)
+    hosts_row, hosts_btn = build_action_row(
+        icon_name="fa5s.file-alt",
+        title=text.hosts_title,
+        description=f"{text.hosts_state_checking}\n{text.hosts_hint}",
+        button_text=text.hosts_add_button,
+        button_icon=FluentIcon.ADD,
+        accessible_name=text.hosts_add_accessible_name,
+        on_click=on_telegram_hosts_action,
+    )
+    set_tooltip(hosts_btn, text.hosts_hint)
+    hosts_btn.setEnabled(False)
+    hosts_card.addSettingCard(hosts_row)
+    enable_setting_card_group_auto_height(hosts_card)
+    return TelegramProxyHostsCardWidgets(hosts_card=hosts_card, hosts_row=hosts_row, hosts_btn=hosts_btn)

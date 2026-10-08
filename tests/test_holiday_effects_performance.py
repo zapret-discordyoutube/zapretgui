@@ -88,7 +88,8 @@ class HolidayEffectsPerformanceTests(unittest.TestCase):
         manager.set_snowflakes_enabled(True)
 
         self.assertEqual(FRAME_INTERVAL_MS, 33)
-        self.assertEqual(manager._timer.interval(), FRAME_INTERVAL_MS)
+        # Кадры идут от общего такта: его шаг кратен 1/60 секунды.
+        self.assertAlmostEqual(manager._timer.interval(), FRAME_INTERVAL_MS, delta=1)
         self.assertTrue(manager.is_running())
 
     def test_garland_only_frame_repaints_only_garland_band(self) -> None:

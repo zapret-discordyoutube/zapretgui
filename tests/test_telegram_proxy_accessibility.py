@@ -20,14 +20,39 @@ from telegram_proxy.ui.build import (
     build_telegram_proxy_shell,
 )
 from telegram_proxy.config.upstream_catalog import UpstreamCatalog
-from telegram_proxy.ui.advanced_build import build_telegram_proxy_advanced_panel
+from telegram_proxy.ui.advanced_build import build_cloudflare_group, build_network_group, build_upstream_group
 from telegram_proxy.ui.advanced_page import TelegramProxyAdvancedPage
-from telegram_proxy.ui.settings_build import build_telegram_proxy_settings_panel
+from telegram_proxy.ui.settings_build import build_telegram_proxy_settings_card, build_telegram_proxy_status_card
 from telegram_proxy.ui.proxy_runtime_workflow import apply_status_changed
 from telegram_proxy.ui.proxy_runtime_workflow import restart_proxy_if_running
 from telegram_proxy.ui.runtime_helpers import refresh_status_texts
 from telegram_proxy.ui.page import TelegramProxyPage
 from ui.widgets.win11_controls import Win11ComboRow
+
+
+def _advanced_widgets(layout, parent) -> SimpleNamespace:
+    """Три группы продвинутых настроек, как их собирает страница (блоками)."""
+    parts = {}
+    parts.update(
+        build_upstream_group(
+            content_parent=parent,
+            upstream_catalog={"manual": "Manual"},
+            on_open_mtproxy=lambda: None,
+        )
+    )
+    parts.update(
+        build_cloudflare_group(
+            content_parent=parent,
+            on_test_cloudflare=lambda: None,
+            on_copy_cloudflare_dns=lambda: None,
+            on_test_cloudflare_worker=lambda: None,
+            on_copy_cloudflare_worker_code=lambda: None,
+        )
+    )
+    parts.update(build_network_group(content_parent=parent))
+    for card in ("upstream_card", "cloudflare_card", "network_card"):
+        layout.addWidget(parts[card])
+    return SimpleNamespace(**parts)
 
 
 class _AccessibleStatusDot:
@@ -212,16 +237,7 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
         self.addCleanup(parent.deleteLater)
         layout = QVBoxLayout(parent)
 
-        widgets = build_telegram_proxy_advanced_panel(
-            layout,
-            content_parent=parent,
-            upstream_catalog={"manual": "Manual"},
-            on_open_mtproxy=lambda: None,
-            on_test_cloudflare=lambda: None,
-            on_copy_cloudflare_dns=lambda: None,
-            on_test_cloudflare_worker=lambda: None,
-            on_copy_cloudflare_worker_code=lambda: None,
-        )
+        widgets = _advanced_widgets(layout, parent)
 
         self.assertEqual(widgets.upstream_host_edit.accessibleName(), "Хост upstream-прокси Telegram Proxy")
         self.assertEqual(
@@ -248,19 +264,15 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
         self.addCleanup(parent.deleteLater)
         layout = QVBoxLayout(parent)
 
-        widgets = build_telegram_proxy_settings_panel(
-            layout,
-            content_parent=parent,
+        status_widgets = build_telegram_proxy_status_card(
             status_dot_cls=QLabel,
             on_toggle_proxy=lambda: None,
             on_open_in_telegram=lambda: None,
             on_copy_link=lambda: None,
             on_open_zastogram=lambda: None,
-            on_generate_mtproxy_secret=lambda: None,
-            on_copy_fake_tls_nginx_config=lambda: None,
-            on_open_advanced_settings=lambda: None,
-            on_telegram_hosts_action=lambda: None,
         )
+        layout.addWidget(status_widgets.status_card)
+        widgets = status_widgets
 
         self.assertEqual(widgets.setup_open_btn.accessibleName(), "Открыть Telegram Proxy в Telegram")
         self.assertEqual(
@@ -281,6 +293,14 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             "Скачать ZaStoGram Desktop",
         )
         self.assertIn("последнего выпуска", widgets.setup_zastogram_btn.accessibleDescription())
+
+        widgets = build_telegram_proxy_settings_card(
+            content_parent=parent,
+            on_generate_mtproxy_secret=lambda: None,
+            on_copy_fake_tls_nginx_config=lambda: None,
+            on_open_advanced_settings=lambda: None,
+        )
+        layout.addWidget(widgets.settings_card)
         self.assertEqual(widgets.mtproxy_secret_edit.accessibleName(), "Secret MTProxy")
         self.assertIn("ключ подключения", widgets.mtproxy_secret_edit.accessibleDescription())
         self.assertEqual(widgets.mtproxy_generate_btn.accessibleName(), "Создать secret MTProxy")
@@ -310,16 +330,7 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
         self.addCleanup(parent.deleteLater)
         layout = QVBoxLayout(parent)
 
-        widgets = build_telegram_proxy_advanced_panel(
-            layout,
-            content_parent=parent,
-            upstream_catalog={"manual": "Manual"},
-            on_open_mtproxy=lambda: None,
-            on_test_cloudflare=lambda: None,
-            on_copy_cloudflare_dns=lambda: None,
-            on_test_cloudflare_worker=lambda: None,
-            on_copy_cloudflare_worker_code=lambda: None,
-        )
+        widgets = _advanced_widgets(layout, parent)
 
         self.assertEqual(
             widgets.upstream_port_spin.accessibleName(),
@@ -338,29 +349,14 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
         parent = QWidget()
         self.addCleanup(parent.deleteLater)
         layout = QVBoxLayout(parent)
-        main_widgets = build_telegram_proxy_settings_panel(
-            layout,
+        main_widgets = build_telegram_proxy_settings_card(
             content_parent=parent,
-            status_dot_cls=QLabel,
-            on_toggle_proxy=lambda: None,
-            on_open_in_telegram=lambda: None,
-            on_copy_link=lambda: None,
-            on_open_zastogram=lambda: None,
             on_generate_mtproxy_secret=lambda: None,
             on_copy_fake_tls_nginx_config=lambda: None,
             on_open_advanced_settings=lambda: None,
-            on_telegram_hosts_action=lambda: None,
         )
-        advanced_widgets = build_telegram_proxy_advanced_panel(
-            layout,
-            content_parent=parent,
-            upstream_catalog={"manual": "Manual"},
-            on_open_mtproxy=lambda: None,
-            on_test_cloudflare=lambda: None,
-            on_copy_cloudflare_dns=lambda: None,
-            on_test_cloudflare_worker=lambda: None,
-            on_copy_cloudflare_worker_code=lambda: None,
-        )
+        layout.addWidget(main_widgets.settings_card)
+        advanced_widgets = _advanced_widgets(layout, parent)
         line_edits = (
             main_widgets.host_edit,
             main_widgets.mtproxy_secret_edit,
@@ -426,10 +422,8 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
         stats_label = QLabel()
         status_label = QLabel()
         btn_toggle = PushButton("Запустить")
-        port_spin = QSpinBox()
-        host_edit = LineEdit()
 
-        apply_status_changed(
+        plan = apply_status_changed(
             manager=SimpleNamespace(host="127.0.0.1", port=1353),
             running=True,
             restarting=False,
@@ -438,12 +432,14 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             stats_label=stats_label,
             status_label=status_label,
             btn_toggle=btn_toggle,
-            port_spin=port_spin,
-            host_edit=host_edit,
             relay_check_gen=0,
             set_speed_state=lambda *_args: None,
             set_generation=lambda _value: None,
         )
+
+        # Адрес и порт лежат в блоке настроек: их запрет страница применяет по плану.
+        self.assertFalse(plan.port_spin_enabled)
+        self.assertFalse(plan.host_edit_enabled)
 
         self.assertEqual(status_label.accessibleName(), "Статус Telegram Proxy: Работает на 127.0.0.1:1353")
         self.assertEqual(status_dot.accessibleName(), "Индикатор Telegram Proxy: Работает на 127.0.0.1:1353")

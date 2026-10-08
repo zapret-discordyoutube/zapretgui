@@ -10,7 +10,7 @@ from unittest import mock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6 import sip
-from PyQt6.QtWidgets import QApplication, QLabel, QWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 import ui.block_build as block_build
 import ui.pages.base_page as base_page_module
@@ -316,6 +316,175 @@ class LazyBlockQueueTests(_QueueCase):
         _pump(0.05)
         self.assertEqual(built, ["once"])
         self.assertEqual(block.minimumHeight(), 0, "собранный блок больше не держит запасную высоту")
+
+
+class OpenBudgetTests(_QueueCase):
+    """Первый экран собирается при показе, только пока страница укладывается во время на открытие."""
+
+    def _clicked(self, page: _Page, *, spent_ms: float) -> None:
+        # Так страницу открывает щелчок: счёт времени идёт от него.
+        page._begin_page_open_metric("page", started_at=time.perf_counter() - spent_ms / 1000.0, first_show=True)
+
+    def test_page_that_already_spent_its_time_shows_first_and_builds_after(self) -> None:
+        page = self._page()
+        self._clicked(page, spent_ms=block_build.OPEN_BUDGET_MS + 50)
+        with mock.patch.object(block_build, "BACKGROUND_START_DELAY_MS", 60_000):
+            page.show()
+            self.assertEqual(page.built_order, [], "время вышло на сборке: показ блоки не собирает")
+            _pump(0.1)
+            # Место блока перерисовалось — он собран уже после первого кадра.
+            self.assertEqual(page.built_order, ["near"])
+            self.assertTrue(float_module.is_floating_in(page.near_card), "блок, собранный после показа, выплывает")
+
+    def test_page_within_its_time_is_ready_before_the_first_frame(self) -> None:
+        page = self._page()
+        self._clicked(page, spent_ms=1)
+        # Запас с избытком: тест не должен зависеть от скорости машины.
+        with mock.patch.object(block_build, "BACKGROUND_START_DELAY_MS", 60_000), \
+                mock.patch.object(base_page_module, "OPEN_BUDGET_MS", 1_000):
+            page.show()
+            self.assertEqual(page.built_order, ["near"])
+
+    def test_time_is_counted_from_the_click(self) -> None:
+        page = self._page()
+        self.assertEqual(page._open_budget_left_ms(), block_build.OPEN_BUDGET_MS, "страницу не открывали щелчком")
+        self._clicked(page, spent_ms=5)
+        self.assertLess(page._open_budget_left_ms(), block_build.OPEN_BUDGET_MS - 4)
+        # Щелчок был давно: страница собрана заранее, показ начинает с полного запаса.
+        self._clicked(page, spent_ms=60_000)
+        self.assertEqual(page._open_budget_left_ms(), block_build.OPEN_BUDGET_MS)
+
+    def test_warm_up_has_no_time_limit(self) -> None:
+        page = self._page()
+        self._clicked(page, spent_ms=block_build.OPEN_BUDGET_MS + 50)
+        page.build_first_screen_blocks()
+        self.assertEqual(page.built_order, ["near"])
+
+
+class _TabbedPage(BasePage):
+    """Страница с вкладками: блоки лежат внутри вкладок, а не прямо на странице."""
+
+    def __init__(self) -> None:
+        super().__init__("Вкладки", "")
+        self.built_order: list[str] = []
+        self.stack = QStackedWidget(self.content)
+        self.tab_layouts = []
+        for _ in range(2):
+            tab = QWidget(self.stack)
+            layout = QVBoxLayout(tab)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(12)
+            self.stack.addWidget(tab)
+            self.tab_layouts.append(layout)
+        self.add_widget(self.stack)
+        first, second = self.tab_layouts
+        # Высокая карточка: первый блок ещё виден в окне, второй уже под его краем.
+        first.addWidget(_Card("сразу", 300))
+        self.add_lazy_block(
+            "near", lambda: self._build("near"), estimated_height=150, provides=("near_card",), layout=first
+        )
+        self.add_lazy_block(
+            "deep", lambda: self._build("deep"), estimated_height=900, provides=("deep_card",), layout=first
+        )
+        self.add_lazy_block(
+            "far", lambda: self._build("far"), estimated_height=400, provides=("far_card",), layout=first
+        )
+        first.addStretch()
+        self.add_lazy_block(
+            "other", lambda: self._build("other"), estimated_height=150, provides=("other_card",), layout=second
+        )
+        second.addStretch()
+
+    def _build(self, name: str) -> None:
+        self.built_order.append(name)
+        card = _Card(name, 150)
+        setattr(self, f"{name}_card", card)
+        self.add_widget(card)
+
+
+class NestedBlockTests(_QueueCase):
+    def _tabbed(self) -> _TabbedPage:
+        page = _TabbedPage()
+        self.addCleanup(page.deleteLater)
+        page.resize(700, 520)
+        return page
+
+    def test_block_inside_the_open_tab_belongs_to_the_first_screen(self) -> None:
+        page = self._tabbed()
+        with mock.patch.object(block_build, "BACKGROUND_START_DELAY_MS", 60_000):
+            page.show()
+            # Блок под краем окна и блок скрытой вкладки показ не трогает.
+            self.assertEqual(page.built_order, ["near"])
+            self.assertIs(page.near_card.parentWidget(), page.lazy_block("near"))
+            self.assertIs(page.lazy_block("near").parentWidget(), page.stack.widget(0))
+
+    def test_block_of_a_hidden_tab_is_built_when_the_tab_is_opened(self) -> None:
+        page = self._tabbed()
+        with mock.patch.object(block_build, "BACKGROUND_START_DELAY_MS", 60_000):
+            page.show()
+            _pump(0.05)
+            self.assertNotIn("other", page.built_order)
+            page.stack.setCurrentIndex(1)
+            _pump(0.1)
+            self.assertIn("other", page.built_order)
+
+    def test_hidden_tab_blocks_are_not_built_in_pauses(self) -> None:
+        page = self._tabbed()
+        page.show()
+        _pump(0.3)
+        self.assertEqual(page.built_order, ["near", "deep", "far"])
+
+
+class BlockAttributeTests(_QueueCase):
+    """Обращение к виджету несобранного блока достраивает блок."""
+
+    def _tabbed(self) -> _TabbedPage:
+        page = _TabbedPage()
+        self.addCleanup(page.deleteLater)
+        page.resize(700, 520)
+        return page
+
+    def test_reading_a_block_widget_builds_the_block(self) -> None:
+        page = self._tabbed()
+        self.assertEqual(page.built_order, [])
+        self.assertEqual(page.deep_card.text(), "deep")
+        self.assertEqual(page.built_order, ["deep"], "собран только нужный блок")
+        self.assertEqual(page._forced_blocks, [("deep", "deep_card")])
+
+    def test_soft_lookup_does_not_build_anything(self) -> None:
+        page = self._tabbed()
+        # Так код страницы спрашивает «собран ли уже виджет».
+        self.assertIsNone(page.__dict__.get("deep_card"))
+        self.assertIsNone(getattr(page, "no_such_widget", None))
+        self.assertEqual(page.built_order, [])
+        self.assertEqual(page._forced_blocks, [])
+
+    def test_missing_attribute_is_still_an_error(self) -> None:
+        page = self._tabbed()
+        with self.assertRaises(AttributeError):
+            page.no_such_widget  # noqa: B018
+
+    def test_builder_reading_its_own_unset_widget_gets_an_error_not_a_loop(self) -> None:
+        page = self._tabbed()
+        seen: list[str] = []
+
+        def build() -> None:
+            try:
+                page.loop_card  # noqa: B018
+            except AttributeError:
+                seen.append("error")
+            page.loop_card = _Card("loop")
+            page.add_widget(page.loop_card)
+
+        page.add_lazy_block("loop", build, estimated_height=10, provides=("loop_card",))
+        self.assertEqual(page.loop_card.text(), "loop")
+        self.assertEqual(seen, ["error"])
+
+    def test_page_without_blocks_is_not_affected(self) -> None:
+        plain = BasePage("Обычная", "")
+        self.addCleanup(plain.deleteLater)
+        self.assertIsNone(getattr(plain, "anything", None))
+        self.assertEqual(plain.width(), plain.size().width())
 
 
 if __name__ == "__main__":

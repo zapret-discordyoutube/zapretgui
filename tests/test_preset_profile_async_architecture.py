@@ -2658,7 +2658,7 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         loaded_source = inspect.getsource(TelegramProxyPage._on_initial_state_loaded)
         cleanup_source = inspect.getsource(TelegramProxyPage.cleanup)
         page_source = inspect.getsource(TelegramProxyPage)
-        settings_build_source = inspect.getsource(telegram_proxy_settings_build.build_telegram_proxy_settings_panel)
+        settings_build_source = inspect.getsource(telegram_proxy_settings_build)
         settings_source = inspect.getsource(telegram_proxy_settings.load_page_initial_state)
         feature_source = inspect.getsource(TelegramProxyFeature)
         worker_source = inspect.getsource(telegram_proxy_workers.TelegramProxyInitialStateWorker.run)
@@ -4366,7 +4366,7 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
 
         self.assertNotIn("advanced_build", page_source)
         self.assertNotIn("cloudflare", settings_build_source.lower())
-        self.assertIn("build_telegram_proxy_advanced_panel", inspect.getsource(TelegramProxyAdvancedPage))
+        self.assertIn("build_upstream_group", inspect.getsource(TelegramProxyAdvancedPage))
         self.assertIn("SettingCardGroup(text.upstream_group_title", inspect.getsource(advanced_build))
         # Настройки читаются не в конструкторе, а при открытии страницы и в фоне.
         self.assertNotIn("_request_state_reload", advanced_init_source)

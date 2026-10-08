@@ -110,12 +110,9 @@ class ProfileStrategyListWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
         self._pages.addWidget(browse)
-        self._details_view = StrategyDetailsView(self._pages)
-        self._details_view.strategy_chosen.connect(self._on_strategy_chosen)
-        self._details_view.rating_requested.connect(self.strategy_rating_requested)
-        self._details_view.favorite_requested.connect(self.strategy_favorite_requested)
-        self._details_view.profile_chosen.connect(self.profile_chosen)
-        self._pages.addWidget(self._details_view)
+        # Страница подробностей (40 виджетов) собирается, когда её впервые
+        # открывают: см. ``_details_view``.
+        self._built_details_view: StrategyDetailsView | None = None
 
         self._try_panel = TryNextPanel(self)
         self._try_panel.rated.connect(self._on_current_rated)
@@ -245,6 +242,24 @@ class ProfileStrategyListWidget(QWidget):
     # ------------------------------------------------------------------
     # Подробности о стратегии
     # ------------------------------------------------------------------
+    @property
+    def _details_view(self) -> StrategyDetailsView:
+        """Страница подробностей; собирается при первом обращении.
+
+        Пока человек не открыл подробности ни одной стратегии, она не нужна:
+        список живёт без неё, а страница профиля собирается на треть быстрее.
+        """
+        view = self._built_details_view
+        if view is None:
+            view = StrategyDetailsView(self._pages)
+            view.strategy_chosen.connect(self._on_strategy_chosen)
+            view.rating_requested.connect(self.strategy_rating_requested)
+            view.favorite_requested.connect(self.strategy_favorite_requested)
+            view.profile_chosen.connect(self.profile_chosen)
+            self._pages.addWidget(view)
+            self._built_details_view = view
+        return view
+
     def details_open(self) -> bool:
         return bool(self._details_id)
 

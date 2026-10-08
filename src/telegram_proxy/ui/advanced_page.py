@@ -12,7 +12,7 @@ from qfluentwidgets import BreadcrumbBar, InfoBar, InfoBarPosition
 
 import telegram_proxy.config.settings as telegram_proxy_settings
 from log.log import log
-from telegram_proxy.ui.advanced_build import build_telegram_proxy_advanced_panel
+from telegram_proxy.ui.advanced_build import build_cloudflare_group, build_network_group, build_upstream_group
 from telegram_proxy.ui.runtime_helpers import apply_upstream_preset_ui, apply_upstream_runtime_state
 from telegram_proxy.ui.text_plan import TELEGRAM_PROXY_SETTINGS_TEXT
 from telegram_proxy.ui.upstream_workflow import handle_upstream_preset_changed, handle_upstream_toggle
@@ -23,6 +23,45 @@ from ui.pages.base_page import BasePage
 
 
 _BREADCRUMB_ROOT = "Telegram Proxy"
+
+# Три группы настроек собираются блоками (см. ui.block_build): страница
+# появляется сразу, группы — следом, по одной. Высоты — замер при окне
+# 1280x720 с выключенными внешним прокси и Cloudflare.
+UPSTREAM_BLOCK = "upstream"
+CLOUDFLARE_BLOCK = "cloudflare"
+NETWORK_BLOCK = "network"
+_BLOCK_HEIGHTS = {UPSTREAM_BLOCK: 106, CLOUDFLARE_BLOCK: 178, NETWORK_BLOCK: 250}
+# Атрибуты страницы, которые создаёт каждый блок: обращение к ним до сборки
+# блока достраивает его на месте.
+_UPSTREAM_ATTRS = (
+    "_upstream_card",
+    "_upstream_toggle",
+    "_upstream_preset_row",
+    "_upstream_address_row",
+    "_upstream_host_edit",
+    "_upstream_port_spin",
+    "_upstream_user_row",
+    "_upstream_user_edit",
+    "_upstream_pass_row",
+    "_upstream_pass_edit",
+    "_mtproxy_action_card",
+    "_upstream_mode_toggle",
+    "_upstream_udp_toggle",
+)
+_CLOUDFLARE_ATTRS = (
+    "_cloudflare_card",
+    "_cloudflare_toggle",
+    "_cloudflare_domains_row",
+    "_cloudflare_domains_edit",
+    "_cloudflare_test_btn",
+    "_cloudflare_dns_btn",
+    "_cloudflare_worker_toggle",
+    "_cloudflare_worker_domains_row",
+    "_cloudflare_worker_domains_edit",
+    "_cloudflare_worker_test_btn",
+    "_cloudflare_worker_code_btn",
+)
+_NETWORK_ATTRS = ("_dc_ip_edit", "_pool_size_spin", "_buffer_kb_spin")
 
 
 class TelegramProxyAdvancedPage(BasePage):
@@ -47,6 +86,8 @@ class TelegramProxyAdvancedPage(BasePage):
         self._upstream_catalog_loaded = False
         self._upstream_runtime_state = None
         self._current_mtproxy_preset_id = ""
+        # Последние загруженные настройки: блок, собранный позже, берёт их отсюда.
+        self._loaded_settings_state = None
         self._breadcrumb = None
         self._build_content()
         self._connect_signals()
@@ -65,47 +106,38 @@ class TelegramProxyAdvancedPage(BasePage):
         self.layout.addWidget(self._breadcrumb)
         self._rebuild_breadcrumb()
 
-        widgets = build_telegram_proxy_advanced_panel(
-            self.layout,
+        for name, build, attrs in (
+            (UPSTREAM_BLOCK, self._build_upstream_block, _UPSTREAM_ATTRS),
+            (CLOUDFLARE_BLOCK, self._build_cloudflare_block, _CLOUDFLARE_ATTRS),
+            (NETWORK_BLOCK, self._build_network_block, _NETWORK_ATTRS),
+        ):
+            self.add_lazy_block(name, build, estimated_height=_BLOCK_HEIGHTS[name], provides=attrs)
+        self.layout.addStretch()
+
+    # Каждый блок рождается позже страницы, поэтому сам подключает сигналы
+    # своих виджетов и подставляет в них уже загруженные настройки.
+
+    def _build_upstream_block(self) -> None:
+        widgets = build_upstream_group(
             content_parent=self.content,
             upstream_catalog=self._upstream_catalog,
             on_open_mtproxy=self._on_open_mtproxy,
-            on_test_cloudflare=self._on_test_cloudflare,
-            on_copy_cloudflare_dns=self._on_copy_cloudflare_dns,
-            on_test_cloudflare_worker=self._on_test_cloudflare_worker,
-            on_copy_cloudflare_worker_code=self._on_copy_cloudflare_worker_code,
         )
-        self._widgets = widgets
-        self._upstream_card = widgets.upstream_card
-        self._upstream_toggle = widgets.upstream_toggle
-        self._upstream_preset_row = widgets.upstream_preset_row
-        self._upstream_address_row = widgets.upstream_address_row
-        self._upstream_host_edit = widgets.upstream_host_edit
-        self._upstream_port_spin = widgets.upstream_port_spin
-        self._upstream_user_row = widgets.upstream_user_row
-        self._upstream_user_edit = widgets.upstream_user_edit
-        self._upstream_pass_row = widgets.upstream_pass_row
-        self._upstream_pass_edit = widgets.upstream_pass_edit
-        self._mtproxy_action_card = widgets.mtproxy_action_card
-        self._upstream_mode_toggle = widgets.upstream_mode_toggle
-        self._upstream_udp_toggle = widgets.upstream_udp_toggle
-        self._cloudflare_card = widgets.cloudflare_card
-        self._cloudflare_toggle = widgets.cloudflare_toggle
-        self._cloudflare_domains_row = widgets.cloudflare_domains_row
-        self._cloudflare_domains_edit = widgets.cloudflare_domains_edit
-        self._cloudflare_test_btn = widgets.cloudflare_test_btn
-        self._cloudflare_dns_btn = widgets.cloudflare_dns_btn
-        self._cloudflare_worker_toggle = widgets.cloudflare_worker_toggle
-        self._cloudflare_worker_domains_row = widgets.cloudflare_worker_domains_row
-        self._cloudflare_worker_domains_edit = widgets.cloudflare_worker_domains_edit
-        self._cloudflare_worker_test_btn = widgets.cloudflare_worker_test_btn
-        self._cloudflare_worker_code_btn = widgets.cloudflare_worker_code_btn
-        self._dc_ip_edit = widgets.dc_ip_edit
-        self._pool_size_spin = widgets.pool_size_spin
-        self._buffer_kb_spin = widgets.buffer_kb_spin
-        self._refresh_upstream_preset_description()
+        self.add_widget(widgets["upstream_card"])
+        self._upstream_card = widgets["upstream_card"]
+        self._upstream_toggle = widgets["upstream_toggle"]
+        self._upstream_preset_row = widgets["upstream_preset_row"]
+        self._upstream_address_row = widgets["upstream_address_row"]
+        self._upstream_host_edit = widgets["upstream_host_edit"]
+        self._upstream_port_spin = widgets["upstream_port_spin"]
+        self._upstream_user_row = widgets["upstream_user_row"]
+        self._upstream_user_edit = widgets["upstream_user_edit"]
+        self._upstream_pass_row = widgets["upstream_pass_row"]
+        self._upstream_pass_edit = widgets["upstream_pass_edit"]
+        self._mtproxy_action_card = widgets["mtproxy_action_card"]
+        self._upstream_mode_toggle = widgets["upstream_mode_toggle"]
+        self._upstream_udp_toggle = widgets["upstream_udp_toggle"]
 
-    def _connect_signals(self) -> None:
         self._upstream_toggle.toggled.connect(self._on_upstream_changed)
         self._upstream_preset_row.currentIndexChanged.connect(self._on_upstream_preset_changed)
         self._upstream_host_edit.editingFinished.connect(self._on_manual_upstream_edited)
@@ -114,13 +146,59 @@ class TelegramProxyAdvancedPage(BasePage):
         self._upstream_pass_edit.editingFinished.connect(self._on_manual_upstream_edited)
         self._upstream_mode_toggle.toggled.connect(self._on_upstream_mode_changed)
         self._upstream_udp_toggle.toggled.connect(self._on_upstream_udp_changed)
+
+        state = self._loaded_settings_state
+        if state is not None:
+            self._apply_upstream_state(state)
+        else:
+            self._refresh_upstream_preset_description()
+
+    def _build_cloudflare_block(self) -> None:
+        widgets = build_cloudflare_group(
+            content_parent=self.content,
+            on_test_cloudflare=self._on_test_cloudflare,
+            on_copy_cloudflare_dns=self._on_copy_cloudflare_dns,
+            on_test_cloudflare_worker=self._on_test_cloudflare_worker,
+            on_copy_cloudflare_worker_code=self._on_copy_cloudflare_worker_code,
+        )
+        self.add_widget(widgets["cloudflare_card"])
+        self._cloudflare_card = widgets["cloudflare_card"]
+        self._cloudflare_toggle = widgets["cloudflare_toggle"]
+        self._cloudflare_domains_row = widgets["cloudflare_domains_row"]
+        self._cloudflare_domains_edit = widgets["cloudflare_domains_edit"]
+        self._cloudflare_test_btn = widgets["cloudflare_test_btn"]
+        self._cloudflare_dns_btn = widgets["cloudflare_dns_btn"]
+        self._cloudflare_worker_toggle = widgets["cloudflare_worker_toggle"]
+        self._cloudflare_worker_domains_row = widgets["cloudflare_worker_domains_row"]
+        self._cloudflare_worker_domains_edit = widgets["cloudflare_worker_domains_edit"]
+        self._cloudflare_worker_test_btn = widgets["cloudflare_worker_test_btn"]
+        self._cloudflare_worker_code_btn = widgets["cloudflare_worker_code_btn"]
+
         self._cloudflare_toggle.toggled.connect(self._on_cloudflare_changed)
         self._cloudflare_domains_edit.editingFinished.connect(self._on_cloudflare_domains_changed)
         self._cloudflare_worker_toggle.toggled.connect(self._on_cloudflare_worker_changed)
         self._cloudflare_worker_domains_edit.editingFinished.connect(self._on_cloudflare_worker_domains_changed)
+
+        state = self._loaded_settings_state
+        if state is not None:
+            self._apply_cloudflare_state(state)
+
+    def _build_network_block(self) -> None:
+        widgets = build_network_group(content_parent=self.content)
+        self.add_widget(widgets["network_card"])
+        self._dc_ip_edit = widgets["dc_ip_edit"]
+        self._pool_size_spin = widgets["pool_size_spin"]
+        self._buffer_kb_spin = widgets["buffer_kb_spin"]
+
         self._dc_ip_edit.editingFinished.connect(self._on_dc_ip_changed)
         self._pool_size_spin.valueChanged.connect(self._on_pool_size_changed)
         self._buffer_kb_spin.valueChanged.connect(self._on_buffer_kb_changed)
+
+        state = self._loaded_settings_state
+        if state is not None:
+            self._apply_network_state(state)
+
+    def _connect_signals(self) -> None:
         self._telegram_proxy.get_proxy_manager().upstream_state_changed.connect(self._on_upstream_state_changed)
 
     def _rebuild_breadcrumb(self) -> None:
@@ -153,9 +231,9 @@ class TelegramProxyAdvancedPage(BasePage):
     def onboarding_target(self, name: str):
         """Экскурсия показывает группы целиком: строки внутри появляются только при включённых выключателях."""
         if name == "upstream":
-            return self.__dict__.get("_upstream_card")
+            return self._upstream_card
         if name == "cloudflare":
-            return self.__dict__.get("_cloudflare_card")
+            return self._cloudflare_card
         return None
 
     def _request_state_reload(self) -> None:
@@ -206,6 +284,9 @@ class TelegramProxyAdvancedPage(BasePage):
         old_items = [text for text, _data in self._upstream_catalog.items()]
         self._upstream_catalog = upstream_catalog
         self._upstream_catalog_loaded = True
+        if "_upstream_preset_row" not in self.__dict__:
+            # Блок внешнего прокси ещё не собран: список серверов он возьмёт из каталога сам.
+            return
         if new_items == old_items and self._upstream_preset_row.combo.count() == len(new_items):
             return
         combo = self._upstream_preset_row.combo
@@ -219,6 +300,17 @@ class TelegramProxyAdvancedPage(BasePage):
         self._upstream_preset_row.refresh_accessibility()
 
     def _apply_settings_state(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> None:
+        self._loaded_settings_state = state
+        # Настройки получают только собранные блоки; остальные возьмут их при сборке.
+        built = self.__dict__
+        if "_upstream_card" in built:
+            self._apply_upstream_state(state)
+        if "_cloudflare_card" in built:
+            self._apply_cloudflare_state(state)
+        if "_buffer_kb_spin" in built:
+            self._apply_network_state(state)
+
+    def _apply_upstream_state(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> None:
         self._upstream_toggle.setChecked(state.upstream_enabled, block_signals=True)
         self._upstream_host_edit.setText(state.upstream_host)
         self._upstream_port_spin.blockSignals(True)
@@ -231,12 +323,16 @@ class TelegramProxyAdvancedPage(BasePage):
             self._upstream_preset_row.setCurrentIndex(target_index, block_signals=True)
         self._upstream_mode_toggle.setChecked(state.upstream_mode == "always", block_signals=True)
         self._upstream_udp_toggle.setChecked(state.upstream_udp_enabled, block_signals=True)
+        self._apply_upstream_preset_ui(self._upstream_preset_row.combo.currentIndex())
 
+    def _apply_cloudflare_state(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> None:
         self._cloudflare_toggle.setChecked(state.cloudflare_enabled, block_signals=True)
         self._cloudflare_domains_edit.setText(", ".join(state.cloudflare_domains))
         self._cloudflare_worker_toggle.setChecked(state.cloudflare_worker_enabled, block_signals=True)
         self._cloudflare_worker_domains_edit.setText(", ".join(state.cloudflare_worker_domains))
+        self._apply_cloudflare_rows_visibility()
 
+    def _apply_network_state(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> None:
         self._dc_ip_edit.setText(", ".join(state.dc_ip))
         self._pool_size_spin.blockSignals(True)
         self._pool_size_spin.setValue(state.pool_size)
@@ -244,9 +340,6 @@ class TelegramProxyAdvancedPage(BasePage):
         self._buffer_kb_spin.blockSignals(True)
         self._buffer_kb_spin.setValue(state.buffer_kb)
         self._buffer_kb_spin.blockSignals(False)
-
-        self._apply_upstream_preset_ui(self._upstream_preset_row.combo.currentIndex())
-        self._apply_cloudflare_rows_visibility()
 
     # -- Внешний прокси --
 
@@ -266,6 +359,9 @@ class TelegramProxyAdvancedPage(BasePage):
 
     def _refresh_upstream_preset_description(self) -> None:
         """Описание строки «Сервер»: какой сервер реально работает или подсказка."""
+        if "_upstream_preset_row" not in self.__dict__:
+            # Блок ещё не собран: описание он подставит сам в конце сборки.
+            return
         text = TELEGRAM_PROXY_SETTINGS_TEXT
         if self._upstream_catalog_loaded and not self._upstream_catalog.has_bundled_presets():
             apply_upstream_runtime_state(self._upstream_preset_row, None, text.upstream_catalog_missing)

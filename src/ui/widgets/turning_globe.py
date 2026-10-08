@@ -4,25 +4,37 @@
 (Америка → Европа → Африка → Азия), а между сменами едва заметно
 поднимается и опускается. Анимация идёт, только пока глобус виден, окно
 не свёрнуто и включены «Живые анимации»; иначе показан один материк.
+
+Кадры глобус берёт у общего такта (``ui.frame_clock``), а не у своих
+таймеров: при заблокированном сеансе и выключенном экране такт стоит, и
+глобус не рисует кадры в пустоту; его перерисовка сливается с остальными
+живыми анимациями окна в одну. Картинка считается по времени, а не по числу
+кадров, поэтому от частоты кадров не зависит.
 """
 
 from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import QEasingCurve, QEvent, QRectF, Qt, QTimer, QVariantAnimation
+from PyQt6.QtCore import QEasingCurve, QEvent, QRectF, Qt
 from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QWidget
 
 from ui.animation_policy import are_live_animations_enabled
+from ui.frame_clock import frame_clock
 
 
 GLOBE_ICONS = ("fa5s.globe-americas", "fa5s.globe-europe", "fa5s.globe-africa", "fa5s.globe-asia")
 TURN_PERIOD_MS = 3200
 TURN_DURATION_MS = 900
-FLOAT_PERIOD_MS = 3200
+# Один подъём и спуск. Столько он и длился на Windows: свой таймер на 33 мс
+# система отдавала раз в ~47 мс, и задуманные 3,2 с растягивались до 4,5 с.
+FLOAT_PERIOD_MS = 4500
 FLOAT_PX = 2.5
-_FLOAT_TICK_MS = 33
+# Парение — 20 кадров в секунду (за кадр глобус сдвигается меньше чем на
+# пятую часть точки), смена материка — 30: плавному перетеканию нужно чаще.
+_FLOAT_FRAME_MS = 50
+_TURN_FRAME_MS = 33
 
 
 class TurningGlobe(QWidget):
@@ -38,21 +50,10 @@ class TurningGlobe(QWidget):
         self.setFixedSize(self._side + 8, self._side + 8)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self._turn = QVariantAnimation(self)
-        self._turn.setStartValue(0.0)
-        self._turn.setEndValue(1.0)
-        self._turn.setDuration(TURN_DURATION_MS)
-        self._turn.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self._turn.valueChanged.connect(self._on_blend)
-        self._turn.finished.connect(self._on_turned)
-
-        self._pause = QTimer(self)
-        self._pause.setSingleShot(True)
-        self._pause.timeout.connect(self._begin_turn)
-
-        self._float = QTimer(self)
-        self._float.setInterval(_FLOAT_TICK_MS)
-        self._float.timeout.connect(self._on_float_tick)
+        self._turn_curve = QEasingCurve(QEasingCurve.Type.InOutSine)
+        # Материк, с которого начался текущий запуск анимации.
+        self._base_index = 0
+        self._frames = frame_clock().subscribe(self._on_frame, interval_ms=_FLOAT_FRAME_MS, owner=self)
 
     def set_color(self, color: str) -> None:
         self._color = str(color)
@@ -73,7 +74,7 @@ class TurningGlobe(QWidget):
         return GLOBE_ICONS[self._index]
 
     def is_animating(self) -> bool:
-        return self._pause.isActive() or self._float.isActive() or self._turn.state() == QVariantAnimation.State.Running
+        return self._frames.isActive()
 
     # ---- цикл ----------------------------------------------------------
 
@@ -86,40 +87,32 @@ class TurningGlobe(QWidget):
         return are_live_animations_enabled()
 
     def _start(self) -> None:
-        if not self._can_animate():
+        if not self._can_animate() or self._frames.isActive():
             return
-        if not self._pause.isActive() and self._turn.state() != QVariantAnimation.State.Running:
-            self._pause.start(TURN_PERIOD_MS - TURN_DURATION_MS)
-        if not self._float.isActive():
-            self._float.start()
+        self._base_index = self._index
+        self._frames.setInterval(_FLOAT_FRAME_MS)
+        self._frames.start()
 
     def _stop(self) -> None:
-        self._pause.stop()
-        self._turn.stop()
-        self._float.stop()
+        self._frames.stop()
         self._blend = 0.0
         self._float_phase = 0.0
         self.update()
 
-    def _begin_turn(self) -> None:
+    def _on_frame(self) -> None:
         if not self._can_animate():
             self._stop()
             return
-        self._turn.start()
-
-    def _on_blend(self, value) -> None:
-        self._blend = float(value)
-        self.update()
-
-    def _on_turned(self) -> None:
-        self._index = (self._index + 1) % len(GLOBE_ICONS)
-        self._blend = 0.0
-        self.update()
-        if self._can_animate():
-            self._pause.start(TURN_PERIOD_MS - TURN_DURATION_MS)
-
-    def _on_float_tick(self) -> None:
-        self._float_phase = (self._float_phase + _FLOAT_TICK_MS / FLOAT_PERIOD_MS) % 1.0
+        elapsed = self._frames.elapsed_ms()
+        # Круг: материк стоит, затем перетекает в следующий.
+        period = max(1, int(TURN_PERIOD_MS))
+        duration = min(period, max(1, int(TURN_DURATION_MS)))
+        turns, within = divmod(elapsed, period)
+        turning_for = within - (period - duration)
+        self._index = (self._base_index + int(turns)) % len(GLOBE_ICONS)
+        self._blend = self._turn_curve.valueForProgress(turning_for / duration) if turning_for > 0 else 0.0
+        self._float_phase = (elapsed / FLOAT_PERIOD_MS) % 1.0
+        self._frames.setInterval(_TURN_FRAME_MS if turning_for > 0 else _FLOAT_FRAME_MS)
         self.update()
 
     def showEvent(self, event) -> None:  # noqa: N802

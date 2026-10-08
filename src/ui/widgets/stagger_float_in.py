@@ -145,8 +145,12 @@ class _Overlay(QWidget):
             painter.setWorldTransform(inverted)
         for block in blocks:
             progress = block.progress(now)
-            if progress <= 0.0 or progress >= 1.0:
+            if progress <= 0.0:
                 continue
+            # Полёт мог закончиться между кадром такта и этой перерисовкой, а
+            # настоящий виджет откроется только на следующем кадре: до него
+            # картинка стоит на месте целиком. Иначе блок на один кадр пропадал.
+            progress = min(progress, 1.0)
             painter.setOpacity(progress)
             rise = FLOAT_IN_RISE_PX * (1.0 - progress)
             painter.drawPixmap(
@@ -472,6 +476,8 @@ class StaggeredFloatIn(QObject):
         self._own: list[QWidget] = []
         # Группы, чьи виджеты запущены в этот показ (у группы свой слой).
         self._groups: list[QWidget] = []
+        # Когда началось появление этого показа (для блоков, достроенных позже).
+        self._played_at: float | None = None
         container.installEventFilter(self)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
@@ -506,6 +512,7 @@ class StaggeredFloatIn(QObject):
         if not _can_animate(self._container):
             return
         self.finish_all()
+        self._played_at = time.monotonic()
         for order, widget in enumerate(self._targets()):
             delay = min(order, _MAX_STAGGERED) * FLOAT_IN_STEP_MS
             if _has_own_float_in(widget):
@@ -515,6 +522,35 @@ class StaggeredFloatIn(QObject):
                 group = widget.parentWidget()
                 if group is not self._container and group not in self._groups:
                     self._groups.append(group)
+
+    def join(self, group: QWidget) -> None:
+        """Группа достроена уже после показа контейнера: её виджеты встают в общую очередь.
+
+        Блок первого экрана, собранный на кадр позже страницы, не должен
+        появиться раньше карточек, которые лежат над ним: его первый виджет
+        стартует не раньше своего места в очереди страницы. Если очередь уже
+        отыграла (до блока долистали), виджеты группы идут сразу, друг за другом.
+        """
+        widgets = _layout_targets(group, just_built=True)
+        if not widgets:
+            return
+        wait_ms = 0.0
+        if self._played_at is not None:
+            try:
+                place = _layout_targets(self._container, just_built=True).index(widgets[0])
+            except ValueError:
+                place = 0
+            since_play_ms = (time.monotonic() - self._played_at) * 1000.0
+            wait_ms = max(0.0, min(place, _MAX_STAGGERED) * FLOAT_IN_STEP_MS - since_play_ms)
+        for order, widget in enumerate(widgets):
+            delay = int(wait_ms) + min(order, _MAX_STAGGERED) * FLOAT_IN_STEP_MS
+            if _has_own_float_in(widget):
+                getattr(widget, OWN_FLOAT_IN_METHOD)(delay)
+                self._own.append(widget)
+            elif _start_block(widget, delay):
+                holder = widget.parentWidget()
+                if holder is not self._container and holder not in self._groups:
+                    self._groups.append(holder)
 
     def finish_all(self) -> None:
         for engine in self._engines():
@@ -535,6 +571,15 @@ def float_in_group(group: QWidget) -> None:
     """
     if sip.isdeleted(group) or not group.isVisible() or not _can_animate(group):
         return
+    # Группа внутри контейнера со своей очередью появления (страница) встаёт
+    # в неё: так блок не появится раньше карточек над ним.
+    holder = group.parentWidget()
+    while holder is not None:
+        controller = holder.__dict__.get(_CONTROLLER_ATTR)
+        if controller is not None:
+            controller.join(group)
+            return
+        holder = holder.parentWidget()
     for order, widget in enumerate(_layout_targets(group, just_built=True)):
         delay = min(order, _MAX_STAGGERED) * FLOAT_IN_STEP_MS
         if _has_own_float_in(widget):
@@ -587,6 +632,17 @@ def skip_float_in(widget: QWidget) -> QWidget:
     return widget
 
 
+def float_in_by_parts(widget: QWidget) -> QWidget:
+    """Помечает виджет-обёртку: выплывает не она целиком, а виджеты её раскладки по очереди.
+
+    Для вкладки или панели, внутри которой лежат карточки и блоки страницы:
+    блок, собранный на кадр позже остальных, появляется в свой черёд, а не
+    остаётся закрытым снимком всей вкладки.
+    """
+    widget.__dict__[FLOAT_IN_GROUP_ATTR] = True
+    return widget
+
+
 __all__ = [
     "FLOAT_IN_DURATION_MS",
     "FLOAT_IN_GROUP_ATTR",
@@ -595,6 +651,7 @@ __all__ = [
     "StaggeredFloatIn",
     "attach_stagger_float_in",
     "float_in",
+    "float_in_by_parts",
     "float_in_group",
     "float_in_progress",
     "float_in_progress_of",
