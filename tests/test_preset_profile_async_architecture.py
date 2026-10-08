@@ -3063,8 +3063,9 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("blockcheck.commands", worker_source)
         self.assertNotIn("blockcheck.page_runtime", worker_source)
         self.assertIn("run_log_started", worker_source)
-        self.assertIn("_start_run_log", worker_source)
-        self.assertIn("_append_run_log_action", worker_source)
+        # Файл у проверки один — отчёт .json; его пишет рабочий поток через переданное действие.
+        self.assertIn("_save_report", worker_source)
+        self.assertIn("_report_path", worker_source)
 
     def test_strategy_scan_run_log_writes_are_owned_by_worker(self) -> None:
         strategy_scan_run_workflow = importlib.import_module("blockcheck.strategy_scan_run_workflow")

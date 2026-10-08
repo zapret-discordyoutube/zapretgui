@@ -28,9 +28,8 @@ class BlockcheckFeature:
         from blockcheck.worker import BlockcheckWorker
 
         return BlockcheckWorker(
-            start_run_log=self.start_blockcheck_run_log,
-            append_run_log=self.append_blockcheck_run_log,
-            close_run_log=self.close_blockcheck_run_log,
+            report_path=self.make_blockcheck_report_path,
+            save_report=self.save_blockcheck_report,
             load_geo_sites=self.load_geo_sites,
             remember_run=self.remember_blockcheck_run,
             check_dns_servers=self.check_dns_servers,
@@ -131,14 +130,11 @@ class BlockcheckFeature:
     def start_run_log(self, *args, **kwargs):
         return self._commands().start_run_log(*args, **kwargs)
 
-    def start_blockcheck_run_log(self, *args, **kwargs):
-        return self._worker_commands().start_blockcheck_run_log(*args, **kwargs)
+    def make_blockcheck_report_path(self, *args, **kwargs) -> str:
+        return self._worker_commands().make_blockcheck_report_path(*args, **kwargs)
 
-    def append_blockcheck_run_log(self, *args, **kwargs) -> None:
-        return self._worker_commands().append_blockcheck_run_log(*args, **kwargs)
-
-    def close_blockcheck_run_log(self, *args, **kwargs) -> None:
-        return self._worker_commands().close_blockcheck_run_log(*args, **kwargs)
+    def save_blockcheck_report(self, *args, **kwargs) -> str:
+        return self._worker_commands().save_blockcheck_report(*args, **kwargs)
 
     def start_strategy_scan_run_log(self, *args, **kwargs):
         return self._worker_commands().start_strategy_scan_run_log(*args, **kwargs)

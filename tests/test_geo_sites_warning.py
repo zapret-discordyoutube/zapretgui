@@ -303,9 +303,8 @@ class BlockcheckWorkerGeoTests(unittest.TestCase):
         from blockcheck.worker import BlockcheckWorker
 
         worker = BlockcheckWorker(
-            start_run_log=lambda *_a: SimpleNamespace(path=None, created=True),
-            append_run_log=lambda *_a: None,
-            close_run_log=lambda *_a: None,
+            report_path=lambda *_a: "",
+            save_report=lambda *_a: "",
             load_geo_sites=lambda: _GEO_SITES,
         )
         with patch("diagnostics.engine.run_blockcheck", return_value={}) as run:

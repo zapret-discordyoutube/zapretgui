@@ -42,27 +42,24 @@ class BlockcheckWorkerArchitectureTests(unittest.TestCase):
         command_factory_source = inspect.getsource(blockcheck_commands.create_blockcheck_worker)
         worker_source = inspect.getsource(blockcheck_worker.BlockcheckWorker)
 
-        self.assertIn("start_run_log=self.start_blockcheck_run_log", feature_source)
-        self.assertIn("append_run_log=self.append_blockcheck_run_log", feature_source)
-        self.assertIn("close_run_log=self.close_blockcheck_run_log", feature_source)
-        self.assertIn("start_run_log=start_blockcheck_run_log", command_factory_source)
-        self.assertIn("append_run_log=append_blockcheck_run_log", command_factory_source)
-        self.assertIn("close_run_log=close_blockcheck_run_log", command_factory_source)
-        self.assertIn("_start_run_log", worker_source)
-        self.assertIn("_append_run_log_action", worker_source)
-        self.assertIn("_close_run_log_action", worker_source)
+        # У проверки один файл — отчёт .json: рабочий поток получает, куда его писать и чем.
+        self.assertIn("report_path=self.make_blockcheck_report_path", feature_source)
+        self.assertIn("save_report=self.save_blockcheck_report", feature_source)
+        self.assertIn("report_path=make_blockcheck_report_path", command_factory_source)
+        self.assertIn("save_report=save_blockcheck_report", command_factory_source)
+        self.assertIn("_report_path", worker_source)
+        self.assertIn("_save_report", worker_source)
+        # Текстовый журнал проверки больше не ведётся.
+        self.assertNotIn("append_run_log", worker_source)
         self.assertNotIn("blockcheck.commands", worker_source)
 
     def test_blockcheck_run_log_file_io_lives_in_session_registry_not_page_runtime(self) -> None:
         commands_source = inspect.getsource(blockcheck_commands)
         page_runtime_source = inspect.getsource(blockcheck_page_runtime)
 
-        self.assertIn("def start_blockcheck_run_log", commands_source)
-        self.assertIn("def append_blockcheck_run_log", commands_source)
-        self.assertIn("run_log_sessions.start", commands_source)
-        self.assertIn("run_log_sessions.append", commands_source)
-        self.assertIn("run_log_sessions.close", commands_source)
-        self.assertNotIn("with open(", inspect.getsource(blockcheck_commands.append_blockcheck_run_log))
+        self.assertIn("def save_blockcheck_report", commands_source)
+        self.assertNotIn("def append_blockcheck_run_log", commands_source)
+        self.assertTrue(blockcheck_commands.make_blockcheck_report_path("full").endswith("_full.json"))
 
         self.assertNotIn("with open(", page_runtime_source)
         self.assertNotIn("os.makedirs(", page_runtime_source)

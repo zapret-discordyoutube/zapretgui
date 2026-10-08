@@ -296,9 +296,8 @@ class WorkerTests(unittest.TestCase):
         from blockcheck.worker import BlockcheckWorker
 
         return BlockcheckWorker(
-            start_run_log=lambda *_a: None,
-            append_run_log=lambda *_a: None,
-            close_run_log=lambda *_a: None,
+            report_path=lambda *_a: "",
+            save_report=lambda *_a: "",
             remember_run=remember,
         )
 
@@ -336,3 +335,68 @@ class WorkerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SingleReportFileTests(unittest.TestCase):
+    """У проверки один файл — .json: в нём и данные, и текст отчёта, и прерванный прогон тоже."""
+
+    def _run(self, engine_result, *, raises: Exception | None = None):
+        from unittest.mock import patch
+
+        from blockcheck.worker import BlockcheckWorker
+
+        saved: list[tuple[dict, str]] = []
+        remembered: list[tuple[dict, str]] = []
+
+        def remember(report, path):
+            remembered.append((dict(report), path))
+            return {"changes": [], "previous_time": "", "json_file": path}
+
+        def fake_engine(scope, *, emit, partial, **_kwargs):
+            emit("строка первая")
+            partial({"scope": scope, "services": ["discord"], "partial": True})
+            emit("строка вторая")
+            if raises is not None:
+                raise raises
+            return engine_result
+
+        worker = BlockcheckWorker(
+            scope="full",
+            report_path=lambda scope: f"run_{scope}.json",
+            save_report=lambda report, path: saved.append((report, path)) or path,
+            remember_run=remember,
+        )
+        announced: list = []
+        worker.run_log_started.connect(announced.append)
+        with patch("diagnostics.engine.run_blockcheck", fake_engine):
+            worker.run()
+        return saved, remembered, announced
+
+    def test_finished_run_keeps_its_text_inside_the_report(self) -> None:
+        saved, remembered, announced = self._run({"scope": "full", "services": []})
+
+        [(report, path)] = remembered
+        self.assertEqual(path, "run_full.json")
+        self.assertEqual(report["text"], ["строка первая", "строка вторая"])
+        self.assertEqual((saved, announced), ([], ["run_full.json"]))
+
+    def test_stopped_and_crashed_runs_are_saved_with_what_was_learned(self) -> None:
+        for kwargs, mark in (({"engine_result": {"stopped": True}}, "stopped"), ({"engine_result": None, "raises": RuntimeError("сеть")}, "failed")):
+            saved, remembered, announced = self._run(**kwargs)
+            [(report, path)] = saved
+            self.assertTrue(report[mark])
+            self.assertEqual(report["services"], ["discord"])
+            self.assertEqual(report["text"][:2], ["строка первая", "строка вторая"])
+            self.assertEqual((remembered, announced), ([], [path]))
+
+    def test_saved_file_is_read_back_as_a_past_report(self) -> None:
+        import tempfile
+
+        from blockcheck import commands
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "blockcheck_run_1_full.json")
+            self.assertEqual(commands.save_blockcheck_report({"scope": "full", "text": ["раз", "два"]}, path), path)
+            self.assertEqual(commands.load_past_blockcheck_report(path)["text"], ["раз", "два"])
+            self.assertEqual(sorted(item.name for item in Path(folder).iterdir()), ["blockcheck_run_1_full.json"])
+        self.assertEqual(commands.save_blockcheck_report({}, None), "")

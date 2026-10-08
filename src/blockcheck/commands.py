@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 import os
 
 from log.log import global_logger
 from log.run_log_sessions import run_log_sessions
-
-
-@dataclass(slots=True)
-class BlockcheckRunLogState:
-    path: str | None
-    created: bool
 
 
 def create_blockcheck_worker(
@@ -25,9 +18,8 @@ def create_blockcheck_worker(
     return BlockcheckWorker(
         scope=scope,
         user_domains=user_domains,
-        start_run_log=start_blockcheck_run_log,
-        append_run_log=append_blockcheck_run_log,
-        close_run_log=close_blockcheck_run_log,
+        report_path=make_blockcheck_report_path,
+        save_report=save_blockcheck_report,
         remember_run=remember_blockcheck_run,
         check_dns_servers=check_dns_servers,
         parent=parent,
@@ -62,7 +54,8 @@ def run_user_domain_action(action: str, domain: str):
     raise ValueError(f"Неизвестное действие домена BlockCheck: {action_name}")
 
 
-def make_blockcheck_run_log_path(mode: str) -> str:
+def make_blockcheck_report_path(mode: str) -> str:
+    """Куда ляжет отчёт проверки. Файл один — ``.json``: в нём и разбираемые данные, и текст отчёта."""
     from config.runtime_layout import APPLICATION_PATHS
 
     log_dir = str(APPLICATION_PATHS.logs_dir)
@@ -78,33 +71,39 @@ def make_blockcheck_run_log_path(mode: str) -> str:
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     raw_mode = str(mode or "full").strip().lower()
     safe_mode = "".join(ch if (ch.isalnum() or ch in ("_", "-")) else "_" for ch in raw_mode) or "full"
-    return os.path.join(log_dir, f"blockcheck_run_{ts}_{safe_mode}.log")
+    return os.path.join(log_dir, f"blockcheck_run_{ts}_{safe_mode}.json")
 
 
-def start_blockcheck_run_log(scope: str, extra_domains: list[str]):
-    path = make_blockcheck_run_log_path(scope)
-    header = (
-        f"=== Blockcheck Run Log ({datetime.now():%Y-%m-%d %H:%M:%S}) ===\n"
-        f"Scope: {scope}\n"
-        f"User domains: {len(extra_domains)}\n"
-    )
-    if extra_domains:
-        header += f"Domains: {', '.join(extra_domains)}\n"
-    header += "=" * 60 + "\n\n"
-    created = run_log_sessions.start(path, header)
-    return BlockcheckRunLogState(path=path if created else None, created=created)
+def save_blockcheck_report(report: dict, path: str | None, *, entry: dict | None = None) -> str:
+    """Пишет отчёт проверки в ``path``. Возвращает путь или пустую строку, если записать не вышло.
 
+    Так сохраняется и законченная проверка, и прерванная (остановили, упала): во
+    втором случае в файле то, что успели узнать, и текст отчёта до этого места.
+    """
+    from diagnostics import history
 
-def append_blockcheck_run_log(path: str | None, message: str) -> None:
-    run_log_sessions.append(path, message)
-
-
-def close_blockcheck_run_log(path: str | None) -> None:
-    run_log_sessions.close(path)
+    if not path:
+        return ""
+    try:
+        from config.build_info import APP_VERSION
+    except Exception:
+        APP_VERSION = ""
+    entry = entry or {"time": datetime.now().isoformat(timespec="seconds"), "title": "", "level": "unknown"}
+    try:
+        os.makedirs(os.path.dirname(str(path)) or ".", exist_ok=True)
+        with open(path, "w", encoding="utf-8") as stream:
+            stream.write(history.report_json(report, entry, app_version=str(APP_VERSION)))
+    except OSError:
+        return ""
+    return str(path)
 
 
 def load_past_blockcheck_report(log_file: str | None) -> dict | None:
-    """Сохранённый отчёт прошлой проверки (лежит рядом с её журналом). ``None`` — файла нет или он не читается."""
+    """Сохранённый отчёт прошлой проверки. ``None`` — файла нет или он не читается.
+
+    ``log_file`` — путь из записи истории. У новых проверок это сам ``.json``; у
+    старых — текстовый журнал, рядом с которым лежит отчёт под тем же именем.
+    """
     import json
 
     from diagnostics.history import REPORT_FORMAT
@@ -145,7 +144,7 @@ def check_dns_servers(*, should_stop=None) -> dict:
 
 
 def remember_blockcheck_run(report: dict, log_file: str | None) -> dict:
-    """Записывает прогон в историю и рядом с журналом кладёт отчёт в строгом виде.
+    """Записывает прогон в историю и сохраняет его отчёт в файл ``log_file`` (``.json``).
 
     Возвращает, что изменилось с прошлой такой же проверки:
     ``{"changes": [...], "previous_time": "...", "json_file": "..."}``.
@@ -157,18 +156,7 @@ def remember_blockcheck_run(report: dict, log_file: str | None) -> dict:
     previous = history.previous_run(get_check_history(), entry)
     runs = add_check_history_run(entry)
 
-    json_file = ""
-    if log_file:
-        try:
-            from config.build_info import APP_VERSION
-        except Exception:
-            APP_VERSION = ""
-        json_file = os.path.splitext(str(log_file))[0] + ".json"
-        try:
-            with open(json_file, "w", encoding="utf-8") as stream:
-                stream.write(history.report_json(report, entry, app_version=str(APP_VERSION)))
-        except OSError:
-            json_file = ""
+    json_file = save_blockcheck_report(report, os.path.splitext(str(log_file))[0] + ".json", entry=entry) if log_file else ""
     return {
         "changes": history.describe_changes(previous, entry),
         "previous_time": str(previous.get("time") or "") if previous else "",

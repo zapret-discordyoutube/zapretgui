@@ -118,6 +118,11 @@ def cleanup_old_logs(logs_folder, max_files=MAX_LOG_FILES):
     total_deleted += d
     all_errors.extend(e)
     total_found += t
+    # Отчёты проверок BlockCheck: у новых проверок это единственный файл, у старых — пара к журналу.
+    d, e, t = _cleanup_files_by_pattern(logs_folder, "blockcheck_run_*.json", MAX_BLOCKCHECK_LOG_FILES)
+    total_deleted += d
+    all_errors.extend(e)
+    total_found += t
 
     return total_deleted, all_errors, total_found
 

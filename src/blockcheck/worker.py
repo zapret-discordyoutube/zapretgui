@@ -1,7 +1,7 @@
 """Фоновый поток проверки BlockCheck.
 
 Сам ничего не проверяет: запускает ``diagnostics.engine.run_blockcheck``,
-пишет каждую строку отчёта в журнал ``blockcheck_run_*.log`` (его потом
+копит строки отчёта и в конце кладёт их вместе с данными в один файл ``blockcheck_run_*.json`` (его потом
 забирает обращение в поддержку) и отдаёт странице готовый итог.
 """
 
@@ -34,9 +34,8 @@ class BlockcheckWorker(QObject):
         scope: str = "main",
         user_domains: list[str] | None = None,
         *,
-        start_run_log: Callable[[str, list[str]], object],
-        append_run_log: Callable[[str | None, str], None],
-        close_run_log: Callable[[str | None], None],
+        report_path: Callable[[str], str],
+        save_report: Callable[[dict, str | None], str],
         load_geo_sites: Callable[[], object] | None = None,
         remember_run: Callable[[dict, str | None], dict] | None = None,
         check_dns_servers: Callable[..., dict] | None = None,
@@ -45,9 +44,11 @@ class BlockcheckWorker(QObject):
         super().__init__(parent)
         self._scope = str(scope or "main")
         self._user_domains = list(user_domains or [])
-        self._start_run_log = start_run_log
-        self._append_run_log_action = append_run_log
-        self._close_run_log_action = close_run_log
+        self._report_path = report_path
+        self._save_report = save_report
+        # Текст отчёта копится здесь и уходит в тот же файл, что и данные: файл у проверки один.
+        self._lines: list[str] = []
+        self._last_partial: dict | None = None
         self._load_geo_sites = load_geo_sites
         self._remember_run = remember_run
         self._check_dns_servers = check_dns_servers
@@ -74,11 +75,7 @@ class BlockcheckWorker(QObject):
         try:
             from diagnostics.engine import run_blockcheck
 
-            log_state = self._start_run_log(self._scope, list(self._user_domains))
-            self._run_log_file = log_state.path
-            self.run_log_started.emit(log_state.path)
-            if not log_state.created:
-                logger.warning("Failed to create blockcheck run log")
+            self._run_log_file = self._report_path(self._scope)
 
             report = run_blockcheck(
                 self._scope,
@@ -88,23 +85,35 @@ class BlockcheckWorker(QObject):
                 geo_service_for=self._geo_service_lookup(),
                 check_dns_servers=self._check_dns_servers,
                 progress=self.progress.emit,
-                partial=self.partial.emit,
+                partial=self._on_partial,
             )
             if isinstance(report, dict) and report.get("stopped"):
+                self._save_unfinished(stopped=True)
                 report = None
             if report is not None:
+                report["text"] = list(self._lines)
                 self._remember(report)
         except Exception as e:
             logger.exception("BlockcheckWorker crashed")
             self._emit(f"❌ Проверка упала: {e}")
+            self._save_unfinished(failed=True, error=str(e))
             report = {"failed": True, "error": str(e)}
         finally:
-            try:
-                self._close_run_log_action(self._run_log_file)
-            except Exception:
-                pass
             self._running = False
         self.finished.emit(report)
+
+    def _on_partial(self, report: dict) -> None:
+        self._last_partial = report
+        self.partial.emit(report)
+
+    def _save_unfinished(self, **marks) -> None:
+        """Прерванная проверка тоже остаётся в файле: что успели узнать и текст до этого места."""
+        try:
+            document = dict(self._last_partial or {}, text=list(self._lines), **marks)
+            if self._save_report(document, self._run_log_file):
+                self.run_log_started.emit(self._run_log_file)
+        except Exception:
+            logger.exception("Failed to save unfinished blockcheck report")
 
     def _remember(self, report: dict) -> None:
         """Записывает прогон в историю и дописывает, что изменилось с прошлого раза.
@@ -122,6 +131,8 @@ class BlockcheckWorker(QObject):
         report["changes"] = changes
         report["previous_time"] = str(note.get("previous_time") or "")
         report["json_file"] = str(note.get("json_file") or "")
+        if report["json_file"]:
+            self.run_log_started.emit(report["json_file"])
         report["history"] = [dict(run) for run in note.get("history") or () if isinstance(run, dict)]
         if changes:
             from diagnostics.history import format_time
@@ -140,8 +151,5 @@ class BlockcheckWorker(QObject):
         return bool(self._running)
 
     def _emit(self, message: str) -> None:
-        try:
-            self._append_run_log_action(self._run_log_file, message)
-        except Exception:
-            pass
+        self._lines.append(str(message))
         self.log_message.emit(message)

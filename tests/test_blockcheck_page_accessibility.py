@@ -650,9 +650,8 @@ class BlockcheckWorkerTests(unittest.TestCase):
         from blockcheck.worker import BlockcheckWorker
 
         return BlockcheckWorker(
-            start_run_log=lambda *_a: SimpleNamespace(path=None, created=True),
-            append_run_log=lambda *_a: None,
-            close_run_log=lambda *_a: None,
+            report_path=lambda *_a: "",
+            save_report=lambda *_a: "",
         )
 
     def test_stop_pressed_before_start_is_not_lost(self) -> None:
