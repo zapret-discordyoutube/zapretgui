@@ -52,11 +52,7 @@ class TrayMenuContractTests(unittest.TestCase):
 
     def _manager(self, *, phase: str = "running", snapshot=None, visible: bool = False):
         import tray
-        from qfluentwidgets import RoundMenu
-        from PyQt6.QtWidgets import QWidget
 
-        owner = QWidget()
-        self.addCleanup(owner.deleteLater)
         feature = SimpleNamespace(
             launch_phase=Mock(return_value=phase),
             preset_snapshot=Mock(return_value=snapshot),
@@ -65,12 +61,11 @@ class TrayMenuContractTests(unittest.TestCase):
             restart_dpi=Mock(),
             toggle_dpi=Mock(),
             activate_preset=Mock(return_value=True),
+            apply_window_opacity=Mock(),
         )
         port = SimpleNamespace(
-            create_menu=lambda: RoundMenu(parent=owner),
             is_visible=Mock(return_value=visible),
             ui_language=Mock(return_value="ru"),
-            exec_popup_menu=Mock(),
         )
         manager = tray.SystemTrayManager.__new__(tray.SystemTrayManager)
         manager.window_port = port
@@ -78,9 +73,7 @@ class TrayMenuContractTests(unittest.TestCase):
         manager._launch_phase = ""
         manager._launch_method = "zapret2_mode"
         manager._preset_name = ""
-        manager._menu = None
-        manager._header = None
-        manager._launch_action = None
+        manager._popup = None
         manager._stopped_notify_timer = None
         manager._status_icon_key = ""
         manager._status_icon_handles = {}
@@ -90,28 +83,28 @@ class TrayMenuContractTests(unittest.TestCase):
         return manager, feature, port
 
     @staticmethod
-    def _snapshot():
+    def _snapshot(count: int = 0):
         from tray_workers import TrayPresetSnapshot
 
+        presets = (("default.txt", "Default v1"), ("game.txt", "Game filter"))
+        presets += tuple((f"extra{i}.txt", f"Extra {i}") for i in range(count))
         return TrayPresetSnapshot(
             launch_method="zapret2_mode",
-            presets=(("default.txt", "Default v1"), ("game.txt", "Game filter")),
+            presets=presets,
             selected_file_name="default.txt",
             selected_display_name="Default v1",
         )
 
-    def test_round_tray_menu_uses_global_hairline_fix(self) -> None:
-        from ui.popup_menu_style import install_global_round_menu_hairline_fix
+    @staticmethod
+    def _rows(manager, page: str = "main"):
+        return manager._menu_model().page(page).rows
 
-        manager, _feature, _port = self._manager()
-        with patch("ui.popup_menu_style._is_windows_11_or_newer", return_value=True):
-            install_global_round_menu_hairline_fix()
-            menu = manager._build_menu()
-        self.addCleanup(menu.deleteLater)
-
-        self.assertIn("MenuActionListWidget", menu.styleSheet())
-        self.assertIn("zapretgui-round-menu-hairline-begin", menu.styleSheet())
-        self.assertNotIn("border-left", menu.styleSheet())
+    def _popup(self, manager):
+        popup = manager._ensure_popup()
+        self.addCleanup(popup.deleteLater)
+        self.addCleanup(popup.hide)
+        popup.set_model(manager._menu_model())
+        return popup
 
     def test_tray_menu_main_action_follows_launch_phase(self) -> None:
         cases = {
@@ -124,57 +117,231 @@ class TrayMenuContractTests(unittest.TestCase):
         for phase, (text, enabled) in cases.items():
             with self.subTest(phase=phase):
                 manager, feature, _port = self._manager(phase=phase)
-                menu = manager._build_menu()
-                self.addCleanup(menu.deleteLater)
-                texts = [action.text() for action in menu.actions()]
+                rows = self._rows(manager)
+                launch = next(row for row in rows if row.command == "toggle_dpi")
 
-                self.assertEqual(manager._launch_action.text(), text)
-                self.assertEqual(manager._launch_action.isEnabled(), enabled)
-                self.assertEqual("Перезапустить" in texts, phase == "running")
-                manager._launch_action.trigger()
-                self.assertEqual(feature.toggle_dpi.call_count, 1 if enabled else 0)
+                self.assertEqual((launch.text, launch.enabled), (text, enabled))
+                self.assertEqual("Перезапустить" in [row.text for row in rows], phase == "running")
+                manager._run_menu_command(launch.command, launch.arg)
+                feature.toggle_dpi.assert_called_once_with()
 
     def test_tray_menu_header_shows_mode_status_and_preset(self) -> None:
         manager, _feature, _port = self._manager(phase="running", snapshot=self._snapshot())
-        menu = manager._build_menu()
-        self.addCleanup(menu.deleteLater)
+        header = self._rows(manager)[0]
 
-        self.assertEqual(manager._header.title_label.text(), "Zapret 2 · работает")
-        self.assertEqual(manager._header.preset_label.text(), "Default v1")
+        self.assertEqual(header.kind, "status")
+        self.assertEqual(header.text, "Zapret 2 · работает")
+        self.assertEqual(header.detail, "Default v1")
+        self.assertEqual(header.command, "show_window")
 
-    def test_tray_preset_submenu_marks_active_and_activates_choice(self) -> None:
+    def test_tray_preset_page_marks_active_and_activates_choice(self) -> None:
         manager, feature, _port = self._manager(snapshot=self._snapshot())
-        menu = manager._build_menu()
-        self.addCleanup(menu.deleteLater)
+        entry = next(row for row in self._rows(manager) if row.page == "presets")
+        self.assertEqual((entry.text, entry.detail), ("Пресет", "Default v1"))
 
-        preset_menu = next(sub for sub in menu._subMenus if sub.title() == "Пресет")
-        items = [(action.text(), action.isChecked()) for action in preset_menu.actions()]
-        self.assertEqual(items, [("Default v1", True), ("Game filter", False)])
+        items = [row for row in self._rows(manager, "presets") if row.kind == "item"]
+        self.assertEqual([(row.text, row.checked) for row in items], [("Default v1", True), ("Game filter", False)])
 
-        preset_menu.actions()[1].trigger()
+        manager._run_menu_command(items[1].command, items[1].arg)
         feature.activate_preset.assert_called_once_with("game.txt", "Game filter")
 
-    def test_tray_preset_submenu_hidden_for_orchestra(self) -> None:
+    def test_tray_preset_page_hidden_for_orchestra(self) -> None:
         from tray_workers import TrayPresetSnapshot
 
         manager, _feature, _port = self._manager(snapshot=TrayPresetSnapshot(launch_method="orchestra"))
-        menu = manager._build_menu()
-        self.addCleanup(menu.deleteLater)
+        model = manager._menu_model()
 
-        self.assertNotIn("Пресет", [sub.title() for sub in menu._subMenus])
+        self.assertNotIn("presets", model.pages)
+        self.assertNotIn("presets", [row.page for row in model.page("main").rows])
 
-    def test_tray_menu_is_rebuilt_and_released_on_each_open(self) -> None:
-        manager, feature, port = self._manager()
+    def test_tray_menu_commands_are_all_handled(self) -> None:
+        manager, _feature, _port = self._manager(snapshot=self._snapshot())
+        model = manager._menu_model()
+        commands = {row.command for page in model.pages.values() for row in page.rows if row.command}
+        for name in ("show_window", "_toggle_primary_visibility_action", "show_console", "exit_only",
+                     "exit_and_stop", "_toggle_tg_proxy", "_set_window_opacity"):
+            setattr(manager, name, Mock())
+
+        with patch("tray.log") as log:
+            for command in sorted(commands):
+                arg = ("game.txt", "Game filter") if command == "activate_preset" else 50
+                manager._run_menu_command(command, arg)
+
+        log.assert_not_called()
+
+    def test_tray_menu_window_is_reused_and_presets_are_refreshed_on_each_open(self) -> None:
+        manager, feature, _port = self._manager(snapshot=self._snapshot())
+        popup = self._popup(manager)
 
         manager.show_context_menu()
+        self.assertTrue(popup.isVisible())
+        manager.show_context_menu()
+        popup.hide()
         manager.show_context_menu()
 
-        self.assertEqual(port.exec_popup_menu.call_count, 2)
-        first_menu = port.exec_popup_menu.call_args_list[0].args[0]
-        second_menu = port.exec_popup_menu.call_args_list[1].args[0]
-        self.assertIsNot(first_menu, second_menu)
-        self.assertIsNone(manager._menu)
+        self.assertIs(manager._ensure_popup(), popup)
         self.assertEqual(feature.refresh_preset_snapshot.call_count, 2)
+
+    def test_open_tray_menu_follows_launch_status(self) -> None:
+        manager, feature, _port = self._manager(phase="running", snapshot=self._snapshot())
+        manager._status_icon_handle_for = Mock(return_value=None)
+        manager._modify_icon = Mock()
+        manager.show_notification = Mock()
+        popup = self._popup(manager)
+        manager.show_context_menu()
+
+        feature.launch_phase.return_value = "stopped"
+        manager.apply_launch_status(phase="stopped", launch_method="zapret2_mode", preset_name="Default v1")
+
+        self.assertEqual(popup.rows()[0].text, "Zapret 2 · остановлен")
+        self.assertIn("Запустить Zapret", [row.text for row in popup.rows()])
+
+    def test_long_preset_list_scrolls_inside_a_small_window(self) -> None:
+        from ui.tray_menu import style
+
+        manager, _feature, _port = self._manager(snapshot=self._snapshot(count=150))
+        popup = self._popup(manager)
+        manager.show_context_menu()
+        main_height = popup.height()
+        popup.open_page("presets")
+
+        self.assertEqual(len(popup.rows()), 154)
+        self.assertLessEqual(popup._view_height, style.MAX_LIST_ROWS * style.ROW_HEIGHT)
+        self.assertLess(popup.height(), main_height + 6 * style.ROW_HEIGHT)
+        self.assertEqual(popup.width(), style.WIDTH + 2 * style.SHADOW)
+
+    def test_preset_page_opens_scrolled_to_the_active_preset(self) -> None:
+        from tray_workers import TrayPresetSnapshot
+
+        base = self._snapshot(count=150)
+        snapshot = TrayPresetSnapshot(
+            launch_method=base.launch_method,
+            presets=base.presets,
+            selected_file_name="extra100.txt",
+            selected_display_name="Extra 100",
+        )
+        manager, _feature, _port = self._manager(snapshot=snapshot)
+        popup = self._popup(manager)
+        manager.show_context_menu()
+        popup.open_page("presets")
+
+        checked = next(index for index, row in enumerate(popup.rows()) if row.checked)
+        self.assertTrue(popup._body_rect().contains(popup._row_rect(checked)))
+
+    def test_typing_filters_presets_and_escape_steps_back(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        manager, _feature, _port = self._manager(snapshot=self._snapshot(count=20))
+        popup = self._popup(manager)
+        manager.show_context_menu()
+        popup.open_page("presets")
+        height = popup.height()
+
+        QTest.keyClicks(popup, "game")
+        self.assertEqual([row.text for row in popup.rows() if row.kind == "item"], ["Game filter"])
+        self.assertEqual(popup.height(), height)
+
+        QTest.keyClicks(popup, "zz")
+        self.assertEqual([row.kind for row in popup.rows()][-1], "note")
+
+        QTest.keyClick(popup, Qt.Key.Key_Escape)
+        self.assertEqual((popup.query(), popup.page_key()), ("", "presets"))
+        QTest.keyClick(popup, Qt.Key.Key_Escape)
+        self.assertEqual(popup.page_key(), "main")
+        QTest.keyClick(popup, Qt.Key.Key_Escape)
+        self.assertFalse(popup.isVisible())
+
+    def test_click_on_row_closes_menu_and_runs_command(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        manager, feature, _port = self._manager(phase="running", snapshot=self._snapshot())
+        popup = self._popup(manager)
+        manager.show_context_menu()
+        rows = popup.rows()
+
+        restart = next(index for index, row in enumerate(rows) if row.command == "restart_dpi")
+        QTest.mouseClick(popup, Qt.MouseButton.LeftButton, pos=popup._row_rect(restart).center())
+        self.assertFalse(popup.isVisible())
+        self._app.processEvents()
+        feature.restart_dpi.assert_called_once_with()
+
+    def test_click_on_disabled_row_does_nothing(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        manager, feature, _port = self._manager(phase="stopping", snapshot=self._snapshot())
+        popup = self._popup(manager)
+        manager.show_context_menu()
+
+        launch = next(index for index, row in enumerate(popup.rows()) if row.command == "toggle_dpi")
+        QTest.mouseClick(popup, Qt.MouseButton.LeftButton, pos=popup._row_rect(launch).center())
+        self._app.processEvents()
+
+        self.assertTrue(popup.isVisible())
+        feature.toggle_dpi.assert_not_called()
+
+    def test_keyboard_walks_rows_and_opens_preset_page(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        manager, _feature, _port = self._manager(phase="stopped", snapshot=self._snapshot())
+        popup = self._popup(manager)
+        manager.show_context_menu()
+
+        visited = []
+        for _ in range(3):
+            QTest.keyClick(popup, Qt.Key.Key_Down)
+            visited.append(popup.current_row().text)
+        self.assertEqual(visited, ["Zapret 2 · остановлен", "Запустить Zapret", "Пресет"])
+
+        QTest.keyClick(popup, Qt.Key.Key_Right)
+        self.assertEqual(popup.page_key(), "presets")
+        QTest.keyClick(popup, Qt.Key.Key_Left)
+        self.assertEqual(popup.page_key(), "main")
+
+    def test_menu_stays_inside_the_screen_and_keeps_its_edge(self) -> None:
+        from PyQt6.QtCore import QPoint, QRect
+        from ui.tray_menu.popup import menu_origin
+
+        available = QRect(0, 0, 1920, 1040)
+        anchor = QPoint(1900, 1070)
+        short = menu_origin(anchor=anchor, edge_y=1062, opens_up=True, width=292, height=300, available=available)
+        tall = menu_origin(anchor=anchor, edge_y=1062, opens_up=True, width=292, height=450, available=available)
+        down = menu_origin(anchor=QPoint(-50, 5), edge_y=13, opens_up=False, width=292, height=300, available=available)
+
+        self.assertEqual((short.x(), short.y() + 300), (1920 - 292 - 8, 1040 - 8))
+        self.assertEqual(tall.y() + 450, short.y() + 300)
+        self.assertEqual((down.x(), down.y()), (8, 13))
+
+    def test_every_menu_icon_is_drawn(self) -> None:
+        from PyQt6.QtCore import QRectF
+        from PyQt6.QtGui import QColor, QImage, QPainter
+        from ui.tray_menu import style
+
+        manager, _feature, _port = self._manager(phase="running", snapshot=self._snapshot())
+        used = {row.icon for page in manager._menu_model().pages.values() for row in page.rows if row.icon}
+        self.assertLessEqual(used, set(style.tray_icon_names()))
+
+        for name in style.tray_icon_names():
+            with self.subTest(icon=name):
+                image = QImage(32, 32, QImage.Format.Format_ARGB32_Premultiplied)
+                image.fill(0)
+                painter = QPainter(image)
+                style.paint_tray_icon(painter, name, QRectF(0, 0, 32, 32), QColor("#ffffff"))
+                painter.end()
+                self.assertTrue(any(image.pixel(x, y) for x in range(32) for y in range(32)))
+
+    def test_tray_menu_does_not_use_library_menu(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "src"
+        sources = [root / "tray.py", *sorted((root / "ui" / "tray_menu").glob("*.py"))]
+
+        for path in sources:
+            with self.subTest(file=path.name):
+                source = path.read_text(encoding="utf-8")
+                self.assertNotIn("RoundMenu", source)
+                self.assertNotIn("QMenu", source)
 
     def test_tray_icon_dot_color_by_phase(self) -> None:
         import tray

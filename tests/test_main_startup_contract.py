@@ -1030,7 +1030,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertNotIn("from qfluentwidgets import", top_level)
         self.assertNotIn("from log.log import", top_level)
         self.assertIn("from ui.window_adapter import show_window", inspect.getsource(tray_window_port.TrayWindowPort.show))
-        self.assertIn("from ui.popup_menu import exec_popup_menu", inspect.getsource(tray_window_port.TrayWindowPort.exec_popup_menu))
+        # Меню трея — своё окошко ui.tray_menu, окну для него ничего строить не нужно.
+        self.assertNotIn("qfluentwidgets", source)
+        self.assertNotIn("popup_menu", source)
 
     def test_window_page_actions_defers_heavy_ui_helpers(self) -> None:
         import inspect

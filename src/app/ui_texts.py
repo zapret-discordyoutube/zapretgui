@@ -5457,6 +5457,14 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
         "ru": "Пресетов пока нет",
         "en": "No presets yet",
     },
+    "tray.menu.search": {
+        "ru": "Поиск — начните печатать",
+        "en": "Search — just start typing",
+    },
+    "tray.menu.search_empty": {
+        "ru": "Ничего не найдено",
+        "en": "Nothing found",
+    },
     "tray.menu.show": {
         "ru": "Показать окно",
         "en": "Show window",

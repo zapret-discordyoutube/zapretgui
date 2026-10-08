@@ -10,21 +10,6 @@ class TrayWindowPort:
 
     _window: Any
 
-    def create_menu(self):
-        from qfluentwidgets import RoundMenu
-
-        return RoundMenu(parent=self._window)
-
-    def exec_popup_menu(self, menu, position) -> None:
-        from ui.popup_menu import exec_popup_menu
-
-        exec_popup_menu(
-            menu,
-            position,
-            owner=self._window,
-            monitor_global_mouse=True,
-        )
-
     def prompt_console_command(self):
         from PyQt6.QtWidgets import QInputDialog, QLineEdit
 

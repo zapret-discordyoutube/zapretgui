@@ -8,20 +8,13 @@ import sys
 import time
 from ctypes import wintypes
 
-from PyQt6.QtCore import QPoint, QPointF, QSize, Qt, QTimer
+from PyQt6.QtCore import QPointF, QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QCursor, QIcon, QImage, QPainter
-from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox
-from qfluentwidgets import Action, CheckableMenu, FluentIcon, MenuIndicatorType, RoundMenu
+from PyQt6.QtWidgets import QMessageBox
 
-from ui.launch_control import (
-    BUSY_LAUNCH_PHASES,
-    mode_label_for_launch_method,
-    normalize_launch_phase,
-    phase_color,
-    toggle_action_for_phase,
-)
+from ui.launch_control import mode_label_for_launch_method, normalize_launch_phase, phase_color
 from ui.message_box_accessibility import set_message_box_button_accessibility
-from ui.widgets.tray_status_header import TrayStatusHeader
+from ui.tray_menu.model import TrayMenuState, build_tray_menu, tray_status_text
 
 try:
     from log.log import log
@@ -270,26 +263,6 @@ def _get_y_lparam(value: int) -> int:
     return _signed_word(int(value) >> 16)
 
 
-def _fluent_icon(name: str):
-    return getattr(FluentIcon, name, None)
-
-
-def _make_menu_action(text: str, *, icon=None, parent=None):
-    if icon is not None:
-        try:
-            return Action(icon, text, parent)
-        except TypeError:
-            pass
-
-    try:
-        action = Action(text, parent)
-    except TypeError:
-        action = Action(text)
-    if icon is not None and hasattr(action, "setIcon"):
-        action.setIcon(icon)
-    return action
-
-
 # ---- иконка трея с точкой состояния ----------------------------------------
 
 # Точка в правом нижнем углу логотипа: примерно 40% стороны. Вокруг неё логотип
@@ -409,22 +382,6 @@ def _hicon_from_image(image: QImage):
 
 # ---- тексты ---------------------------------------------------------------
 
-_STATUS_DEFAULTS = {
-    "running": "работает",
-    "starting": "запускается",
-    "stopping": "останавливается",
-    "stopped": "остановлен",
-    "failed": "ошибка запуска",
-}
-
-
-def tray_status_text(phase: str, *, language: str | None = None) -> str:
-    key = normalize_launch_phase(phase)
-    if key == "autostart_pending":
-        key = "starting"
-    return tr_catalog(f"tray.status.{key}", language=language, default=_STATUS_DEFAULTS[key])
-
-
 def build_tray_tooltip(*, phase: str, launch_method: str, preset_name: str, language: str | None = None) -> str:
     mode = mode_label_for_launch_method(launch_method)
     lines = [f"{mode} — {tray_status_text(phase, language=language)}"]
@@ -439,10 +396,10 @@ class SystemTrayManager:
     """Windows-first менеджер системного трея.
 
     Production-путь для Windows один: native tray icon через Shell_NotifyIcon
-    без Qt-tray слоя. Меню — RoundMenu из qfluentwidgets.
+    без Qt-tray слоя. Меню — своё окошко ui.tray_menu: менеджер отдаёт ему
+    описание строк и выполняет команду выбранной строки.
     """
 
-    MENU_MIN_WIDTH = 300
     STOPPED_NOTIFY_DELAY_MS = 1500
 
     def __init__(self, window_port, icon_path, app_version, *, tray_feature):
@@ -452,9 +409,7 @@ class SystemTrayManager:
         self.app_version = str(app_version or "").strip()
         self._icon_visible = False
         self._tray_hint_shown_this_session = False
-        self._menu = None
-        self._header = None
-        self._launch_action = None
+        self._popup = None
         self._toggle_request_pending = False
         self._last_toggle_monotonic = 0.0
         self._icon_handle = None
@@ -564,6 +519,10 @@ class SystemTrayManager:
     def cleanup(self) -> None:
         self._cancel_stopped_notification()
         self.hide_icon()
+        popup, self._popup = self._popup, None
+        if popup is not None:
+            popup.hide()
+            popup.deleteLater()
 
         window = self._message_window
         self._message_window = None
@@ -626,8 +585,10 @@ class SystemTrayManager:
 
         if previous_phase and previous_phase != phase:
             self._notify_launch_transition(previous_phase, phase)
-        if self._menu is not None and self._menu.isVisible():
-            self._refresh_open_menu()
+        popup = self._popup
+        if popup is not None and popup.isVisible():
+            # Открытое меню живо: шапка, главный пункт и список пресетов следуют за состоянием.
+            popup.set_model(self._menu_model())
 
     def _notify_launch_transition(self, previous_phase: str, phase: str) -> None:
         if phase in {"starting", "autostart_pending", "running"}:
@@ -733,37 +694,34 @@ class SystemTrayManager:
     # ---- меню ------------------------------------------------------------
 
     def show_context_menu(self, anchor_x: int | None = None, anchor_y: int | None = None) -> None:
-        current = self._menu
+        # Координаты из сообщения Windows даны в точках экрана без учёта масштаба,
+        # а Qt считает с масштабом, поэтому меню ставится по положению курсора.
+        _ = anchor_x, anchor_y
+        popup = self._ensure_popup()
+        if popup.isVisible():
+            return
+        popup.set_model(self._menu_model())
         try:
-            if current is not None and current.isVisible():
-                return
-        except Exception:
-            pass
-
-        # Меню собирается заново при каждом открытии: RoundMenu не умеет прятать
-        # пункты и переименовывать подменю, а так в нём всегда актуальное состояние.
-        menu = self._build_menu()
-        self._menu = menu
-        # Список пресетов перечитывается в фоне: новые пресеты появятся к следующему открытию.
+            popup.open_at(QCursor.pos())
+        except Exception as e:
+            log(f"Не удалось показать tray menu: {e}", "WARNING")
+            return
+        # Список пресетов перечитывается в фоне; когда он придёт, открытое меню обновится само.
         try:
             self._tray_feature.refresh_preset_snapshot()
         except Exception:
             pass
 
-        position = self._resolve_menu_position(menu, anchor_x=anchor_x, anchor_y=anchor_y)
-        try:
-            self.window_port.exec_popup_menu(menu, position)
-        except Exception as e:
-            log(f"Не удалось показать tray menu: {e}", "WARNING")
-        finally:
-            if self._menu is menu:
-                self._menu = None
-                self._header = None
-                self._launch_action = None
-            try:
-                menu.deleteLater()
-            except Exception:
-                pass
+    def _ensure_popup(self):
+        if self._popup is None:
+            self._popup = self._create_popup()
+            self._popup.commandTriggered.connect(self._run_menu_command)
+        return self._popup
+
+    def _create_popup(self):
+        from ui.tray_menu.popup import TrayMenuPopup
+
+        return TrayMenuPopup()
 
     def _menu_launch_phase(self) -> str:
         try:
@@ -777,183 +735,55 @@ class SystemTrayManager:
         except Exception:
             return None
 
-    def _build_menu(self) -> QMenu:
-        language = self._language()
-        phase = self._menu_launch_phase()
-        snapshot = self._menu_snapshot()
-
-        menu = self.window_port.create_menu()
-        try:
-            menu.setMinimumWidth(self.MENU_MIN_WIDTH)
-        except Exception:
-            pass
-
-        # Шапка: состояние Zapret и пресет. Клик по ней открывает окно.
-        header = TrayStatusHeader()
-        header.setFixedWidth(self.MENU_MIN_WIDTH - 12)
-        header.setFixedHeight(52)
-        self._header = header
-        self._sync_header(phase, snapshot, language)
-        if isinstance(menu, RoundMenu):
-            menu.addWidget(header, selectable=True, onClick=self.show_window)
-            menu.addSeparator()
-
-        # Главное действие — первым: запустить или остановить.
-        launch_action = _make_menu_action("", parent=menu)
-        self._launch_action = launch_action
-        self._sync_launch_action(phase, language)
-        launch_action.triggered.connect(self._on_launch_action)
-        menu.addAction(launch_action)
-
-        if phase == "running":
-            restart_action = _make_menu_action(
-                tr_catalog("tray.menu.restart", language=language, default="Перезапустить"),
-                icon=_fluent_icon("SYNC"),
-                parent=menu,
-            )
-            restart_action.triggered.connect(lambda _checked=False: self._tray_feature.restart_dpi())
-            menu.addAction(restart_action)
-
-        preset_menu = self._build_preset_menu(menu, snapshot, language)
-        if preset_menu is not None:
-            menu.addMenu(preset_menu)
-
-        menu.addSeparator()
-
-        window_visible = self._is_window_visible()
-        show_window_action = _make_menu_action(
-            tr_catalog("tray.menu.hide", language=language, default="Скрыть в трей")
-            if window_visible
-            else tr_catalog("tray.menu.show", language=language, default="Показать окно"),
-            icon=_fluent_icon("VIEW"),
-            parent=menu,
-        )
-        show_window_action.triggered.connect(self._toggle_primary_visibility_action)
-        menu.addAction(show_window_action)
-
-        try:
-            tg_label = self._tray_feature.telegram_proxy_label()
-        except Exception:
-            tg_label = "Telegram Proxy"
-        tg_proxy_action = _make_menu_action(tg_label, icon=_fluent_icon("SEND"), parent=menu)
-        tg_proxy_action.triggered.connect(self._toggle_tg_proxy)
-        menu.addAction(tg_proxy_action)
-
-        opacity_menu = RoundMenu(
-            tr_catalog("tray.menu.acrylic", language=language, default="Эффект акрилика окна")
-            if self._is_windows_11_or_newer()
-            else tr_catalog("tray.menu.opacity", language=language, default="Прозрачность окна"),
-            parent=menu,
-        )
-        opacity_menu.setIcon(_fluent_icon("PALETTE"))
-        for value, title in self._opacity_presets():
-            action = _make_menu_action(title, parent=opacity_menu)
-            action.triggered.connect(lambda checked=False, v=value: self._set_window_opacity(v))
-            opacity_menu.addAction(action)
-        menu.addMenu(opacity_menu)
-
-        console_action = _make_menu_action(
-            tr_catalog("tray.menu.console", language=language, default="Консоль"),
-            icon=_fluent_icon("COMMAND_PROMPT"),
-            parent=menu,
-        )
-        console_action.triggered.connect(self.show_console)
-        menu.addAction(console_action)
-
-        menu.addSeparator()
-
-        exit_action = _make_menu_action(
-            tr_catalog("tray.menu.exit", language=language, default="Выход"),
-            icon=_fluent_icon("RETURN"),
-            parent=menu,
-        )
-        exit_action.triggered.connect(self.exit_only)
-        menu.addAction(exit_action)
-
-        exit_stop_action = _make_menu_action(
-            tr_catalog("tray.menu.exit_stop", language=language, default="Выход и остановить"),
-            icon=_fluent_icon("POWER_BUTTON"),
-            parent=menu,
-        )
-        exit_stop_action.triggered.connect(self.exit_and_stop)
-        exit_stop_action.setEnabled(phase in {"autostart_pending", "starting", "running", "stopping"})
-        menu.addAction(exit_stop_action)
-
-        return menu
-
-    def _build_preset_menu(self, parent_menu, snapshot, language: str | None):
+    def _menu_state(self) -> TrayMenuState:
         from settings.mode import is_preset_launch_method
 
-        if snapshot is None or not is_preset_launch_method(snapshot.launch_method):
-            return None
-        title = tr_catalog("tray.menu.preset", language=language, default="Пресет")
-        preset_menu = CheckableMenu(title, parent=parent_menu, indicatorType=MenuIndicatorType.RADIO)
-        preset_menu.setIcon(_fluent_icon("BOOK_SHELF"))
-        if not snapshot.presets:
-            empty = _make_menu_action(
-                tr_catalog("tray.menu.presets_empty", language=language, default="Пресетов пока нет"),
-                parent=preset_menu,
-            )
-            empty.setEnabled(False)
-            preset_menu.addAction(empty)
-            return preset_menu
-        for file_name, display_name in snapshot.presets:
-            action = _make_menu_action(display_name, parent=preset_menu)
-            action.setCheckable(True)
-            action.setChecked(snapshot.is_selected(file_name))
-            action.triggered.connect(
-                lambda _checked=False, f=file_name, d=display_name: self._activate_preset(f, d)
-            )
-            preset_menu.addAction(action)
-        return preset_menu
-
-    def _sync_header(self, phase: str, snapshot, language: str | None) -> None:
-        header = self._header
-        if header is None:
-            return
-        launch_method = self._launch_method or ("" if snapshot is None else snapshot.launch_method)
-        preset_name = self._preset_name or ("" if snapshot is None else snapshot.selected_display_name)
-        mode = mode_label_for_launch_method(launch_method)
-        header.set_status(
-            title=f"{mode} · {tray_status_text(phase, language=language)}",
-            preset=preset_name,
-            color=phase_color(phase),
+        snapshot = self._menu_snapshot()
+        has_presets = snapshot is not None and is_preset_launch_method(snapshot.launch_method)
+        try:
+            telegram_label = str(self._tray_feature.telegram_proxy_label())
+        except Exception:
+            telegram_label = "Telegram Proxy"
+        return TrayMenuState(
+            phase=self._menu_launch_phase(),
+            launch_method=self._launch_method or ("" if snapshot is None else snapshot.launch_method),
+            preset_name=self._preset_name or ("" if snapshot is None else snapshot.selected_display_name),
+            presets=tuple(snapshot.presets) if has_presets else (),
+            selected_preset_file=snapshot.selected_file_name if has_presets else "",
+            has_presets=has_presets,
+            window_visible=self._is_window_visible(),
+            telegram_label=telegram_label,
+            windows_11=self._is_windows_11_or_newer(),
+            language=self._language(),
         )
 
-    def _sync_launch_action(self, phase: str, language: str | None) -> None:
-        action = self._launch_action
-        if action is None:
-            return
-        next_step = toggle_action_for_phase(phase)
-        if phase == "stopping":
-            text = tr_catalog("tray.menu.stopping", language=language, default="Zapret останавливается…")
-            icon = _fluent_icon("PAUSE")
-        elif next_step == "stop" and phase in BUSY_LAUNCH_PHASES:
-            text = tr_catalog("tray.menu.stop", language=language, default="Остановить Zapret")
-            icon = _fluent_icon("CANCEL")
-        elif next_step == "stop":
-            text = tr_catalog("tray.menu.stop", language=language, default="Остановить Zapret")
-            icon = _fluent_icon("PAUSE")
+    def _menu_model(self):
+        return build_tray_menu(self._menu_state())
+
+    def _run_menu_command(self, command: str, arg=None) -> None:
+        if command == "activate_preset":
+            file_name, display_name = arg
+            self._tray_feature.activate_preset(file_name, display_name)
+        elif command == "set_window_opacity":
+            self._set_window_opacity(int(arg))
+        elif command == "toggle_dpi":
+            self._tray_feature.toggle_dpi()
+        elif command == "restart_dpi":
+            self._tray_feature.restart_dpi()
+        elif command == "toggle_telegram_proxy":
+            self._toggle_tg_proxy()
+        elif command == "show_window":
+            self.show_window()
+        elif command == "toggle_window":
+            self._toggle_primary_visibility_action()
+        elif command == "show_console":
+            self.show_console()
+        elif command == "exit_only":
+            self.exit_only()
+        elif command == "exit_and_stop":
+            self.exit_and_stop()
         else:
-            text = tr_catalog("tray.menu.start", language=language, default="Запустить Zapret")
-            icon = _fluent_icon("PLAY")
-        action.setText(text)
-        if icon is not None:
-            action.setIcon(icon)
-        action.setEnabled(bool(next_step))
-
-    def _refresh_open_menu(self) -> None:
-        """Открытое меню живо: шапка и главный пункт следуют за фазой запуска."""
-        language = self._language()
-        phase = self._menu_launch_phase()
-        self._sync_header(phase, self._menu_snapshot(), language)
-        self._sync_launch_action(phase, language)
-
-    def _on_launch_action(self) -> None:
-        self._tray_feature.toggle_dpi()
-
-    def _activate_preset(self, file_name: str, display_name: str) -> None:
-        self._tray_feature.activate_preset(file_name, display_name)
+            log(f"Неизвестная команда меню трея: {command}", "WARNING")
 
     def _toggle_primary_visibility_action(self) -> None:
         try:
@@ -963,47 +793,6 @@ class SystemTrayManager:
                 self.show_window()
         except Exception:
             pass
-
-    def _resolve_menu_position(self, menu: QMenu, anchor_x: int | None = None, anchor_y: int | None = None) -> QPoint:
-        if anchor_x is None or anchor_y is None or anchor_x == -1 or anchor_y == -1:
-            global_pos = QCursor.pos()
-        else:
-            global_pos = QPoint(int(anchor_x), int(anchor_y))
-
-        screen = QApplication.screenAt(global_pos)
-        if screen is None:
-            screen = QApplication.primaryScreen()
-        if screen is None:
-            return global_pos
-
-        available = screen.availableGeometry()
-        size = menu.sizeHint()
-        x = int(global_pos.x())
-        y = int(global_pos.y())
-        gap = 8
-
-        # Для нижнего трея меню должно открываться над иконкой, а не прилипать
-        # к самой панели задач. Это визуально естественнее и не создаёт ощущение,
-        # что меню "тонет" в нижней границе экрана.
-        open_upwards = y >= available.bottom() - max(48, size.height() // 3)
-        if open_upwards:
-            y = y - size.height() - gap
-        else:
-            y = y + gap
-
-        if x + size.width() > available.right():
-            x = max(available.left(), available.right() - size.width())
-
-        if y + size.height() > available.bottom():
-            y = max(available.top(), y - size.height())
-
-        if y < available.top():
-            y = available.top()
-
-        if x < available.left():
-            x = available.left()
-
-        return QPoint(x, y)
 
     # ---- уведомления и действия ---------------------------------------
 
@@ -1132,23 +921,6 @@ class SystemTrayManager:
             return sys.platform == "win32" and sys.getwindowsversion().build >= 22000
         except Exception:
             return False
-
-    def _opacity_presets(self) -> list[tuple[int, str]]:
-        if self._is_windows_11_or_newer():
-            return [
-                (100, "100% (максимальный эффект)"),
-                (75, "75%"),
-                (50, "50%"),
-                (25, "25%"),
-                (0, "0% (минимальный эффект)"),
-            ]
-        return [
-            (100, "100% (непрозрачное)"),
-            (75, "75%"),
-            (50, "50%"),
-            (25, "25%"),
-            (0, "0% (прозрачный фон)"),
-        ]
 
 
 class _TrayMessageWindow:
