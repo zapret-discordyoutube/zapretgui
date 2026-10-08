@@ -322,6 +322,41 @@ class NewSectionsCardsTests(unittest.TestCase):
         self.assertEqual(card(hosts_stale=True, cert={"code": "other_site"}).status, "Отвечает другой сайт")
         self.assertNotIn("hosts", card().status)
 
+    def test_site_that_opens_every_other_time_is_a_third_outcome(self) -> None:
+        from blockcheck.ui.block_kinds_view import kind_color, site_groups
+        from blockcheck.ui.check_results import BlockcheckSummaryPanel
+        from blockcheck.ui.site_road import site_road
+        from diagnostics.block_kind import KIND_ORDER, KIND_UNSTABLE, kind_info
+
+        protocols = [{"key": "tls13", "title": "TLS 1.3", "state": "ok", "word": "проходит", "text": "проходит"}]
+        shaky = _service("signal", "Signal", "warn", [_target("signal.org", main=True, protocols=protocols, unstable="открылся со второй попытки, а при повторе снова сбой", rechecked="unstable")])
+        steady = _service("github", "GitHub", "ok", [_target("github.com", main=True)])
+        report = {"services": [shaky, steady], "problems": [{"level": "warn", "kind": "", "title": "Signal", "text": "Signal открывается через раз", "target": "signal.org", "advice": [], "evidence": [], "action": "strategy"}], "working": ["GitHub"]}
+
+        [card] = [item for item in build_cards(report) if item.key == "site:signal"]
+        # На карточке — своё слово и свой вид, а не общее «Есть проблемы».
+        self.assertEqual((card.kind, card.status, card.level), (KIND_UNSTABLE, "Через раз", "warn"))
+        self.assertIn(KIND_UNSTABLE, KIND_ORDER)
+        self.assertIn("через раз", kind_info(KIND_UNSTABLE).title.lower())
+        # В полосе итога — своя доля между «открываются» и блокировками, своим цветом.
+        groups = site_groups(report)
+        self.assertEqual([(group.key, group.names) for group in groups], [("open", ("GitHub",)), (KIND_UNSTABLE, ("Signal",))])
+        self.assertNotEqual(kind_color(KIND_UNSTABLE), kind_color("open"))
+        self.assertNotEqual(kind_color(KIND_UNSTABLE), kind_color("sni"))
+        # Дорога до сайта не оборвана: крестика нет, у сайта — «через раз».
+        stages, broken = site_road(card)
+        self.assertEqual((broken, stages[-1].word, stages[-1].state), (-1, "через раз", "warn"))
+        # В списке проблем — своя группа, а не «Остальное».
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=lambda _key: None)
+        self.addCleanup(panel.deleteLater)
+        panel.show_report(report)
+        [group] = panel.problem_groups()
+        self.assertEqual((group.kind(), group.title_label.text()), (KIND_UNSTABLE, "Открываются через раз"))
+        # Чужой сертификат и запись в hosts важнее: их слово итога остаётся.
+        both = _service("x", "X", "warn", [_target("x.com", main=True, unstable="через раз", hosts_stale=True)])
+        [other] = [item for item in build_cards({"services": [both]}) if item.site]
+        self.assertEqual(other.status, "Мешает запись в hosts")
+
     def test_no_comparison_no_card(self) -> None:
         self.assertFalse([card for card in build_cards({"compare": None}) if card.key == "compare"])
 

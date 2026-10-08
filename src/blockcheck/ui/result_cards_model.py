@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from diagnostics.block_kind import KIND_OTHER, KINDS, kind_info
+from diagnostics.block_kind import kind_info, KIND_OTHER, KIND_UNSTABLE, KINDS
 
 __all__ = [
     "Card",
@@ -254,6 +254,9 @@ def _by_fingerprint(targets: list) -> bool:
 def site_kind(service: dict, level: str) -> str:
     """Вид блокировки сайта. Пусто — сайт открывается или вид неизвестен."""
     kind = str(service.get("kind") or "")
+    if not kind and level == WARN and any(item.get("unstable") for item in service.get("targets") or ()):
+        # Открылся, но через раз: свой вид — третий исход между «открывается» и «заблокирован».
+        return KIND_UNSTABLE
     return kind if level in (FAIL, WARN) and kind in KINDS and kind != KIND_OTHER else ""
 
 

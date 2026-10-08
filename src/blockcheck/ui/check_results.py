@@ -31,7 +31,7 @@ from blockcheck.ui.result_cards import finding_detail_card, state_color
 from blockcheck.ui.result_cards_model import Card, FindingParts, Line, Section, build_cards, read_finding_parts
 from blockcheck.ui.brand_icons import BrandIcon, site_brand
 from diagnostics.compare import GROUP_TITLES
-from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
+from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KIND_UNSTABLE, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip
 from ui.theme import get_cached_qta_pixmap
@@ -1358,6 +1358,8 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
                     (text for text, state in cards[key].chips if state == "fail" and not (cards[key].marks and ": " in text)), ""
                 ),
                 "marks": cards[key].marks,
+                # «Через раз» — своя группа в итоге, а не «Остальное»: вид берётся с карточки сайта.
+                **({"kind": KIND_UNSTABLE} if cards[key].kind == KIND_UNSTABLE else {}),
             }
             if key.startswith("site:") and key in cards
             else item

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 __all__ = [
     "KIND_CERT",
     "KIND_CUT",
+    "KIND_UNSTABLE",
     "KIND_DNS",
     "KIND_FINGERPRINT",
     "KIND_IP",
@@ -48,6 +49,8 @@ __all__ = [
 KIND_IP = "ip"
 KIND_SNI = "sni"
 KIND_CUT = "cut16"
+# Третий исход между «открывается» и «заблокирован»: сайт открылся, но не каждый раз.
+KIND_UNSTABLE = "unstable"
 KIND_STUB = "stub"
 KIND_CERT = "cert"
 # Сайт блокируют, но чем именно — выяснить не удалось.
@@ -149,6 +152,15 @@ KINDS: dict[str, KindInfo] = {
             "и попробуйте другой DNS.",
         ),
         KindInfo(
+            KIND_UNSTABLE,
+            "Открываются через раз",
+            "через раз",
+            "открывается через раз",
+            "Сайт открылся, но не с первой попытки или не по всем своим адресам: фильтр срабатывает не каждый раз. "
+            "В браузере такой сайт то грузится, то нет.",
+            "Подберите стратегию Zapret — с ней сайт будет открываться каждый раз.",
+        ),
+        KindInfo(
             KIND_UNCLEAR,
             "Блокировка, способ не определён",
             "способ не определён",
@@ -210,6 +222,7 @@ KIND_ORDER: tuple[str, ...] = (
     KIND_IP,
     KIND_SNI,
     KIND_CUT,
+    KIND_UNSTABLE,
     KIND_FINGERPRINT,
     KIND_STUB,
     KIND_CERT,

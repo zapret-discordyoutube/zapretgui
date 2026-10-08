@@ -39,6 +39,7 @@ from diagnostics.block_kind import (
     KIND_SYSTEM,
     KIND_NO_CONNECT,
     KIND_UNCLEAR,
+    KIND_UNSTABLE,
     KIND_VOICE,
     kind_info,
 )
@@ -64,6 +65,8 @@ _COLORS: dict[str, tuple[str, str]] = {
     KIND_IP: ("#e5645d", "#b3261e"),
     KIND_SNI: ("#d99a4e", "#955800"),
     KIND_CUT: ("#a48be0", "#6a3fc8"),
+    # «Через раз» — жёлто-зелёный: между зелёным «открываются» и оранжевым «по имени».
+    KIND_UNSTABLE: ("#b9c85a", "#5f7300"),
     KIND_STUB: ("#d17aa5", "#a3266a"),
     KIND_FINGERPRINT: ("#c58fd6", "#8a3fa0"),
     KIND_CERT: ("#cdb15a", "#765a00"),
@@ -83,7 +86,7 @@ _UNKNOWN_TITLE = "Не удалось проверить"
 _OPEN_ABOUT = "Эти сайты открылись так же, как открылись бы в браузере."
 _UNKNOWN_ABOUT = "Проверка этих сайтов не дала ответа: не хватило времени или не удалось узнать адрес."
 # Порядок долей и плиток: сначала хорошее, затем виды по тяжести.
-_SITE_ORDER = (GROUP_OPEN, KIND_IP, KIND_SNI, KIND_CUT, KIND_STUB, KIND_CERT, KIND_UNCLEAR, KIND_NO_CONNECT, KIND_OTHER, GROUP_UNKNOWN)
+_SITE_ORDER = (GROUP_OPEN, KIND_UNSTABLE, KIND_IP, KIND_SNI, KIND_CUT, KIND_STUB, KIND_CERT, KIND_UNCLEAR, KIND_NO_CONNECT, KIND_OTHER, GROUP_UNKNOWN)
 
 
 def _is_light(tokens=None) -> bool:
@@ -139,6 +142,9 @@ def _service_group(service: dict) -> str:
     kind = str(service.get("kind") or "")
     if level in ("fail", "warn") and kind:
         return kind
+    if level == "warn" and any(item.get("unstable") for item in targets):
+        # Открылся, но через раз: не «открывается» и не «заблокирован» — своя доля в полосе.
+        return KIND_UNSTABLE
     if level == "ok" or (level == "warn" and targets and all(item.get("ok") for item in targets)):
         # Подмена DNS при открывающемся сайте — не блокировка сайта.
         return GROUP_OPEN

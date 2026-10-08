@@ -59,6 +59,9 @@ def site_road(card: Card) -> tuple[tuple[RoadStage, ...], int]:
     cut = any("16" in text for text, _state in card.tags)
     if card.level == "ok":
         stages.append(RoadStage("Сайт", "открывается", "ok", "fa5s.globe"))
+    elif card.kind == "unstable":
+        # Доходит, но не каждый раз: дорога не оборвана, поэтому крестика нет.
+        stages.append(RoadStage("Сайт", "через раз", "warn", "fa5s.globe"))
     elif cut:
         stages.append(RoadStage("Сайт", "обрыв на 16 КБ", "fail", "fa5s.globe"))
     else:
