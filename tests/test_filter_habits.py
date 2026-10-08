@@ -252,6 +252,41 @@ class EchTests(unittest.TestCase):
         self.assertEqual(fh.judge_ech(None), (fh.ECH_UNKNOWN, ""))
 
 
+class SiteChoiceTests(unittest.TestCase):
+    def test_sites_come_from_different_services_and_networks(self) -> None:
+        # Три адреса одного сервиса показали бы одно и то же трижды: берём по одному с сервиса.
+        from concurrent.futures import ThreadPoolExecutor
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from diagnostics import block_cause, sections
+
+        def probe(host, ip, code=block_cause.CAUSE_BY_NAME):
+            return SimpleNamespace(host=host, reach=SimpleNamespace(ip=ip, ok=False), cause=SimpleNamespace(code=code))
+
+        collected = {
+            "discord": [probe("discord.com", "162.159.1.1"), probe("gateway.discord.gg", "162.159.2.2")],
+            "x": [probe("x.com", "151.101.1.1")],
+            "linkedin": [probe("www.linkedin.com", "162.159.9.9")],
+            "rutracker": [probe("rutracker.org", "172.67.1.1")],
+            "telegram": [probe("telegram.org", "149.154.1.1", block_cause.CAUSE_ADDRESS_SILENT)],
+        }
+        asked: list[str] = []
+
+        def fake_split(host, ip, **_kwargs):
+            asked.append(host)
+            return fh.SplitFacts(host, ip, cancelled=True)
+
+        with ThreadPoolExecutor(4) as pool:
+            run = SimpleNamespace(
+                submit=pool.submit, wait=lambda future: future.result(), dns_cancelled=lambda: False, probe_cancel=None
+            )
+            with patch.object(fh, "check_split", fake_split):
+                sections.check_filter_habits(run, collected, lambda _line: None)
+
+        self.assertEqual(sorted(asked), ["discord.com", "rutracker.org", "x.com"])
+
+
 class ReportTests(unittest.TestCase):
     def _report(self, *filters, ech=(fh.ECH_FINE, "соединения с ECH проходят"), tools=()):
         return fh.summarize([_verdict(item) for item in filters], ech, tools=tools)

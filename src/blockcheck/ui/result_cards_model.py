@@ -374,6 +374,8 @@ def _site_card(service: dict) -> Card:
             rows.append(Line(FAIL, "Как блокируют", str(item["cause_text"])))
         if "registry" in item:
             rows.append(Line(INFO, "Реестр РКН", _registry_text(item)))
+        if item.get("seconds"):
+            rows.append(Line(INFO, "Проверка заняла", f"{float(item['seconds']):.0f} с"))
         if item.get("quic_text"):
             rows.append(
                 Line(WARN if item.get("quic") == "blocked_by_name" else INFO, "QUIC (UDP 443)", str(item["quic_text"]))

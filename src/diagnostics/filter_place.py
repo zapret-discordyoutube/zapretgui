@@ -422,7 +422,9 @@ def aggregate(
     basis = f"совпало по {_sites_word(votes)}" if votes > 1 else "найдено по одному сайту"
     if local:
         reasons.append(f"во время поиска работали: {', '.join(local)} — они могли исказить результат")
-        confidence = CONFIDENCE_LOW
+        # Программа обхода на этом компьютере гасила бы поток уже на первом узле; раз место дальше,
+        # это не она. Уверенность всё же на ступень ниже: VPN мог изменить саму дорогу.
+        confidence = CONFIDENCE_MEDIUM if confidence == CONFIDENCE_HIGH else CONFIDENCE_LOW
     return Placement(
         STATE_FOUND,
         f"Фильтр стоит {where}" + (f" — {whose}" if whose else "") + f". Уверенность {_CONFIDENCE_TEXT[confidence]}: {basis}.",

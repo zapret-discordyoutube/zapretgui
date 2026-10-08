@@ -297,7 +297,7 @@ class _Net:
             # Список реестра РКН качается из сети и лежит на диске: в сценариях движка его нет.
             patch.object(sections, "start_registry", return_value=lambda _seconds: self.registry),
             # Пробы «как работает фильтр» шлют свои приветствия в сеть.
-            patch.object(sections, "check_filter_habits", side_effect=lambda _run, _collected, _emit: self.habits),
+            patch.object(sections, "check_filter_habits", side_effect=lambda _run, _collected, _emit, **_kwargs: self.habits),
             # Серии пакетов UDP уходят на настоящие серверы.
             patch.object(sections, "check_udp_burst", side_effect=lambda _run: self.burst),
             patch.object(engine, "running_bypass_tools", return_value=self.bypass_tools),
@@ -938,6 +938,14 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertTrue(all(item["partial"] for item in seen[:-1]))
         self.assertEqual(seen[-1], final)
         self.assertFalse(final["partial"])
+        # У каждого адреса записано, сколько секунд на него ушло, — и это видно в подробностях сайта.
+        target = final["services"][0]["targets"][0]
+        self.assertGreaterEqual(target["seconds"], 0.0)
+        from blockcheck.ui.result_cards_model import build_cards
+
+        timed = {**final, "services": [{**final["services"][0], "targets": [{**target, "seconds": 12.4}]}]}
+        rows = [line for section in build_cards(timed)[0].sections for line in section.lines]
+        self.assertIn(("Проверка заняла", "12 с"), [(line.name, line.text) for line in rows])
         # Набор разделов один и тот же с первого отчёта: экран не гадает, каких ключей ещё нет.
         self.assertLessEqual(set(engine._REPORT_SECTIONS), set(seen[0]))
 

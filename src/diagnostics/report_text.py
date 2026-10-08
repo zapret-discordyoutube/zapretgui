@@ -198,6 +198,7 @@ def target_report(probe: Probe) -> dict:
         "hosts_stale": probe.hosts_stale,
         # Повторная проверка поодиночке: "opened" — открылся со второго раза, "same" — сбой повторился.
         "rechecked": probe.rechecked,
+        "seconds": round(probe.seconds, 1),
         "note": probe.discovery_note,
     }
 

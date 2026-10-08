@@ -162,7 +162,9 @@ class AggregateTests(unittest.TestCase):
     def test_running_bypass_tool_lowers_the_confidence_of_a_farther_place(self) -> None:
         place = fp.aggregate(self._verdicts(4, 4, 4), _hops(), zapret_running=True)
 
-        self.assertEqual((place.state, place.confidence), ("found", "low"))
+        # Три сайта сошлись: уверенность была бы высокой, с работающим обходом — на ступень ниже.
+        self.assertEqual((place.state, place.confidence), ("found", "medium"))
+        self.assertEqual(fp.aggregate(self._verdicts(4, 4), _hops(), zapret_running=True).confidence, "low")
         self.assertIn("Zapret", place.reasons[-1])
 
     def test_nothing_found_and_nothing_to_search_are_different_answers(self) -> None:

@@ -482,12 +482,24 @@ def check_filter_habits(run: Run, collected: dict[str, list[Probe]], emit: Emit,
             time.sleep(seconds)
 
     probes = [probe for items in collected.values() for probe in items]
-    # Дробление сравнивается только там, где блокировка по имени уже доказана.
+    # Дробление сравнивается только там, где блокировка по имени уже доказана. С каждого сервиса —
+    # один адрес, и сначала из разных сетей: три адреса одного Discord показали бы одно и то же трижды.
     blocked: dict[str, Probe] = {}
-    for probe in probes:
-        ip = probe.reach.ip if probe.reach is not None else ""
-        if ip and ":" not in ip and probe.cause is not None and probe.cause.code == block_cause.CAUSE_BY_NAME:
-            blocked.setdefault(ip, probe)
+    spare: dict[str, Probe] = {}
+    networks: set[str] = set()
+    for items in collected.values():
+        for probe in items:
+            ip = probe.reach.ip if probe.reach is not None else ""
+            if not ip or ":" in ip or probe.cause is None or probe.cause.code != block_cause.CAUSE_BY_NAME:
+                continue
+            network = ".".join(ip.split(".")[:2])
+            if network in networks:
+                spare.setdefault(ip, probe)
+            else:
+                blocked[ip] = probe
+                networks.add(network)
+            break
+    blocked.update({ip: probe for ip, probe in spare.items() if ip not in blocked})
     cloudflare = next(
         (probe for probe in probes if probe.host == ECH_HOST and probe.reach is not None and probe.reach.ok and ":" not in probe.reach.ip),
         None,

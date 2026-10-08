@@ -523,7 +523,9 @@ def _run_probes(
 
     def _probe(*args, **kwargs) -> _Probe:
         try:
+            started = time.monotonic()
             probe = _probe_target(*args, **kwargs)
+            probe.seconds = time.monotonic() - started
             if on_probe is not None:
                 on_probe(args[2], probe)
             return probe
