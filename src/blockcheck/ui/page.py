@@ -844,6 +844,7 @@ class BlockcheckPage(BasePage):
         report, self._pending_partial = self._pending_partial, None
         if report is None or self._cleanup_in_progress or not self._run_runtime.is_running():
             return
+        self._progress_steps.set_seconds(report.get("step_seconds") or {})
         # Пока на экране пример экскурсии, настоящие карточки ждут итога.
         if self._tour_demo_shown():
             return

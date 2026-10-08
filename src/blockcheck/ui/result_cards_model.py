@@ -922,7 +922,65 @@ def build_cards(report: dict) -> list[Card]:
     system = list(report.get("system") or ())
     if system:
         cards.append(_system_card(system))
+    run = _run_card(report)
+    if run is not None:
+        cards.append(run)
     return cards
+
+
+def _registry_lines(summary: dict) -> tuple[Line, ...]:
+    """Сам список реестра РКН, по которому ставятся отметки «в реестре»: свежий ли и сколько в нём записей."""
+    import time
+
+    state = str(summary.get("state") or "")
+    if not state:
+        return ()
+    if not summary.get("hosts"):
+        return (Line(UNKNOWN, "Список", "скачать не удалось — отметок «в реестре» в этой проверке нет"),)
+    when = time.strftime("%d.%m.%Y", time.localtime(float(summary.get("updated") or 0)))
+    fresh = state == "fresh"
+    return (
+        Line(OK if fresh else WARN, "Скачан", when if fresh else f"{when} — давно не обновлялся, свежий скачать не удалось"),
+        Line(INFO, "Имён сайтов", f"{int(summary['hosts']):,}".replace(",", " ")),
+        Line(INFO, "Адресов и сетей", f"{int(summary.get('networks') or 0):,}".replace(",", " ")),
+    )
+
+
+def _run_card(report: dict) -> Card | None:
+    """«Ход проверки»: сколько шёл каждый шаг и при каких условиях проверяли."""
+    from diagnostics.report_text import STEP_TITLES
+
+    seconds = {str(name): float(value) for name, value in (report.get("step_seconds") or {}).items()}
+    times = tuple(
+        Line(INFO, STEP_TITLES.get(name, name).capitalize(), f"{value:.0f} с") for name, value in seconds.items()
+    )
+    conditions = [Line(INFO, str(line)) for line in report.get("environment") or () if str(line).strip()]
+    if report.get("zapret_line"):
+        conditions.append(Line(INFO, str(report["zapret_line"])))
+    tools = [str(name) for name in report.get("other_bypass_tools") or ()]
+    if tools:
+        conditions.append(Line(WARN, "Другие программы обхода и VPN", ", ".join(tools)))
+    listing = _registry_lines(report.get("registry") or {})
+    if not times and not conditions and not listing:
+        return None
+    sections = []
+    if times:
+        sections.append(Section("Время по шагам", times))
+    if conditions:
+        sections.append(Section("Условия проверки", tuple(conditions)))
+    if listing:
+        sections.append(Section("Список реестра РКН", listing))
+    longest = max(seconds.items(), key=lambda item: item[1], default=None)
+    status = f"Дольше всего: {STEP_TITLES.get(longest[0], longest[0])}, {longest[1]:.0f} с" if longest else "Условия проверки"
+    return Card(
+        key="run",
+        icon="fa5s.stopwatch",
+        title="Ход проверки",
+        level=WARN if tools else INFO,
+        status=status,
+        lines=(times or tuple(conditions) or listing)[:PREVIEW_LINES],
+        sections=tuple(sections),
+    )
 
 
 def build_counters(report: dict) -> list[Counter]:

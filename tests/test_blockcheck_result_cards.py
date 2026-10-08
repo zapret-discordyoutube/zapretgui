@@ -365,6 +365,49 @@ class CardsWidgetsTests(unittest.TestCase):
         self.assertFalse(view.has_cards())
         self.assertEqual(view.sites_grid.cards(), [])
 
+    def test_site_road_shows_where_the_connection_is_cut(self) -> None:
+        from blockcheck.ui.site_road import SiteRoad, site_road
+
+        def proto(title: str, state: str, word: str) -> dict:
+            return {"key": title, "title": title, "state": state, "word": word, "text": word}
+
+        def card(key: str, level: str, kind: str, words: tuple[str, str, str, str], **extra):
+            states = ["ok" if word == "проходит" else "fail" for word in words]
+            protocols = [proto(title, state, word) for title, state, word in zip(("TLS 1.2", "TLS 1.3", "Как Chrome", "HTTP"), states, words)]
+            target = _target(f"{key}.com", ok=level == "ok", main=True, protocols=protocols, quic="ok", dns_state="ok", **extra)
+            [built] = [item for item in build_cards({"services": [_service(key, key.title(), level, [target], kind=kind)]}) if item.site]
+            return built
+
+        by_name = card("instagram", "fail", "sni", ("сброс", "сброс", "проходит", "проходит"))
+        stages, broken = site_road(by_name)
+        self.assertEqual([stage.title for stage in stages], ["Вы", "DNS", "Сервер", "TLS", "Сайт"])
+        # Режут на TLS: до него всё зелёное, сам он красный, до сайта не дошли.
+        self.assertEqual(broken, 3)
+        self.assertEqual([stage.state for stage in stages], ["ok", "ok", "ok", "fail", "unknown"])
+        self.assertEqual((stages[3].word, stages[4].word), ("сброс", "не дошли"))
+
+        by_address = card("telegram", "fail", "ip", ("нет соединения",) * 4)
+        stages, broken = site_road(by_address)
+        self.assertEqual((broken, stages[2].word, stages[3].word), (2, "адрес закрыт", "не дошли"))
+
+        opens = card("youtube", "ok", "", ("проходит",) * 4)
+        stages, broken = site_road(opens)
+        self.assertEqual((broken, [stage.state for stage in stages]), (-1, ["ok"] * 5))
+
+        view = ResultDetailView()
+        self.addCleanup(view.deleteLater)
+        view.resize(1000, 600)
+        view.show()
+        view.show_card(by_name)
+        self.assertIsInstance(view.road, SiteRoad)
+        # Точка доезжает до места обрыва, а не до сайта.
+        self.assertEqual(view.road.last_reached(), 3)
+        self.assertLess(view.road.node_center(0).x(), view.road.node_center(4).x())
+        view.road.grab()
+        # У отчёта не про сайт дороги нет.
+        view.show_card(Card("hostings", "fa5s.server", "Хостинги", "ok", "В порядке"))
+        self.assertIsNone(view.road)
+
     def test_card_shows_few_lines_and_says_how_many_are_hidden(self) -> None:
         view = ResultCardsView()
         self.addCleanup(view.deleteLater)
@@ -445,6 +488,43 @@ class CardsWidgetsTests(unittest.TestCase):
         self.assertEqual(steps.accessibleName(), "Ход BlockCheck: готово шагов 1 из 3")
         steps.start(("sites",))
         self.assertEqual(steps.rows["voice"].count_label.text(), "ждёт")
+
+    def test_progress_rows_show_how_long_each_step_took(self) -> None:
+        # Секунды приходят из отчёта проверки (step_seconds), а не считаются экраном.
+        steps = ProgressSteps()
+        self.addCleanup(steps.deleteLater)
+        steps.start(("sites", "hostings", "voice"))
+        steps.set_progress("sites", 45, 45)
+        steps.set_progress("hostings", 3, 57)
+        steps.set_seconds({"sites": 23.4, "hostings": 5.0, "voice": 9.0, "нет такого": 1.0})
+
+        self.assertEqual(steps.rows["sites"].count_label.text(), "45 / 45 · 23 с")
+        self.assertEqual(steps.rows["hostings"].count_label.text(), "3 / 57 · 5 с")
+        # Шаг ещё не начинался: секунд у него на экране нет.
+        self.assertEqual(steps.rows["voice"].count_label.text(), "ждёт")
+        steps.set_progress("voice", 1, 1)
+        self.assertEqual(steps.rows["voice"].count_label.text(), "готово · 9 с")
+        steps.start(("sites",))
+        steps.set_progress("sites", 0, 45)
+        self.assertEqual(steps.rows["sites"].count_label.text(), "0 / 45")
+
+    def test_run_card_shows_step_times_conditions_and_the_registry_list(self) -> None:
+        report = {
+            "step_seconds": {"sites": 95.0, "hostings": 30.2},
+            "environment": ["🖥️ Windows 10"],
+            "zapret_line": "✅ Zapret запущен",
+            "other_bypass_tools": ["sing-box"],
+            "registry": {"state": "fresh", "updated": 1791454670.0, "hosts": 1709109, "networks": 69858},
+        }
+        [card] = build_cards(report)
+
+        self.assertEqual((card.key, card.title, card.level), ("run", "Ход проверки", "warn"))
+        self.assertIn("сайты, 95 с", card.status)
+        self.assertEqual([section.title for section in card.sections], ["Время по шагам", "Условия проверки", "Список реестра РКН"])
+        self.assertEqual([(line.name, line.text) for line in card.sections[0].lines], [("Сайты", "95 с"), ("Хостинги", "30 с")])
+        self.assertIn("sing-box", card.sections[1].lines[-1].text)
+        self.assertEqual(card.sections[2].lines[1].text, "1 709 109")
+        self.assertEqual(build_cards({"partial": True}), [])
 
     def test_detail_view_shows_sections_and_closes_by_breadcrumb_and_escape(self) -> None:
         detail = ResultDetailView()

@@ -1,0 +1,509 @@
+{
+ "scope": "full",
+ "environment": [
+  "🖥️ Windows 10 (сборка 19045)",
+  "🌐 DNS-серверы системы: 203.0.113.53"
+ ],
+ "zapret_running": false,
+ "zapret_line": "❌ Zapret не запущен (winws.exe/winws2.exe нет среди процессов)",
+ "services": [
+  {
+   "key": "discord",
+   "label": "Discord",
+   "control": false,
+   "domestic": false,
+   "level": "ok",
+   "kind": "",
+   "headline": "Discord открывается",
+   "advice": [],
+   "dns_note": "",
+   "targets": [
+    {
+     "host": "discord.com",
+     "purpose": "сайт и вход",
+     "main": true,
+     "state": "ok",
+     "ok": true,
+     "text": "открывается (175 мс, TLS 1.3, 203.0.113.8, адрес по DNS-over-HTTPS)",
+     "short": "открывается",
+     "dns_state": "unknown",
+     "dns_reason": "DNS-сервер не дал адрес, сравнить не с чем",
+     "kind": "",
+     "kind_title": "",
+     "volume": "",
+     "volume_text": "",
+     "cause": "",
+     "cause_text": "",
+     "quic": "silent",
+     "quic_text": "сервер не отвечает ни с каким именем — он не поддерживает QUIC или UDP 443 закрыт целиком",
+     "protocols": [
+      {
+       "key": "tls12",
+       "title": "TLS 1.2",
+       "state": "ok",
+       "word": "работает",
+       "text": "шифрование установилось за 167 мс",
+       "ms": 166.8,
+       "code": ""
+      },
+      {
+       "key": "tls13",
+       "title": "TLS 1.3",
+       "state": "ok",
+       "word": "работает",
+       "text": "шифрование установилось за 83 мс",
+       "ms": 83.2,
+       "code": ""
+      }
+     ],
+     "address": "203.0.113.8",
+     "tried": [
+      {
+       "address": "203.0.113.8",
+       "result": "ok"
+      }
+     ],
+     "address_confirmed": false,
+     "hosts_stale": false,
+     "rechecked": "",
+     "note": "",
+     "registry": {
+      "listed": true,
+      "name": "discord.com",
+      "network": ""
+     }
+    },
+    {
+     "host": "gateway.discord.gg",
+     "purpose": "чат и статусы",
+     "main": false,
+     "state": "ok",
+     "ok": true,
+     "text": "открывается (262 мс, TLS 1.3, 203.0.113.7, адрес по DNS-over-HTTPS)",
+     "short": "открывается",
+     "dns_state": "unknown",
+     "dns_reason": "DNS-сервер не дал адрес, сравнить не с чем",
+     "kind": "",
+     "kind_title": "",
+     "volume": "unknown",
+     "volume_text": "по одному соединению удалось набрать только 32 КБ — на таком объёме обрыв после 16 КБ не проверить",
+     "cause": "",
+     "cause_text": "",
+     "quic": "silent",
+     "quic_text": "сервер не отвечает ни с каким именем — он не поддерживает QUIC или UDP 443 закрыт целиком",
+     "protocols": [
+      {
+       "key": "tls12",
+       "title": "TLS 1.2",
+       "state": "ok",
+       "word": "работает",
+       "text": "шифрование установилось за 130 мс",
+       "ms": 129.9,
+       "code": ""
+      },
+      {
+       "key": "tls13",
+       "title": "TLS 1.3",
+       "state": "ok",
+       "word": "работает",
+       "text": "шифрование установилось за 172 мс",
+       "ms": 172.2,
+       "code": ""
+      }
+     ],
+     "address": "203.0.113.7",
+     "tried": [
+      {
+       "address": "203.0.113.7",
+       "result": "ok"
+      }
+     ],
+     "address_confirmed": false,
+     "hosts_stale": false,
+     "rechecked": "",
+     "note": "",
+     "registry": {
+      "listed": true,
+      "name": "discord.gg",
+      "network": ""
+     }
+    }
+   ]
+  },
+  {
+   "key": "youtube",
+   "label": "YouTube",
+   "control": false,
+   "domestic": false,
+   "level": "ok",
+   "kind": "",
+   "headline": "YouTube открывается",
+   "advice": [],
+   "dns_note": "",
+   "targets": [
+    {
+     "host": "www.youtube.com",
+     "purpose": "сайт",
+     "main": true,
+     "state": "ok",
+     "ok": true,
+     "text": "открывается (255 мс, TLS 1.3, 203.0.113.3, адрес по DNS-over-HTTPS)",
+     "short": "открывается",
+     "dns_state": "unknown",
+     "dns_reason": "DNS-сервер не дал адрес, сравнить не с чем",
+     "kind": "",
+     "kind_title": "",
+     "volume": "",
+     "volume_text": "",
+     "cause": "",
+     "cause_text": "",
+     "quic": "silent",
+     "quic_text": "сервер не отвечает ни с каким именем — он не поддерживает QUIC или UDP 443 закрыт целиком",
+     "protocols": [
+      {
+       "key": "tls12",
+       "title": "TLS 1.2",
+       "state": "ok",
+       "word": "работает",
+       "text": "шифрование установилось за 147 мс",
+       "ms": 146.8,
+       "code": ""
+      },
+      {
+       "key": "tls13",
+       "title": "TLS 1.3",
+       "state": "ok",
+       "word": "работает",
+       "text": "шифрование установилось за 109 мс",
+       "ms": 108.5,
+       "code": ""
+      }
+     ],
+     "address": "203.0.113.3",
+     "tried": [
+      {
+       "address": "203.0.113.3",
+       "result": "ok"
+      }
+     ],
+     "address_confirmed": false,
+     "hosts_stale": false,
+     "rechecked": "",
+     "note": "",
+     "registry": {
+      "listed": true,
+      "name": "www.youtube.com",
+      "network": ""
+     }
+    },
+    {
+     "host": "i.ytimg.com",
+     "purpose": "превью видео",
+     "main": false,
+     "state": "ok",
+     "ok": true,
+     "text": "открывается (145 мс, TLS 1.3, 203.0.113.2, адрес по DNS-over-HTTPS)",
+     "short": "открывается",
+     "dns_state": "unknown",
+     "dns_reason": "DNS-сервер не дал адрес, сравнить не с чем",
+     "kind": "",
+     "kind_title": "",
+     "volume": "unknown",
+     "volume_text": "по одному соединению удалось набрать только 1 КБ — на таком объёме обрыв после 16 КБ не проверить",
+     "cause": "",
+     "cause_text": "",
+     "quic": "silent",
+     "quic_text": "сервер не отвечает ни с каким именем — он не поддерживает QUIC или UDP 443 закрыт целиком",
+     "protocols": [
+      {
+       "key": "tls12",
+       "title": "TLS 1.2",
+       "state": "ok",
+       "word": "работает",
+       "text": "шифрование установилось за 115 мс",
+       "ms": 115.3,
+       "code": ""
+      },
+      {
+       "key": "tls13",
+       "title": "TLS 1.3",
+       "state": "ok",
+       "word": "работает",
+       "text": "шифрование установилось за 104 мс",
+       "ms": 104.2,
+       "code": ""
+      }
+     ],
+     "address": "203.0.113.2",
+     "tried": [
+      {
+       "address": "203.0.113.2",
+       "result": "ok"
+      }
+     ],
+     "address_confirmed": false,
+     "hosts_stale": false,
+     "rechecked": "",
+     "note": "",
+     "registry": {
+      "listed": false,
+      "name": "",
+      "network": ""
+     }
+    }
+   ]
+  }
+ ],
+ "voice": {
+  "level": "unknown",
+  "headline": "Голосовые серверы проверить не удалось: не получилось узнать их адреса",
+  "advice": [
+   "Повторите проверку. Если повторяется — проверьте DNS в разделе «Настройка DNS»."
+  ],
+  "items": [
+   {
+    "name": "Google STUN",
+    "ok": false,
+    "state": "unknown",
+    "text": "[Errno 1] Operation not permitted (IPv4)"
+   },
+   {
+    "name": "CF STUN",
+    "ok": false,
+    "state": "unknown",
+    "text": "[Errno 1] Operation not permitted (IPv4)"
+   }
+  ]
+ },
+ "freeze": {
+  "level": "ok",
+  "headline": "Обрыва на 16–20 КБ нет: проверено 52 из 57 серверов, остальные проверить не удалось",
+  "advice": [],
+  "items": [
+   {
+    "name": "Akamai (media.miele.com)",
+    "ok": true,
+    "state": "ok",
+    "text": "получено 65 КБ без обрыва"
+   },
+   {
+    "name": "Akamai (www.roxio.com)",
+    "ok": true,
+    "state": "ok",
+    "text": "получено 75 КБ без обрыва; отправка тоже проходит"
+   }
+  ],
+  "servers": [
+   {
+    "provider": "Akamai",
+    "host": "media.miele.com",
+    "id": "SE.AKM-01",
+    "state": "ok",
+    "text": "получено 65 КБ без обрыва",
+    "direction": "download",
+    "seconds": 1.4
+   },
+   {
+    "provider": "Akamai",
+    "host": "www.roxio.com",
+    "id": "US.AKM-02",
+    "state": "ok",
+    "text": "получено 75 КБ без обрыва; отправка тоже проходит",
+    "direction": "download",
+    "seconds": 3.3
+   }
+  ]
+ },
+ "telegram": {
+  "level": "ok",
+  "headline": "Дорога до дата-центров Telegram открыта: соединение принимают 5 из 5. Режут ли само приложение после соединения, эта проверка не видит",
+  "advice": [],
+  "items": [
+   {
+    "name": "DC1 (Майами)",
+    "address": "203.0.113.6",
+    "state": "ok",
+    "text": "соединение меньше чем за 1 мс"
+   },
+   {
+    "name": "DC2 (Амстердам)",
+    "address": "203.0.113.5",
+    "state": "ok",
+    "text": "соединение меньше чем за 1 мс"
+   }
+  ]
+ },
+ "network": {
+  "external_ip": "203.0.113.10",
+  "country": "DE",
+  "provider": "SENKO-AS - Senko Digital LLC, GE · AS64500",
+  "asn": "213520",
+  "prefix": "203.0.113.9/23",
+  "local_ip": "203.0.113.4",
+  "lines": [
+   {
+    "state": "info",
+    "name": "Внешний адрес",
+    "text": "203.0.113.10 (DE)"
+   },
+   {
+    "state": "info",
+    "name": "Провайдер",
+    "text": "SENKO-AS - Senko Digital LLC, GE · AS64500, US"
+   }
+  ]
+ },
+ "speed": {
+  "level": "ok",
+  "headline": "Заметной разницы в скорости нет: зарубежные серверы — 29 Мбит/с, российские — 38 Мбит/с",
+  "items": [
+   {
+    "name": "Яндекс",
+    "host": "mirror.yandex.ru",
+    "domestic": true,
+    "kbps": 4422.1,
+    "state": "ok",
+    "text": "35 Мбит/с"
+   },
+   {
+    "name": "OVH (Франция)",
+    "host": "proof.ovh.net",
+    "domestic": false,
+    "kbps": 10066.2,
+    "state": "ok",
+    "text": "81 Мбит/с"
+   }
+  ]
+ },
+ "ipv6": {
+  "state": "unknown",
+  "text": "проверочные сайты по IPv6 не ответили, а есть ли он в системе — узнать не удалось"
+ },
+ "dns_servers": {
+  "level": "warn",
+  "findings": [
+   {
+    "level": "warn",
+    "text": "Обычные запросы к Google DNS не доходят"
+   }
+  ],
+  "text": "Проверено 2 из 2 адресов за 3 с."
+ },
+ "filter": {
+  "state": "none",
+  "found": false,
+  "hop": null,
+  "confidence": "",
+  "distance": 0,
+  "text": "Блокировок по имени сайта в этой проверке не видно — искать место фильтра не по чему.",
+  "ttl_advice": "",
+  "reasons": [],
+  "host": "",
+  "address": "",
+  "sites": [],
+  "hops": []
+ },
+ "habits": {
+  "headline": "Соединения с шифрованным именем сайта (ECH) к Cloudflare проходят",
+  "advice": "",
+  "sites": [],
+  "ech": {
+   "state": "fine",
+   "text": "соединения с шифрованным именем сайта (ECH) к Cloudflare проходят",
+   "advice": ""
+  }
+ },
+ "other_bypass_tools": [
+  "sing-box"
+ ],
+ "partial": false,
+ "system": [
+  {
+   "key": "admin",
+   "title": "Права администратора",
+   "level": "unknown",
+   "text": "проверить не удалось",
+   "advice": ""
+  },
+  {
+   "key": "windows",
+   "title": "Версия Windows",
+   "level": "unknown",
+   "text": "проверить не удалось",
+   "advice": ""
+  }
+ ],
+ "registry": {
+  "state": "fresh",
+  "updated": 1791454670.9612303,
+  "hosts": 1709109,
+  "networks": 69858
+ },
+ "problems": [
+  {
+   "level": "warn",
+   "text": "QUIC (UDP 443) не отвечает ни у одного сайта, включая www.cloudflare.com, www.google.com, www.youtube.com, которые его точно поддерживают, — похоже, UDP 443 закрыт целиком: провайдером, роутером или пресетом Zapret. Сайты открываются обычным соединением, но браузер сначала пробует QUIC и теряет на этом время",
+   "advice": [
+    "В пресете должен быть profile для UDP 443 (QUIC) с этими сайтами. Проще всего выбрать готовый пресет, где он есть, или отключить QUIC в браузере (в Chrome: chrome://flags → Experimental QUIC protocol)."
+   ],
+   "action": "",
+   "target": "",
+   "kind": "quic",
+   "title": "",
+   "evidence": []
+  },
+  {
+   "level": "unknown",
+   "text": "Голосовые серверы проверить не удалось: не получилось узнать их адреса",
+   "advice": [
+    "Повторите проверку. Если повторяется — проверьте DNS в разделе «Настройка DNS»."
+   ],
+   "action": "strategy_voice",
+   "target": "",
+   "kind": "voice",
+   "title": "",
+   "evidence": []
+  }
+ ],
+ "working": [
+  "Discord",
+  "YouTube"
+ ],
+ "spoofed_hosts": [
+  "www.youtube.com"
+ ],
+ "reference": [
+  {
+   "label": "Cloudflare",
+   "address": "203.0.113.1",
+   "ok": true,
+   "answered": 151,
+   "failed": 2,
+   "reason": ""
+  },
+  {
+   "label": "Google",
+   "address": "203.0.113.11",
+   "ok": true,
+   "answered": 153,
+   "failed": 0,
+   "reason": ""
+  }
+ ],
+ "timed_out": false,
+ "elapsed": 52.476419244892895,
+ "step_seconds": {
+  "sites": 26.6,
+  "hostings": 15.6,
+  "voice": 3.3,
+  "ipv6": 0.3,
+  "system": 0.7,
+  "dns_servers": 0.0,
+  "filter": 0.6
+ },
+ "dns_poisoning_detected": false,
+ "text": [
+  "строка отчёта"
+ ],
+ "history": []
+}

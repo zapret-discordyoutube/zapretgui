@@ -1054,12 +1054,15 @@ class _StepRow(QWidget):
         self.bar.setValue(0)
         layout.addWidget(self.bar, 1, Qt.AlignmentFlag.AlignVCenter)
         self.count_label = CaptionLabel("ждёт", self)
-        self.count_label.setMinimumWidth(64)
+        self.seconds: float | None = None
+        # Место под «45 / 45 · 123 с»: строка не должна прыгать, когда появляются секунды.
+        self.count_label.setMinimumWidth(112)
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.count_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def reset(self) -> None:
         self.done = self.total = 0
+        self.seconds = None
         self.bar.setRange(0, 1)
         self.bar.setValue(0)
         self.count_label.setText("ждёт")
@@ -1070,13 +1073,25 @@ class _StepRow(QWidget):
         self.done, self.total = int(done), max(1, int(total))
         self.bar.setRange(0, self.total)
         self.bar.setValue(min(self.done, self.total))
-        finished = self.done >= self.total
+        self._icon.set_color(state_color("ok") if self.done >= self.total else "")
+        self._show_text()
+
+    def set_seconds(self, seconds: float | None) -> None:
+        """Сколько секунд идёт (или шёл) шаг — из отчёта проверки, а не со своих часов."""
+        if seconds == self.seconds:
+            return
+        self.seconds = seconds
+        if self.total:
+            self._show_text()
+
+    def _show_text(self) -> None:
         if self.total == 1:
-            text = "готово" if finished else "идёт"
+            text = "готово" if self.done >= self.total else "идёт"
         else:
             text = f"{self.done} / {self.total}"
+        if self.seconds is not None and self.seconds >= 1:
+            text += f" · {self.seconds:.0f} с"
         self.count_label.setText(text)
-        self._icon.set_color(state_color("ok") if finished else "")
         set_state_text(self, f"{self._title}: {text}")
 
 
@@ -1108,6 +1123,12 @@ class ProgressSteps(QWidget):
         ready = sum(1 for item in self.rows.values() if not item.isHidden() and item.total and item.done >= item.total)
         shown = sum(1 for item in self.rows.values() if not item.isHidden())
         set_state_text(self, f"Ход BlockCheck: готово шагов {ready} из {shown}")
+
+    def set_seconds(self, seconds: dict) -> None:
+        """Время шагов из отчёта проверки: ``{шаг: секунды}``."""
+        for key, row in self.rows.items():
+            if key in seconds:
+                row.set_seconds(float(seconds[key]))
 
 
 # ---------------------------------------------------------------------------
@@ -2120,6 +2141,7 @@ class ResultDetailView(QWidget):
         self._layout.addStretch(1)
         self.blocks: list[_SectionBlock] = []
         self._flows: list[_BlocksFlow] = []
+        self.road = None
 
     def card(self) -> Card | None:
         return self._card
@@ -2209,6 +2231,16 @@ class ResultDetailView(QWidget):
             flow.setParent(None)
             flow.deleteLater()
         self._flows = []
+        if self.road is not None:
+            self.road.setParent(None)
+            self.road.deleteLater()
+            self.road = None
+        if card.site and card.marks:
+            # У сайта с проверкой по протоколам — дорога картинкой: где именно режут.
+            from blockcheck.ui.site_road import SiteRoad
+
+            self.road = SiteRoad(card, self._sections_host)
+            self._sections_layout.addWidget(self.road)
         narrow = [is_narrow_section(block.section) and block.table is not None for block in self.blocks]
         flow: _BlocksFlow | None = None
         for order, block in enumerate(self.blocks):

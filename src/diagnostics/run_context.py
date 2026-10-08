@@ -173,8 +173,12 @@ class Live:
     в конце разойтись не могут.
     """
 
-    def __init__(self, publish: Callable[[dict], None] | None, **start) -> None:
+    def __init__(
+        self, publish: Callable[[dict], None] | None, *, fresh: Callable[[], dict] | None = None, **start
+    ) -> None:
         self._publish = publish
+        # Поля, которые пересчитываются при каждой публикации (время шагов растёт само).
+        self._fresh = fresh
         self._lock = threading.Lock()
         self.data: dict = dict(start)
 
@@ -182,6 +186,8 @@ class Live:
         # Разделы кладут и рабочие потоки (сайты по мере готовности), поэтому под замком.
         with self._lock:
             self.data.update(parts)
+            if self._fresh is not None:
+                self.data.update(self._fresh())
             # Копия верхнего уровня: получатель не должен видеть, как словарь дополняется дальше.
             snapshot = dict(self.data)
         if self._publish is not None:

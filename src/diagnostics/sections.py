@@ -16,6 +16,7 @@ from collections.abc import Callable
 from concurrent.futures import Future
 
 from diagnostics import (
+    block_kind,
     filter_habits,
     filter_place,
     ipv6_check,
@@ -29,6 +30,7 @@ from diagnostics import (
     udp_burst,
     upload_probe,
 )
+from diagnostics import problems as problem_rules
 from diagnostics.limits import FILTER_MAX_TTL, FREEZE_READ_TIMEOUT
 from diagnostics.run_context import Probe, Run, Stopped
 from diagnostics.services import Service
@@ -379,6 +381,63 @@ def live_services(services: dict, verdict_of: Callable, publish: Callable[[list]
         publish(report_text.services_report({name: services[name] for name in ready}, verdicts, ready))
 
     return on_probe
+
+
+def dns_problems(dns_servers: dict | None) -> list[dict]:
+    """Находки проверки DNS-серверов строками итога."""
+    found: list[dict] = []
+    for finding in (dns_servers or {}).get("findings") or ():
+        level = DNS_FINDING_LEVEL.get(finding["level"])
+        if level is not None:
+            found.append(
+                problem_rules.problem(
+                    level, finding["text"], action="dns", kind=block_kind.KIND_DNS, parts=dns_finding_parts(finding)
+                )
+            )
+    return found
+
+
+def emit_freeze(freeze, emit: Emit) -> None:
+    """Раздел «Обрыв на 16–20 КБ» текстового отчёта."""
+    if freeze is None:
+        return
+    marks = {"ok": "✅", "freeze": "❌", "unknown": "❔"}
+    rows = [(marks[item.state.value], item.name, item.text) for item in freeze.servers]
+    for line in report_text.section_lines("Обрыв на 16–20 КБ", freeze, rows):
+        emit(line)
+
+
+def emit_telegram(telegram, emit: Emit) -> None:
+    """Раздел «Telegram: дата-центры» текстового отчёта."""
+    if telegram is None:
+        return
+    marks = {"ok": "✅", "fail": "❌", "unknown": "❔"}
+    rows = [
+        (marks[report_text.telegram_state(item)], f"{item.center.name} ({item.center.address})", report_text.telegram_text(item))
+        for item in telegram.servers
+    ]
+    for line in report_text.section_lines("Telegram: дата-центры", telegram, rows):
+        emit(line)
+
+
+def emit_system(system, emit: Emit) -> None:
+    """Раздел «Состояние системы» текстового отчёта."""
+    if not system:
+        return
+    emit("")
+    emit("━━━━━━━━ Состояние системы ━━━━━━━━")
+    for item in system:
+        emit(f"{SYSTEM_ICON[item.level]} {item.title}: {item.text}")
+
+
+def emit_network(network, emit: Emit) -> None:
+    """Раздел «Ваша сеть» текстового отчёта."""
+    if network is None:
+        return
+    emit("")
+    emit("━━━━━━━━ Ваша сеть ━━━━━━━━")
+    for item in network["lines"]:
+        emit(f"{'⚠️' if item['state'] == 'warn' else 'ℹ️'} {item['name']}: {item['text']}")
 
 
 def emit_voice(voice, emit: Emit) -> None:

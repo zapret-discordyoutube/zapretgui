@@ -42,7 +42,6 @@ from datetime import datetime
 
 from diagnostics import (
     block_cause,
-    block_kind,
     net_access,
     protocol_probe,
     quic_probe,
@@ -730,7 +729,8 @@ def run_blockcheck(
             )
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
         # Разделы, которых в этом режиме нет или которые не удались, в отчёте остаются пустыми.
-        live = _Live(partial, scope=scope, environment=environment, zapret_running=zapret_running, zapret_line=zapret_line)
+        live = _Live(partial, fresh=lambda: {"step_seconds": step.seconds()}, scope=scope, environment=environment)
+        live.data.update(zapret_running=zapret_running, zapret_line=zapret_line)
         live.data.update(dict.fromkeys(_REPORT_SECTIONS), other_bypass_tools=list(other_tools), partial=True)
 
         # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
@@ -783,14 +783,7 @@ def run_blockcheck(
 
         freeze_facts = _settle(run, freeze_future, emit, "Обрыв на 16–20 КБ")
         freeze = summarize_freeze(freeze_facts, zapret_running=zapret_running) if freeze_facts is not None else None
-        if freeze is not None:
-            marks = {"ok": "✅", "freeze": "❌", "unknown": "❔"}
-            for line in report_text.section_lines(
-                "Обрыв на 16–20 КБ",
-                freeze,
-                [(marks[item.state.value], item.name, item.text) for item in freeze.servers],
-            ):
-                emit(line)
+        sections.emit_freeze(freeze, emit)
         live.put(freeze=report_text.freeze_report(freeze))
 
         voice_facts = _settle(run, voice_future, emit, "Голосовые серверы")
@@ -809,11 +802,7 @@ def run_blockcheck(
             live.put(ipv6={"state": ipv6.code, "text": ipv6.text})
 
         system: tuple[system_state.SystemItem, ...] = tuple(_settle(run, system_future, emit, "Состояние системы") or ())
-        if system:
-            emit("")
-            emit("━━━━━━━━ Состояние системы ━━━━━━━━")
-            for item in system:
-                emit(f"{sections.SYSTEM_ICON[item.level]} {item.title}: {item.text}")
+        sections.emit_system(system, emit)
         live.put(system=report_text.system_report(system))
 
         telegram_facts = _settle(run, telegram_future, emit, "Дата-центры Telegram")
@@ -822,24 +811,10 @@ def run_blockcheck(
             if telegram_facts is not None
             else None
         )
-        if telegram is not None:
-            marks = {"ok": "✅", "fail": "❌", "unknown": "❔"}
-            for line in report_text.section_lines(
-                "Telegram: дата-центры",
-                telegram,
-                [
-                    (marks[report_text.telegram_state(item)], f"{item.center.name} ({item.center.address})", report_text.telegram_text(item))
-                    for item in telegram.servers
-                ],
-            ):
-                emit(line)
+        sections.emit_telegram(telegram, emit)
 
         network = _settle(run, network_future, emit, "Ваша сеть")
-        if network is not None:
-            emit("")
-            emit("━━━━━━━━ Ваша сеть ━━━━━━━━")
-            for item in network["lines"]:
-                emit(f"{'⚠️' if item['state'] == 'warn' else 'ℹ️'} {item['name']}: {item['text']}")
+        sections.emit_network(network, emit)
         live.put(telegram=report_text.telegram_report(telegram), network=network)
 
         dns_servers = sections.finish_dns_servers(run, dns_future, emit) if dns_future is not None else None
@@ -880,19 +855,7 @@ def run_blockcheck(
             other_tools=other_tools,
         )
         problems += problem_rules.burst_problems(burst)
-        if dns_servers is not None:
-            for finding in dns_servers["findings"]:
-                level = sections.DNS_FINDING_LEVEL.get(finding["level"])
-                if level is not None:
-                    problems.append(
-                        problem_rules.problem(
-                            level,
-                            finding["text"],
-                            action="dns",
-                            kind=block_kind.KIND_DNS,
-                            parts=sections.dns_finding_parts(finding),
-                        )
-                    )
+        problems += sections.dns_problems(dns_servers)
         problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
         registry_index = registry_wait(REGISTRY_WAIT_S)
@@ -914,7 +877,6 @@ def run_blockcheck(
             reference=run.reference_report(),
             timed_out=run.timed_out,
             elapsed=elapsed,
-            step_seconds=step.seconds(),
             dns_poisoning_detected=bool(spoofed),
             partial=False,
         )
