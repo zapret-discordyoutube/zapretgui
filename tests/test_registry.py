@@ -203,3 +203,16 @@ class DownloadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BuildOrderTests(unittest.TestCase):
+    def test_index_built_in_buckets_is_sorted_and_without_repeats(self) -> None:
+        # Список собирается кучками по первому байту отпечатка, чтобы не подвешивать окно;
+        # итог обязан быть тем же, что у одной общей сортировки, — по нему идёт двоичный поиск.
+        names = [f"site-{number}.example" for number in range(3000)]
+        index, count = registry.build_hosts([*names, *names[:500], "  SITE-7.example.  ", "без-точки"])
+
+        keys = [index[at : at + 8] for at in range(0, len(index), 8)]
+        self.assertEqual(count, 3000)
+        self.assertEqual(keys, sorted(set(keys)))
+        self.assertEqual(len(keys), 3000)

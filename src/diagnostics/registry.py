@@ -96,6 +96,11 @@ class Match:
         return bool(self.name or self.network)
 
 
+# Сборка списка идёт фоном во время проверки: через сколько строк и на сколько уступать окну.
+_BUILD_STEP = 20_000
+_BUILD_PAUSE_S = 0.002
+
+
 def _clean(host: str) -> str:
     return str(host or "").strip().strip('".').lower()
 
@@ -106,9 +111,25 @@ def _key(host: str) -> bytes:
 
 def build_hosts(lines: Iterable[str]) -> tuple[bytes, int]:
     """Отсортированные отпечатки имён одним куском и их число."""
-    keys = sorted(_key(name) for name in map(_clean, lines) if name and "." in name)
-    unique = [key for index, key in enumerate(keys) if not index or key != keys[index - 1]]
-    return b"".join(unique), len(unique)
+    # В списке больше полутора миллионов имён. Одна общая сортировка держала бы
+    # интерпретатор полсекунды без передышки — и на это время замирало окно
+    # программы. Поэтому отпечатки раскладываются по первому байту на 256 кучек:
+    # каждая сортируется за миллисекунды, а вместе они уже идут по порядку.
+    # Раз в ``_BUILD_STEP`` строк поток уступает дорогу окну.
+    buckets: list[set[bytes]] = [set() for _ in range(256)]
+    for number, name in enumerate(map(_clean, lines)):
+        if name and "." in name:
+            key = _key(name)
+            buckets[key[0]].add(key)
+        if number % _BUILD_STEP == _BUILD_STEP - 1:
+            time.sleep(_BUILD_PAUSE_S)
+    parts: list[bytes] = []
+    count = 0
+    for bucket in buckets:
+        parts.append(b"".join(sorted(bucket)))
+        count += len(bucket)
+        time.sleep(0)
+    return b"".join(parts), count
 
 
 def build_networks(lines: Iterable[str]) -> list[tuple[int, int, str]]:
