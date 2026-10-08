@@ -23,7 +23,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from diagnostics.block_kind import KIND_CUT, KIND_IP, KIND_NO_CONNECT, KIND_UNSTABLE, kind_info, site_kind
+from diagnostics.block_kind import (
+    KIND_CUT,
+    KIND_FINGERPRINT,
+    KIND_IP,
+    KIND_NO_CONNECT,
+    KIND_UNSTABLE,
+    kind_info,
+    site_kind,
+)
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -255,6 +263,8 @@ class TargetOutcome:
     hosts_stale: bool = False
     # Сайт открылся, но не каждый раз или не по каждому своему адресу.
     unstable: bool = False
+    # Проверка сайт открыла, но приветствие с составом Chrome не проходит: в браузере он может висеть.
+    fingerprint: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,6 +434,13 @@ def summarize_service(
             headline = f"{label} открывается через раз"
             advice = (_ADVICE_START if zapret_running is False else _ADVICE_STRATEGY, ADVICE_UNSTABLE)
             own_kind = KIND_UNSTABLE
+        elif not secondary_broken and any(item.fingerprint and item.reach == ReachState.OK for item in targets):
+            level = Level.WARN
+            headline = (
+                f"{label}: проверка сайт открывает, но соединение «как у Chrome» не проходит — "
+                "в браузере он может не открываться"
+            )
+            own_kind = KIND_FINGERPRINT
         elif not secondary_broken:
             level = Level.WARN if spoofed else Level.OK
             headline = f"{label} открывается"

@@ -717,6 +717,87 @@ class ForeignCertificateTests(unittest.TestCase):
         self.assertEqual(net.cert_asked, [])
 
 
+class SiteWordsComeFromTheReportTests(unittest.TestCase):
+    """Слово итога, дороги и метки сайта лежат в отчёте готовыми: экран их только показывает."""
+
+    @staticmethod
+    def _protocols(tls12, tls13, browser):
+        bc = engine.block_cause
+        return lambda host, ip: engine.protocol_probe.ProtocolFacts(
+            host=host, ip=ip, tls12=bc.HelloResult(tls12, ms=30.0), tls13=bc.HelloResult(tls13, ms=30.0), browser=bc.HelloResult(browser, ms=40.0)
+        )
+
+    @staticmethod
+    def _discord(result) -> dict:
+        return next(item for item in result["services"] if item["key"] == "discord")
+
+    def test_open_site_has_status_and_six_roads_in_fixed_order(self) -> None:
+        bc = engine.block_cause
+        net = _Net()
+        net.protocol_facts = self._protocols(bc.HELLO_OK, bc.HELLO_OK, bc.HELLO_OK)
+        discord = self._discord(net.run(engine.run_blockcheck, "full", emit=lambda _line: None))
+
+        self.assertEqual(discord["status"], "Открывается")
+        self.assertEqual([road["key"] for road in discord["roads"]], ["tls12", "tls13", "browser", "quic", "dns"])
+        self.assertEqual([road["label"] for road in discord["roads"]], ["TLS 1.2", "TLS 1.3", "Chrome", "QUIC", "DNS"])
+        for road in discord["roads"]:
+            self.assertTrue(road["word"] and road["text"] and road["hint"], road)
+            self.assertIn(road["state"], ("ok", "warn", "fail", "info", "unknown"))
+        dns = next(road for road in discord["roads"] if road["key"] == "dns")
+        self.assertEqual((dns["state"], dns["word"]), ("ok", "честный"))
+
+    def test_roads_not_checked_means_no_roads_not_invented_ones(self) -> None:
+        discord = self._discord(_Net().run(engine.run_blockcheck, "full", emit=lambda _line: None))
+
+        self.assertEqual(discord["roads"], [])
+
+    def test_browser_hello_cut_alone_is_a_warning_in_the_report_itself(self) -> None:
+        # Раньше «жёлтым» такой сайт делал экран, а в отчёте он оставался зелёным — две правды.
+        bc = engine.block_cause
+        net = _Net()
+        net.protocol_facts = self._protocols(bc.HELLO_OK, bc.HELLO_OK, bc.HELLO_RESET)
+        result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+        discord = self._discord(result)
+
+        self.assertEqual((discord["level"], discord["kind"]), ("warn", "fingerprint"))
+        self.assertIn("в браузере он может не открываться", discord["headline"])
+        self.assertNotIn("Discord", result["working"])
+        self.assertEqual(sum(1 for item in result["problems"] if item.get("kind") == "fingerprint" and "Discord" in item["text"]), 1)
+
+    def test_status_names_the_cause_that_is_not_the_provider(self) -> None:
+        def https(host, ip):
+            if ip == "203.0.113.9":
+                return ProbeResult(ip=ip, kind=KIND_CERT, cert_problem="сертификат выдан другому сайту")
+            return _ok(ip)
+
+        from utils.cert_reader import CertNames
+
+        net = _Net(https=https)
+        net.hosts = ("203.0.113.9",)
+        net.cert_names = CertNames(subject="other.example", issuer="R11", names=("other.example",))
+        discord = self._discord(net.run(engine.run_blockcheck, "full", emit=lambda _line: None))
+
+        self.assertEqual(discord["status"], "Адрес из hosts ведёт не туда")
+        self.assertIn({"key": "hosts", "text": "запись в hosts устарела", "state": "warn"}, discord["tags"])
+
+    def test_blocked_site_status_is_the_kind_of_block(self) -> None:
+        net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET))
+        discord = self._discord(net.run(engine.run_blockcheck, "full", emit=lambda _line: None))
+
+        self.assertEqual(discord["level"], "fail")
+        self.assertNotIn(discord["status"], ("Открывается", "Есть проблемы", ""))
+
+    def test_control_and_registry_tags(self) -> None:
+        net = _Net()
+        net.registry = engine.registry.Index(hosts=engine.registry.build_hosts(["discord.com"])[0], updated=1000.0)
+        result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+
+        self.assertIn({"key": "registry", "text": "в реестре РКН", "state": "info"}, self._discord(result)["tags"])
+        control = next(item for item in result["services"] if item["control"])
+        self.assertIn({"key": "control", "text": "контрольный", "state": "info"}, control["tags"])
+        self.assertNotIn("registry", [tag["key"] for tag in control["tags"]])
+
+
 class UnstableSiteTests(unittest.TestCase):
     """Третий исход: сайт не «открывается» и не «заблокирован», а открывается через раз."""
 

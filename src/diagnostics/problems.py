@@ -286,7 +286,8 @@ def collect_problems(
         elif verdict.level == Level.UNKNOWN:
             if not offline:
                 problems.append(problem(Level.UNKNOWN, verdict.headline, verdict.advice))
-        else:
+        elif verdict.kind != block_kind.KIND_FINGERPRINT:
+            # Сайт, который в браузере может не открыться, в «Открываются» не числится: о нём своя строка ниже.
             working.append(service.label)
 
     # Сайт открывается нашей проверкой, но приветствие с составом Chrome не проходит.

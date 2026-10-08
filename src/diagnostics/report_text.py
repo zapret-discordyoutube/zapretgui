@@ -294,8 +294,106 @@ def summary_lines(problems: list[dict], working: list[str], *, timed_out: bool, 
     return lines
 
 
+# Слово итога сайта, когда вид блокировки не назван: по уровню.
+_STATUS_BY_LEVEL = {
+    Level.OK: "Открывается",
+    Level.WARN: "Есть проблемы",
+    Level.FAIL: "Не открывается",
+    Level.UNKNOWN: "Не удалось проверить",
+}
+# Кто ответил вместо сайта — словом итога (код из ``cert_owner``).
+_STATUS_BY_CERT = {
+    "antivirus": "Сертификат подменяет антивирус",
+    "debug_proxy": "Сертификат подменяет прокси-отладчик",
+    "state_ca": "Сертификат государственного центра",
+    "hosts": "Адрес из hosts ведёт не туда",
+    "other_site": "Отвечает другой сайт",
+    "self_signed": "Самоподписанный сертификат",
+    "unknown_issuer": "Сертификат от неизвестного центра",
+}
+HINT_QUIC = (
+    "QUIC — быстрый способ соединения поверх UDP: им браузер открывает YouTube и многие крупные сайты. "
+    "Если он закрыт, браузер сам переходит на обычное соединение."
+)
+HINT_DNS = "DNS — справочная, которая по имени сайта выдаёт его адрес. Провайдер может подменять её ответы."
+_ROAD_LABELS = {
+    protocol_probe.PROTO_TLS12: "TLS 1.2",
+    protocol_probe.PROTO_TLS13: "TLS 1.3",
+    protocol_probe.PROTO_BROWSER: "Chrome",
+    protocol_probe.PROTO_HTTP: "HTTP",
+}
+
+
+def service_status(verdict, probes) -> str:
+    """Слово итога сайта — одно на всю программу: карточка, история и сравнение берут его отсюда.
+
+    Причина не у провайдера (чужой сертификат, запись в hosts) называется прямо:
+    общее «Есть проблемы» про неё ничего не говорит.
+    """
+    cert = next((probe.cert.code for probe in probes if probe.cert is not None), "")
+    if cert:
+        return _STATUS_BY_CERT.get(cert, "Чужой сертификат")
+    if any(probe.hosts_stale for probe in probes):
+        return "Мешает запись в hosts"
+    if verdict.kind and verdict.level in (Level.WARN, Level.FAIL) and verdict.kind in block_kind.KINDS:
+        if verdict.kind != block_kind.KIND_OTHER:
+            return sentence(block_kind.kind_info(verdict.kind).short)
+    return _STATUS_BY_LEVEL[verdict.level]
+
+
+def _road(key: str, label: str, state: str, word: str, text: str, hint: str) -> dict:
+    return {"key": key, "label": label, "state": state, "word": word, "text": text, "hint": hint}
+
+
+def service_roads(probes, dns_note: str = "") -> list[dict]:
+    """Дороги к сайту — всегда в одном порядке: TLS 1.2, TLS 1.3, Chrome, HTTP, QUIC, DNS.
+
+    Каждая дорога приходит готовой: состояние, слово для метки, полная фраза и
+    пояснение, что это за дорога. Экран их только показывает. Пусто — дороги не
+    проверялись.
+    """
+    main = next((probe for probe in probes if probe.target.main), probes[0] if probes else None)
+    roads = [
+        _road(line.key, _ROAD_LABELS.get(line.key, line.title), line.state, line.word, line.text, protocol_probe.HINTS.get(line.key, ""))
+        for line in (main.protocols if main is not None else ())
+    ]
+    if not roads:
+        return []
+    quic = {probe.quic.code for probe in probes if probe.quic is not None}
+    if quic_probe.QUIC_BLOCKED_BY_NAME in quic:
+        roads.append(_road("quic", "QUIC", "warn", "закрыт", "QUIC к этому сайту режут: сайт откроется обычным способом, чуть медленнее", HINT_QUIC))
+    elif quic_probe.QUIC_OK in quic:
+        roads.append(_road("quic", "QUIC", "ok", "работает", "QUIC к этому сайту проходит", HINT_QUIC))
+    else:
+        roads.append(_road("quic", "QUIC", "unknown", "—", "у этого сайта QUIC не проверялся или сервер его не поддерживает", HINT_QUIC))
+    dns = {probe.judgement.state for probe in probes if probe.judgement is not None}
+    if dns_note or DnsState.SPOOFED in dns:
+        roads.append(_road("dns", "DNS", "warn", "подменён", "ответ DNS подменён: лечится DNS с шифрованием в разделе «Настройка DNS»", HINT_DNS))
+    elif dns and DnsState.UNKNOWN not in dns:
+        roads.append(_road("dns", "DNS", "ok", "честный", "адрес сайта DNS выдаёт верно", HINT_DNS))
+    else:
+        roads.append(_road("dns", "DNS", "unknown", "—", "сверить ответ DNS не удалось", HINT_DNS))
+    return roads
+
+
+def service_tags(service, probes) -> list[dict]:
+    """Метки сайта о том, чего в дорогах нет. Метку реестра РКН дописывает ``registry.annotate``."""
+    tags = []
+    if any(probe.volume is not None and probe.volume.code == volume_probe.VOLUME_CUT for probe in probes):
+        tags.append({"key": "cut16", "text": "обрыв на 16 КБ", "state": "warn"})
+    if any(probe.hosts_stale for probe in probes):
+        tags.append({"key": "hosts", "text": "запись в hosts устарела", "state": "warn"})
+    if service.control:
+        tags.append({"key": "control", "text": "контрольный", "state": "info"})
+    return tags
+
+
 def services_report(services: dict, verdicts: dict, collected: dict) -> list[dict]:
-    """Сервисы с итогом и всеми их адресами — в том порядке, в каком проверялись."""
+    """Сервисы с итогом и всеми их адресами — в том порядке, в каком проверялись.
+
+    Всё, что экран показывает о сайте словами (итог, дороги, метки), лежит
+    здесь готовым: отчёт — единственный источник истины, экран его не дополняет.
+    """
     return [
         {
             "key": key,
@@ -304,9 +402,12 @@ def services_report(services: dict, verdicts: dict, collected: dict) -> list[dic
             "domestic": service.domestic,
             "level": verdicts[key].level.value,
             "kind": verdicts[key].kind,
+            "status": service_status(verdicts[key], collected[key]),
             "headline": verdicts[key].headline,
             "advice": list(verdicts[key].advice),
             "dns_note": verdicts[key].dns_note,
+            "roads": service_roads(collected[key], verdicts[key].dns_note),
+            "tags": service_tags(service, collected[key]),
             "targets": [target_report(probe) for probe in collected[key]],
         }
         for key, service in services.items()

@@ -330,6 +330,10 @@ def lines(services: list[dict], index: Index, now: float | None = None) -> list[
     return out
 
 
+# Метка сайта, который значится в списке.
+TAG_REGISTRY = {"key": "registry", "text": "в реестре РКН", "state": "info"}
+
+
 def annotate(services: list[dict], index: Index) -> None:
     """Дописывает в отчёт по сайтам отметку реестра. Пустой список — ничего не пишет."""
     if not index.hosts:
@@ -338,3 +342,8 @@ def annotate(services: list[dict], index: Index) -> None:
         for target in service.get("targets") or ():
             found = index.match(str(target.get("host") or ""), str(target.get("address") or ""))
             target["registry"] = {"listed": found.listed, "name": found.name, "network": found.network}
+        # Метка сайта лежит в отчёте готовой, как и остальные его метки.
+        tags = service.setdefault("tags", [])
+        if any((target.get("registry") or {}).get("listed") for target in service.get("targets") or ()):
+            if TAG_REGISTRY not in tags:
+                tags.append(dict(TAG_REGISTRY))

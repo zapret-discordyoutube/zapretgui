@@ -525,6 +525,7 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
             kind=probe.kind,
             hosts_stale=probe.hosts_stale,
             unstable=bool(probe.unstable),
+            fingerprint=any(line.code == protocol_probe.CODE_FINGERPRINT for line in probe.protocols),
         )
         for probe in probes
     ]
