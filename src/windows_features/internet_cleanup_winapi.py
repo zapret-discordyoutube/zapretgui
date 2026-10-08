@@ -1,4 +1,4 @@
-"""Вызовы Windows для сброса сети: кэши, прокси и каталог Winsock.
+"""Вызовы Windows для сброса сети: кэши и прокси.
 
 Только тонкая обёртка над WinAPI, без решений «что чинить». Решения живут
 в windows_features.internet_cleanup, а этот модуль читает и меняет ровно то,
@@ -9,8 +9,6 @@
   WinHttpGetDefaultProxyConfiguration / WinHttpSetDefaultProxyConfiguration.
 - Системный прокси (тот, что в «Параметры → Прокси», им пользуются браузеры):
   InternetQueryOptionW / InternetSetOptionW.
-- Каталог Winsock: WSCEnumProtocols / WSCDeinstallProvider и их пары с
-  суффиксом 32 — у 64-битной Windows отдельный каталог для 32-битных программ.
 
 Библиотеки Windows подгружаются лениво, поэтому модуль импортируется и на
 других системах.
@@ -19,16 +17,13 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import POINTER, Structure, Union, byref, c_int, c_ubyte, c_ulong, c_ushort, c_void_p, c_wchar, c_wchar_p, sizeof
+from ctypes import POINTER, Structure, Union, byref, c_int, c_ulong, c_ushort, c_void_p, c_wchar_p, sizeof
 from dataclasses import dataclass
 from functools import lru_cache
 
 AF_UNSPEC = 0
 ERROR_SUCCESS = 0
 ERROR_ACCESS_DENIED = 5
-SOCKET_ERROR = -1
-WSAEACCES = 10013
-WSAENOBUFS = 10055
 
 WINHTTP_ACCESS_TYPE_NO_PROXY = 1
 
@@ -40,46 +35,9 @@ INTERNET_PER_CONN_PROXY_SERVER = 2
 PROXY_TYPE_DIRECT = 0x1
 PROXY_TYPE_PROXY = 0x2
 
-# ProtocolChain.ChainLen: 1 — обычный поставщик самой Windows или драйвера,
-# 0 — надстройка (LSP), больше 1 — цепочка, проходящая через надстройку.
-BASE_PROTOCOL = 1
-
 
 class NetworkWinApiError(OSError):
     """Windows вернула ошибку; текст уже понятен человеку."""
-
-
-class GUID(Structure):
-    _fields_ = [("Data1", c_ulong), ("Data2", c_ushort), ("Data3", c_ushort), ("Data4", c_ubyte * 8)]
-
-
-class WSAPROTOCOLCHAIN(Structure):
-    _fields_ = [("ChainLen", c_int), ("ChainEntries", c_ulong * 7)]
-
-
-class WSAPROTOCOL_INFOW(Structure):
-    _fields_ = [
-        ("dwServiceFlags1", c_ulong),
-        ("dwServiceFlags2", c_ulong),
-        ("dwServiceFlags3", c_ulong),
-        ("dwServiceFlags4", c_ulong),
-        ("dwProviderFlags", c_ulong),
-        ("ProviderId", GUID),
-        ("dwCatalogEntryId", c_ulong),
-        ("ProtocolChain", WSAPROTOCOLCHAIN),
-        ("iVersion", c_int),
-        ("iAddressFamily", c_int),
-        ("iMaxSockAddr", c_int),
-        ("iMinSockAddr", c_int),
-        ("iSocketType", c_int),
-        ("iProtocol", c_int),
-        ("iProtocolMaxOffset", c_int),
-        ("iNetworkByteOrder", c_int),
-        ("iSecurityScheme", c_int),
-        ("dwMessageSize", c_ulong),
-        ("dwProviderReserved", c_ulong),
-        ("szProtocol", c_wchar * 256),
-    ]
 
 
 class WINHTTP_PROXY_INFO(Structure):
@@ -113,15 +71,6 @@ class SystemProxy:
     server: str
 
 
-@dataclass(frozen=True, slots=True)
-class WinsockProvider:
-    """Запись каталога Winsock, добавленная посторонней программой."""
-
-    name: str
-    provider_id: bytes
-    for_32bit_apps: bool
-
-
 @lru_cache(maxsize=1)
 def _iphlpapi():
     return ctypes.WinDLL("iphlpapi")
@@ -138,17 +87,12 @@ def _wininet():
 
 
 @lru_cache(maxsize=1)
-def _ws2_32():
-    return ctypes.WinDLL("ws2_32")
-
-
-@lru_cache(maxsize=1)
 def _kernel32():
     return ctypes.WinDLL("kernel32")
 
 
 def _error_text(api: str, code: int) -> str:
-    if int(code) in (ERROR_ACCESS_DENIED, WSAEACCES):
+    if int(code) == ERROR_ACCESS_DENIED:
         return "нужны права администратора"
     detail = ""
     formatter = getattr(ctypes, "FormatError", None)
@@ -269,79 +213,12 @@ def disable_system_proxy() -> None:
     api.InternetSetOptionW(None, INTERNET_OPTION_REFRESH, None, 0)
 
 
-# ── каталог Winsock ───────────────────────────────────────────────────────
-
-
-def _winsock_function(name: str, *, for_32bit_apps: bool):
-    # Каталог для 32-битных программ есть только у 64-битной Windows.
-    return getattr(_ws2_32(), name + ("32" if for_32bit_apps else ""), None)
-
-
-def _read_winsock_catalog(for_32bit_apps: bool) -> list[WSAPROTOCOL_INFOW]:
-    enum_protocols = _winsock_function("WSCEnumProtocols", for_32bit_apps=for_32bit_apps)
-    if enum_protocols is None:
-        return []
-    enum_protocols.argtypes = [c_void_p, c_void_p, POINTER(c_ulong), POINTER(c_int)]
-    enum_protocols.restype = c_int
-    size = c_ulong(0)
-    error = c_int(0)
-    # Первый вызов с пустым буфером сообщает, сколько байт нужно.
-    count = enum_protocols(None, None, byref(size), byref(error))
-    if count == SOCKET_ERROR and error.value != WSAENOBUFS:
-        raise NetworkWinApiError(_error_text("WSCEnumProtocols", error.value))
-    if not size.value:
-        return []
-    buffer = ctypes.create_string_buffer(size.value)
-    count = enum_protocols(None, buffer, byref(size), byref(error))
-    if count == SOCKET_ERROR:
-        raise NetworkWinApiError(_error_text("WSCEnumProtocols", error.value))
-    entries = ctypes.cast(buffer, POINTER(WSAPROTOCOL_INFOW))
-    return [WSAPROTOCOL_INFOW.from_buffer_copy(entries[index]) for index in range(count)]
-
-
-def list_layered_winsock_providers() -> tuple[WinsockProvider, ...]:
-    """Надстройки (LSP) из обоих каталогов Winsock, по одной записи на надстройку.
-
-    Обычные поставщики самой Windows и драйверов (ChainLen == 1) сюда не попадают.
-    """
-    found: dict[tuple[bool, bytes], WinsockProvider] = {}
-    for for_32bit_apps in (False, True):
-        for entry in _read_winsock_catalog(for_32bit_apps):
-            if int(entry.ProtocolChain.ChainLen) == BASE_PROTOCOL:
-                continue
-            provider_id = bytes(entry.ProviderId)
-            found.setdefault(
-                (for_32bit_apps, provider_id),
-                WinsockProvider(
-                    name=str(entry.szProtocol or "").strip() or "без названия",
-                    provider_id=provider_id,
-                    for_32bit_apps=for_32bit_apps,
-                ),
-            )
-    return tuple(found.values())
-
-
-def remove_winsock_provider(provider: WinsockProvider) -> None:
-    deinstall = _winsock_function("WSCDeinstallProvider", for_32bit_apps=provider.for_32bit_apps)
-    if deinstall is None:
-        raise NetworkWinApiError("WSCDeinstallProvider: функция недоступна в этой Windows")
-    deinstall.argtypes = [POINTER(GUID), POINTER(c_int)]
-    deinstall.restype = c_int
-    provider_id = GUID.from_buffer_copy(provider.provider_id)
-    error = c_int(0)
-    if deinstall(byref(provider_id), byref(error)) != 0:
-        raise NetworkWinApiError(_error_text("WSCDeinstallProvider", error.value))
-
-
 __all__ = [
     "NetworkWinApiError",
     "SystemProxy",
-    "WinsockProvider",
     "disable_system_proxy",
     "flush_neighbor_and_path_caches",
-    "list_layered_winsock_providers",
     "read_system_proxy",
     "read_winhttp_proxy",
-    "remove_winsock_provider",
     "reset_winhttp_proxy",
 ]

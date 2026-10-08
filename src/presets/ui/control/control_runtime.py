@@ -380,7 +380,7 @@ def build_internet_cleanup_start_plan(*, language: str) -> ControlToggleActionSt
                     "• Очистка кэша DNS, адресов и маршрутов\n"
                     "• Сброс прокси WinHTTP, если он задан\n"
                     "• Отключение системного прокси, если программа, на которую он указывает, не отвечает\n"
-                    "• Удаление из Winsock надстроек посторонних программ\n\n"
+                    "• Сброс Winsock\n\n"
                     "После сброса понадобится перезагрузка Windows."
                 ),
                 revert_checked=False,

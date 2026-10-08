@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from windows_features import internet_cleanup
 from windows_features.internet_cleanup import CleanupStep, run_internet_cleanup
-from windows_features.internet_cleanup_winapi import NetworkWinApiError, SystemProxy, WinsockProvider
+from windows_features.internet_cleanup_winapi import NetworkWinApiError, SystemProxy
 
 # Настоящий ответ `netsh interface ipv4 reset` исправной русской Windows 10 с правами
 # администратора (сокращён): код завершения 1 и один защищённый пункт с отказом.
@@ -28,7 +28,10 @@ NETSH_COMMANDS = [
     ("interface", "ipv4", "reset"),
     ("interface", "ipv6", "reset"),
     ("interface", "ipv4", "set", "dynamicport", "tcp", "start=10000", "num=30000"),
+    ("winsock", "reset"),
 ]
+# Настоящий ответ `netsh winsock reset` той же Windows: код завершения 0.
+WINSOCK_OUTPUT = "\nСброс каталога Winsock выполнен успешно.\nНеобходимо перезагрузить компьютер, чтобы завершить сброс.\n"
 
 
 class _FakeWindows:
@@ -40,17 +43,15 @@ class _FakeWindows:
         winhttp_proxy: str = "",
         system_proxy: SystemProxy = SystemProxy(enabled=False, server=""),
         listening: set[tuple[str, int]] = frozenset(),
-        winsock: tuple[WinsockProvider, ...] = (),
         fail: set[str] = frozenset(),
         netsh: dict[str, tuple[int, str]] | None = None,
     ) -> None:
         self.winhttp_proxy = winhttp_proxy
         self.system_proxy = system_proxy
         self.listening = set(listening)
-        self.winsock = list(winsock)
         self.fail = set(fail)
-        # Ответ netsh по третьему слову команды: «reset» или «set».
-        self.netsh = {"reset": (1, RESET_OUTPUT), "set": (0, "ОК.\n"), **(netsh or {})}
+        # Ответ netsh по последнему слову команды до параметров: «reset», «set» или «winsock».
+        self.netsh = {"reset": (1, RESET_OUTPUT), "set": (0, "ОК.\n"), "winsock": (0, WINSOCK_OUTPUT), **(netsh or {})}
         self.netsh_calls: list[tuple[str, ...]] = []
         self.calls: list[str] = []
 
@@ -61,7 +62,7 @@ class _FakeWindows:
 
     def run_netsh(self, *args: str) -> tuple[int, str]:
         self.netsh_calls.append(args)
-        return self.netsh[args[2]]
+        return self.netsh["winsock" if args[0] == "winsock" else args[2]]
 
     def flush_resolver_cache(self) -> bool:
         self.calls.append("flush_dns")
@@ -84,13 +85,6 @@ class _FakeWindows:
         self._call("disable_system_proxy")
         self.system_proxy = SystemProxy(enabled=False, server=self.system_proxy.server)
 
-    def list_layered_winsock_providers(self) -> tuple[WinsockProvider, ...]:
-        return tuple(self.winsock)
-
-    def remove_winsock_provider(self, provider: WinsockProvider) -> None:
-        self._call("remove_winsock")
-        self.winsock.remove(provider)
-
     def accepts_connections(self, host: str, port: int) -> bool:
         self.calls.append(f"probe {host}:{port}")
         return (host, port) in self.listening
@@ -104,8 +98,6 @@ class InternetCleanupTests(unittest.TestCase):
             "reset_winhttp_proxy",
             "read_system_proxy",
             "disable_system_proxy",
-            "list_layered_winsock_providers",
-            "remove_winsock_provider",
         )
         patchers = [
             *(patch.object(internet_cleanup.winapi, name, getattr(windows, name)) for name in winapi_names),
@@ -131,10 +123,10 @@ class InternetCleanupTests(unittest.TestCase):
         self.assertEqual(result.title, "Сеть Windows сброшена")
         self.assertEqual(
             result.content,
-            "TCP/IP IPv4 сброшен. TCP/IP IPv6 сброшен. Динамические TCP-порты: 10000–39999. "
+            "TCP/IP IPv4 сброшен. TCP/IP IPv6 сброшен. Динамические TCP-порты: 10000–39999. Winsock сброшен. "
             "Кэш DNS очищен. Кэш адресов и маршрутов очищен.\n"
-            "Менять не пришлось: прокси WinHTTP, системный прокси, Winsock.\n"
-            "Перезагрузите Windows, чтобы сброс TCP/IP подействовал.",
+            "Менять не пришлось: прокси WinHTTP, системный прокси.\n"
+            "Перезагрузите Windows, чтобы сброс подействовал.",
         )
 
     def test_english_netsh_output_is_understood_too(self) -> None:
@@ -156,7 +148,7 @@ class InternetCleanupTests(unittest.TestCase):
             result.content,
         )
         self.assertIn("сброс TCP/IP IPv6 — netsh вернул код 1", result.content)
-        self.assertNotIn("Перезагрузите Windows", result.content)
+        self.assertIn("Winsock сброшен.", result.content)
 
     def test_tcpip_reset_refused_in_most_items_is_a_failure(self) -> None:
         mostly_refused = "Сброс Глобальный - OK!\nСброс  - сбой.\nОтказано в доступе.\nСброс  - сбой.\nОтказано в доступе.\n"
@@ -258,20 +250,14 @@ class InternetCleanupTests(unittest.TestCase):
 
         self.assertFalse([call for call in windows.calls if call.startswith("probe")])
 
-    def test_foreign_winsock_addons_are_removed_from_both_catalogs(self) -> None:
-        addons = (
-            WinsockProvider(name="Speed Booster over [TCP/IP]", provider_id=b"a" * 16, for_32bit_apps=False),
-            WinsockProvider(name="Speed Booster over [TCP/IP]", provider_id=b"a" * 16, for_32bit_apps=True),
-            WinsockProvider(name="Speed Booster", provider_id=b"b" * 16, for_32bit_apps=False),
-        )
-        windows = _FakeWindows(winsock=addons)
+    def test_winsock_reset_failure_is_reported(self) -> None:
+        windows = _FakeWindows(netsh={"winsock": (1, NO_RIGHTS_OUTPUT)})
 
         result = self._run(windows)
 
-        self.assertEqual(windows.winsock, [])
-        self.assertEqual(windows.calls.count("remove_winsock"), 3)
-        self.assertIn("Удалены надстройки Winsock: «Speed Booster over [TCP/IP]», «Speed Booster».", result.content)
-        self.assertIn("Перезапустите браузер", result.content)
+        self.assertEqual(result.level, "warning")
+        self.assertIn("сброс Winsock — netsh вернул код 1: Запрошенная операция требует повышения прав", result.content)
+        self.assertNotIn("Winsock сброшен", result.content)
 
     def test_failed_step_does_not_stop_the_rest(self) -> None:
         windows = _FakeWindows(winhttp_proxy="10.0.0.5:3128", fail={"flush_caches", "reset_winhttp"})
@@ -297,11 +283,11 @@ class InternetCleanupTests(unittest.TestCase):
         def broken() -> str:
             raise OSError("нет доступа")
 
-        result = run_internet_cleanup([CleanupStep("кэш DNS", broken), CleanupStep("Winsock", broken)])
+        result = run_internet_cleanup([CleanupStep("кэш DNS", broken), CleanupStep("сброс Winsock", broken)])
 
         self.assertEqual(result.level, "error")
         self.assertEqual(result.title, "Сброс сети не выполнен")
-        self.assertEqual(result.content, "Не получилось: кэш DNS — нет доступа; Winsock — нет доступа.")
+        self.assertEqual(result.content, "Не получилось: кэш DNS — нет доступа; сброс Winsock — нет доступа.")
 
     def test_proxy_address_forms(self) -> None:
         parse = internet_cleanup._proxy_endpoints
@@ -315,6 +301,17 @@ class InternetCleanupTests(unittest.TestCase):
         for unclear in ("", "127.0.0.1", "127.0.0.1:0", "127.0.0.1:99999", "::1:8080", "host:port"):
             with self.subTest(unclear):
                 self.assertIsNone(parse(unclear))
+
+    def test_no_step_needing_reboot_means_no_reboot_reminder(self) -> None:
+        steps = [
+            CleanupStep("сброс Winsock", lambda: (_ for _ in ()).throw(OSError("нет доступа")), needs_reboot=True),
+            CleanupStep("кэш DNS", lambda: "Кэш DNS очищен."),
+        ]
+
+        result = run_internet_cleanup(steps)
+
+        self.assertEqual(result.level, "warning")
+        self.assertNotIn("Перезагрузите Windows", result.content)
 
     def test_winapi_wrapper_does_not_start_external_programs(self) -> None:
         import inspect

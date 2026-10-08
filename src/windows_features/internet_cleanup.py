@@ -7,12 +7,12 @@ WinAPI (windows_features.internet_cleanup_winapi):
 - прокси WinHTTP сбрасывается, только если он задан;
 - системный прокси отключается, только если он смотрит на этот же компьютер
   и там никто не отвечает — так бывает после аварийно закрытого VPN или
-  прокси-клиента. Работающий прокси не трогается;
-- из каталога Winsock удаляются надстройки посторонних программ (LSP).
+  прокси-клиента. Работающий прокси не трогается.
 
-У сброса TCP/IP и у диапазона динамических портов открытых функций нет,
-поэтому для них запускается netsh — три команды по десятой доле секунды.
-Сброс TCP/IP вступает в силу после перезагрузки Windows.
+У сброса TCP/IP, сброса каталога Winsock и у диапазона динамических портов
+открытых функций нет, поэтому для них запускается netsh — четыре команды по
+десятой доле секунды. Сброс TCP/IP и Winsock вступает в силу после
+перезагрузки Windows.
 """
 
 from __future__ import annotations
@@ -41,7 +41,6 @@ DYNAMIC_TCP_PORT_COUNT = 30000
 # Столько ждём ответа от прокси на этом же компьютере. Работающая программа
 # отвечает мгновенно, а на закрытый порт Windows стучится около двух секунд.
 PROXY_PROBE_TIMEOUT_SECONDS = 0.5
-MAX_LISTED_ITEMS = 3
 # Сколько итог висит на экране: в нём несколько строк, а ошибку ещё нужно успеть понять.
 RESULT_DURATION_MS = 8000
 PROBLEM_DURATION_MS = 15000
@@ -147,6 +146,13 @@ def _set_dynamic_tcp_ports() -> str:
     return f"Динамические TCP-порты: {DYNAMIC_TCP_PORT_START}–{last_port}."
 
 
+def _reset_winsock() -> str:
+    code, text = _run_netsh("winsock", "reset")
+    if code != 0:
+        raise OSError(_netsh_problem(code, text))
+    return "Winsock сброшен."
+
+
 # ── шаги через WinAPI ─────────────────────────────────────────────────────
 
 
@@ -226,34 +232,17 @@ def _disable_dead_system_proxy() -> str:
     return f"Системный прокси {proxy.server} отключён: программа по этому адресу не отвечает."
 
 
-def _remove_winsock_addons() -> str:
-    providers = winapi.list_layered_winsock_providers()
-    if not providers:
-        return ""
-    for provider in providers:
-        log(f"Сброс сети: удаляется надстройка Winsock «{provider.name}»", "INFO")
-        winapi.remove_winsock_provider(provider)
-    names = list(dict.fromkeys(provider.name for provider in providers))
-    listed = ", ".join(f"«{name}»" for name in names[:MAX_LISTED_ITEMS])
-    if len(names) > MAX_LISTED_ITEMS:
-        listed += f" и ещё {len(names) - MAX_LISTED_ITEMS}"
-    return (
-        f"Удалены надстройки Winsock: {listed}. "
-        "Перезапустите браузер и другие программы, чтобы они перестали ими пользоваться."
-    )
-
-
 def default_cleanup_steps() -> tuple[CleanupStep, ...]:
     return (
         CleanupStep("сброс TCP/IP IPv4", _reset_tcpip_v4, needs_reboot=True),
         CleanupStep("сброс TCP/IP IPv6", _reset_tcpip_v6, needs_reboot=True),
         # Порты — после сброса TCP/IP, как и в прежнем порядке команд.
         CleanupStep("динамические TCP-порты", _set_dynamic_tcp_ports),
+        CleanupStep("сброс Winsock", _reset_winsock, needs_reboot=True),
         CleanupStep("кэш DNS", _flush_dns_cache),
         CleanupStep("кэш адресов и маршрутов", _flush_address_caches),
         CleanupStep("прокси WinHTTP", _reset_winhttp_proxy),
         CleanupStep("системный прокси", _disable_dead_system_proxy),
-        CleanupStep("Winsock", _remove_winsock_addons),
     )
 
 
@@ -293,7 +282,7 @@ def run_internet_cleanup(steps: Sequence[CleanupStep] | None = None) -> Internet
     if untouched:
         lines.append(f"Менять не пришлось: {', '.join(untouched)}.")
     if needs_reboot:
-        lines.append("Перезагрузите Windows, чтобы сброс TCP/IP подействовал.")
+        lines.append("Перезагрузите Windows, чтобы сброс подействовал.")
     if not failed:
         return InternetCleanupActionResult(
             level="success",
