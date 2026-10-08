@@ -926,6 +926,20 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertIn(("www.youtube.com", "142.251.157.4"), net.calls)
         self.assertNotIn("❌ YouTube", text)
 
+    def test_blocks_found_while_vpn_tools_run_are_marked_as_direct_road_only(self) -> None:
+        # Проверка ходит напрямую, а VPN умеет вести браузер своей дорогой: «не соединяется»
+        # у нас при нём не значит «не открывается у человека». Без VPN оговорки нет.
+        def advice(tools):
+            net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET))
+            net.bypass_tools = tools
+            result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+            return [line for item in result["problems"] for line in item["advice"] if "прямой дороги" in line]
+
+        marked = advice(("sing-box", "WireGuard"))
+        self.assertTrue(marked)
+        self.assertIn("sing-box, WireGuard", marked[0])
+        self.assertEqual(advice(()), [])
+
     def test_dpi_reset_retries_once_on_another_address_and_reports_strategy(self) -> None:
         lines: list[str] = []
         net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET))

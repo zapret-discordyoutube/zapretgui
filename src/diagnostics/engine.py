@@ -862,6 +862,7 @@ def run_blockcheck(
             ipv6=ipv6,
             system=system,
             telegram=telegram,
+            other_tools=other_tools,
         )
         problems += problem_rules.burst_problems(burst)
         if dns_servers is not None:

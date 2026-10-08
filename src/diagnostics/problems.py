@@ -60,6 +60,14 @@ ADVICE_FINGERPRINT = (
 BYPASSABLE = (ReachState.DPI, ReachState.FREEZE)
 
 
+# Блокировки, которые VPN или прокси обходит своей дорогой: при них вывод верен только для прямого пути.
+_DIRECT_ROAD_KINDS = (block_kind.KIND_IP, block_kind.KIND_NO_CONNECT, block_kind.KIND_SNI, block_kind.KIND_VOICE)
+ADVICE_OTHER_TOOLS = (
+    "Это результат прямой дороги: проверка идёт мимо запущенных {tools}. Если в браузере или приложении всё "
+    "работает, значит, его ведёт одна из этих программ — блокировка на линии есть, но вам она не мешает."
+)
+
+
 def _zapret_action(zapret_running: bool | None) -> str:
     """Кнопка у обходимой блокировки. «Запустить» — только когда точно известно, что Zapret не запущен."""
     return "start_zapret" if zapret_running is False else "strategy"
@@ -150,8 +158,14 @@ def collect_problems(
     ipv6: ipv6_check.Ipv6Verdict | None = None,
     system: tuple[system_state.SystemItem, ...] = (),
     telegram: telegram_check.TelegramReport | None = None,
+    other_tools=(),
 ) -> tuple[list[dict], list[str], list[str]]:
-    """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS."""
+    """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS.
+
+    ``other_tools`` — запущенные VPN и программы обхода. Проверка ходит в сеть
+    напрямую, а они умеют вести отдельные программы (например, браузер) своей
+    дорогой: при них «не соединяется» у нас не значит «не открывается в браузере».
+    """
     problems: list[dict] = []
 
     controls = [key for key, service in services.items() if service.control]
@@ -412,6 +426,11 @@ def collect_problems(
                 kind=block_kind.KIND_DNS,
             )
         )
+    tools = ", ".join(other_tools)
+    if tools:
+        for item in problems:
+            if item["kind"] in _DIRECT_ROAD_KINDS:
+                item["advice"].append(ADVICE_OTHER_TOOLS.format(tools=tools))
     problems.sort(key=lambda item: LEVEL_ORDER.get(Level(item["level"]), 9))
     return problems, working, spoofed
 
