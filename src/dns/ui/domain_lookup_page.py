@@ -492,7 +492,19 @@ class DomainLookupPage(BasePage):
             return
         run = runs[row]
         from diagnostics.history import format_time
+        from dns.domain_lookup import DomainLookupReport
 
+        # Прошлая проверка — теми же карточками, что и свежая: её отчёт лежит в файле целиком.
+        restore = getattr(self._dns, "load_past_domain_lookup_report", None)
+        past = restore(str(run.get("log_file") or "")) if callable(restore) and not self._running else None
+        if isinstance(past, DomainLookupReport):
+            self._show_report(past)
+            when = format_time(str(run.get("time") or ""))
+            self.status_lines.set_lines(
+                (plans.InfoLine(f"Показана прошлая проверка: {run.get('title', '')} · {when}", plans.TONE_ACCENT),)
+            )
+            self.report_button.setEnabled(True)
+            return
         loader = getattr(self._dns, "load_past_domain_lookup", None)
         text = str(loader(str(run.get("log_file") or "")) if callable(loader) else "")
         if not text:

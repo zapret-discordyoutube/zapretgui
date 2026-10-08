@@ -297,8 +297,8 @@ def run_domain_lookup(target: str, *, use_external: bool = True, on_stage=None, 
 
     entry = build_history_entry(report)
     if entry is not None:
-        # Полный текст проверки — в файл: запись истории на вкладке открывает его страницей.
-        entry["log_file"] = save_domain_lookup_text(report.target, build_text_report(report))
+        # Проверка целиком — в файл: запись истории на вкладке открывает её теми же карточками.
+        entry["log_file"] = save_domain_lookup_text(report.target, build_text_report(report), report)
     _remember_check("domain_history", entry)
     # Экран показывает именно сохранённую запись: соберёт свою — в ней не будет пути к полному тексту.
     return replace(report, history_entry=entry)
@@ -309,8 +309,11 @@ DOMAIN_LOOKUP_FORMAT = "zapretgui.domain_lookup/1"
 DOMAIN_LOOKUP_FILES_KEPT = 40
 
 
-def save_domain_lookup_text(target: str, text: str) -> str:
-    """Кладёт текст проверки домена в папку журналов. Возвращает путь; пусто — записать не удалось."""
+def save_domain_lookup_text(target: str, text: str, report=None) -> str:
+    """Кладёт проверку домена в папку журналов. Возвращает путь; пусто — записать не удалось.
+
+    В файле и сам отчёт (по нему прошлая проверка рисуется теми же карточками), и его текст.
+    """
     import json
     import os
     from datetime import datetime
@@ -322,6 +325,10 @@ def save_domain_lookup_text(target: str, text: str) -> str:
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, f"domain_lookup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         document = {"format": DOMAIN_LOOKUP_FORMAT, "target": str(target), "text": str(text).split("\n")}
+        if report is not None:
+            from utils.dataclass_json import to_plain
+
+            document["report"] = to_plain(report)
         with open(path, "w", encoding="utf-8") as stream:
             json.dump(document, stream, ensure_ascii=False, indent=1)
         old = sorted(name for name in os.listdir(folder) if name.startswith("domain_lookup_") and name.endswith(".json"))
@@ -335,21 +342,36 @@ def save_domain_lookup_text(target: str, text: str) -> str:
         return ""
 
 
-def load_past_domain_lookup(log_file: str | None) -> str:
-    """Текст прошлой проверки домена. Пусто — файла нет или он не читается."""
+def _read_domain_lookup(log_file: str | None) -> dict:
     import json
 
     if not log_file:
-        return ""
+        return {}
     try:
         with open(str(log_file), encoding="utf-8") as stream:
             document = json.load(stream)
     except (OSError, ValueError):
-        return ""
+        return {}
     if not isinstance(document, dict) or document.get("format") != DOMAIN_LOOKUP_FORMAT:
-        return ""
-    lines = document.get("text")
+        return {}
+    return document
+
+
+def load_past_domain_lookup(log_file: str | None) -> str:
+    """Текст прошлой проверки домена. Пусто — файла нет или он не читается."""
+    lines = _read_domain_lookup(log_file).get("text")
     return "\n".join(str(line) for line in lines) if isinstance(lines, list) else ""
+
+
+def load_past_domain_lookup_report(log_file: str | None):
+    """Отчёт прошлой проверки домена — тем же объектом, из которого рисуются карточки.
+
+    None — файла нет, он не читается или сохранён до того, как отчёт стали класть в файл.
+    """
+    from dns.domain_lookup import DomainLookupReport
+    from utils.dataclass_json import from_plain
+
+    return from_plain(DomainLookupReport, _read_domain_lookup(log_file).get("report"))
 
 
 def _remember_check(key: str, entry: dict | None) -> None:

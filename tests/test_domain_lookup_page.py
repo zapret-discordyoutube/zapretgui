@@ -402,3 +402,44 @@ class PastCheckTextTests(unittest.TestCase):
         self.assertEqual(opened[-1].text, "полный текст проверки")
         self.assertNotIn("не сохранился", opened[-1].text)
 
+    def test_past_check_is_shown_with_the_same_cards_as_a_fresh_one(self) -> None:
+        import tempfile
+        from types import SimpleNamespace
+
+        from PyQt6.QtWidgets import QApplication
+
+        from dns import commands
+        from dns.ui.domain_lookup_page import DomainLookupPage
+
+        _app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as folder:
+            with patch("config.runtime_layout.APPLICATION_PATHS", SimpleNamespace(logs_dir=folder)):
+                path = commands.save_domain_lookup_text("example.com", "текст", _report(finished=True))
+            # Отчёт возвращается из файла тем же объектом: карточки по нему получаются те же.
+            self.assertEqual(commands.load_past_domain_lookup_report(path), _report(finished=True))
+
+            feature = Mock()
+            feature.load_past_domain_lookup_report = commands.load_past_domain_lookup_report
+            feature.load_past_domain_lookup = commands.load_past_domain_lookup
+            page = DomainLookupPage(dns_feature=feature, embedded=True)
+            self.addCleanup(page.deleteLater)
+            fresh = DomainLookupPage(dns_feature=Mock(), embedded=True)
+            self.addCleanup(fresh.deleteLater)
+            fresh._show_report(_report(finished=True))
+            opened: list = []
+            page.report_requested.connect(opened.append)
+            run = {"kind": "domain", "time": "2026-10-08T16:06:00", "title": "example.com", "level": "ok",
+                   "headline": "Готово", "problems": [], "states": {}, "log_file": path}
+            page.set_history([run, {**run, "log_file": ""}])
+
+            # Плитки идут свежими сверху: вторая — запись с файлом.
+            page._open_past(1)
+            self.assertEqual(page.result_cards(), fresh.result_cards())
+            self.assertTrue(page.result_cards())
+            self.assertIn("Показана прошлая проверка: example.com", page.status_lines.accessibleName())
+            self.assertEqual(opened, [])
+
+            # У старой записи отчёта в файле нет: остаётся страница с текстом.
+            page._open_past(0)
+            self.assertEqual(len(opened), 1)
+
