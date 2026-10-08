@@ -53,7 +53,13 @@ from ui.fluent_widgets import set_tooltip
 # За это время фаза сцены проходит полный круг, не считая остановок у проверки.
 PERIOD_MS = 10000
 # На столько дорожка замирает, когда пакет дошёл до ТСПУ: это главный момент схемы.
-HOLD_MS = 1700
+HOLD_MS = 2600
+# На какой доле остановки проверка выносит решение: до неё луч идёт по пакету,
+# после — решение стоит под проверкой и в журнале, и его успевают прочитать.
+VERDICT_AT = 0.45
+# Надпись проявляется плавно: доля остановки и доля круга, за которые она набирает яркость.
+TEXT_FADE_HOLD = 0.16
+TEXT_FADE = 0.03
 # Во столько раз увеличен пакет, пока его проверяют.
 HOLD_SCALE = 1.22
 FRAME_MS = 33
@@ -70,6 +76,8 @@ WIDE_TRACK_SHARE = 0.56
 ILLUSTRATION_HEIGHT = TRACK_HEIGHT + LOG_HEADER_HEIGHT + LOG_ROW_HEIGHT * 2 + LOG_BOTTOM_PAD
 # Сколько доли круга плашка идёт от «Вы» до сайта.
 TRAVEL = 0.45
+# Отступ первого пакета от «Вы» берётся только из той длины дорожки, что сверх этой.
+LEAD_FREE_TRACK = 360.0
 # С этого места круга всё плавно гаснет перед повтором.
 FADE_FROM = 0.9
 # Неподвижный кадр, когда анимации выключены: всё уже дошло.
@@ -287,13 +295,17 @@ class LogRow:
     number: int
     label: str
     kind: str
-    length: int
     # Что сделала проверка провайдера и что сделал сайт: (текст, тон).
     # Тон: wait — ещё не дошёл, ok, pass, drop, block, none.
     gate: tuple[str, str]
     site: tuple[str, str]
     # Строка проявляется, когда пакет выходит от «Вы».
     alpha: float = 1.0
+    # Пакет сейчас стоит у проверки: его строка подсвечена.
+    active: bool = False
+    # Надписи в столбцах проявляются плавно, когда меняются.
+    gate_alpha: float = 1.0
+    site_alpha: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +334,11 @@ class TechniqueIllustration(QWidget):
         self._phase = STATIC_PHASE
         # Пакет, остановленный у проверки (-1 — дорожка движется).
         self._held_packet = -1
+        # Какая доля остановки прошла (0…1): по ней идёт луч и появляется решение.
+        self._hold_progress = 0.0
+        # Круг идёт по часам с остановками (а не выставлен на один кадр).
+        self._with_holds = False
+        self._anim_ms = 0.0
         self._paused = False
         # С какого места круга идёт отсчёт после снятия с паузы, мс.
         self._clock_offset_ms = 0.0
@@ -377,6 +394,9 @@ class TechniqueIllustration(QWidget):
             self._timer.stop()
         else:
             self._clock_offset_ms = self.ms_at(self._phase)
+            if self._held_packet >= 0:
+                # Сняли с паузы посреди проверки — она продолжается, а не идёт заново.
+                self._clock_offset_ms += self._hold_progress * HOLD_MS
             self._clock.start()
             self._timer.start()
         self._sync_pause_button()
@@ -390,6 +410,8 @@ class TechniqueIllustration(QWidget):
     def set_phase(self, phase: float) -> None:
         """Кадр в заданный момент круга (для снимков и тестов)."""
         self._held_packet = -1
+        self._hold_progress = 0.0
+        self._with_holds = False
         self._phase = max(0.0, min(0.999, float(phase)))
         self.update()
 
@@ -417,6 +439,9 @@ class TechniqueIllustration(QWidget):
         animate = self._can_animate()
         self._paused = False
         self._clock_offset_ms = 0.0
+        self._held_packet = -1
+        self._hold_progress = 0.0
+        self._with_holds = False
         # Без анимаций кадр один и ставить на паузу нечего — кнопка не нужна.
         self.pause_button.setVisible(animate)
         self._sync_pause_button()
@@ -460,6 +485,11 @@ class TechniqueIllustration(QWidget):
     def phase_at(self, ms: float) -> tuple[float, int]:
         """Фаза сцены в момент ms от начала круга и номер пакета, который сейчас
         проверяют (-1 — дорожка движется)."""
+        phase, index, _progress = self._clock_state(ms)
+        return phase, index
+
+    def _clock_state(self, ms: float) -> tuple[float, int, float]:
+        """Фаза сцены, пакет у проверки и доля его остановки в момент ms."""
         points = self.hold_points()
         rest = float(ms) % (PERIOD_MS + HOLD_MS * len(points))
         for moment, index in points:
@@ -467,9 +497,9 @@ class TechniqueIllustration(QWidget):
             if rest < reach:
                 break
             if rest < reach + HOLD_MS:
-                return moment, index
+                return moment, index, (rest - reach) / HOLD_MS
             rest -= HOLD_MS
-        return min(0.999, rest / PERIOD_MS), -1
+        return min(0.999, rest / PERIOD_MS), -1, 0.0
 
     def ms_at(self, phase: float) -> float:
         """Момент круга, в который фаза сцены впервые равна phase."""
@@ -477,7 +507,9 @@ class TechniqueIllustration(QWidget):
 
     def _on_tick(self) -> None:
         elapsed = self._clock.elapsed() if self._clock.isValid() else 0
-        self._phase, self._held_packet = self.phase_at(self._clock_offset_ms + elapsed)
+        self._anim_ms = self._clock_offset_ms + elapsed
+        self._phase, self._held_packet, self._hold_progress = self._clock_state(self._anim_ms)
+        self._with_holds = True
         self.update()
 
     def _sync_pause_button(self) -> None:
@@ -529,7 +561,14 @@ class TechniqueIllustration(QWidget):
         you_rect = QRectF(4, track_y - 30, node_w, 60)
         site_rect = QRectF(width - 4 - node_w, track_y - 30, node_w, 60)
         gate_rect = QRectF(width / 2 - gate_w / 2, track_y - 42, gate_w, 84)
-        return _Layout(you_rect, gate_rect, site_rect, you_rect.right() + 8, site_rect.left() - 8, track_y)
+        start_x, end_x = you_rect.right() + 8, site_rect.left() - 8
+        scene = SCENES.get(self._scene_key)
+        if scene is not None:
+            # Пакет появляется рядом с «Вы» уже целым, а не выезжает из-за него
+            # обрезанным. На узкой схеме отступа нет: дорожка и так короткая.
+            widest = max(self._chip_widths(scene, QFontMetrics(self._chip_font())))
+            start_x += min(widest / 2, max(0.0, end_x - start_x - LEAD_FREE_TRACK) * 0.5)
+        return _Layout(you_rect, gate_rect, site_rect, start_x, end_x, track_y)
 
     def _fit_height(self) -> int:
         """Высота под нынешнюю ширину: журнал либо под дорожкой, либо справа от неё."""
@@ -565,41 +604,87 @@ class TechniqueIllustration(QWidget):
         # Подделка гаснет на первой половине пути от проверки к сайту.
         gone = at_gate + (1.0 - at_gate) * 0.55
         wait = ("…", "wait")
+        scanning = (self._tr("onboarding.scene.log.scanning", "проверяет…"), "scan")
+        held = self._held_packet
+        together = set()
+        if held >= 0:
+            together = {held, held + 1} if scene.packets[held].glued_to_next else {held}
         rows: list[LogRow] = []
+        reached_before = False
         for index, packet in enumerate(scene.packets):
             raw = (phase - times.starts[index]) / scene.travel
+            if packet.fate == "blocked":
+                reached = phase >= times.verdict
+            else:
+                reached = raw >= at_gate - 1e-9
+            # Вторая половина слитого пакета проверена вместе с первой.
+            if index > 0 and scene.packets[index - 1].glued_to_next:
+                reached = reached or reached_before
+            reached_before = reached
             if raw <= 0.0:
                 continue
-            passed_gate = raw >= at_gate
+            active = index in together
+            site_from = 1.0
             if packet.fate == "blocked":
-                gate = (self._tr("onboarding.scene.log.blocked", "узнал имя — блок"), "block") if phase >= times.verdict else wait
+                verdict = (self._tr("onboarding.scene.log.blocked", "узнал имя — блок"), "block")
                 site = ("—", "none")
             elif packet.fate == "die":
-                gate = (self._tr("onboarding.scene.log.fooled", "принял за настоящий"), "ok") if passed_gate else wait
+                verdict = (self._tr("onboarding.scene.log.fooled", "принял за настоящий"), "ok")
                 # Подделка либо не доходит до сайта (короткий путь), либо он её
                 # отбрасывает (подпись, номер, метка времени): сайту она не достаётся.
                 site = (self._tr("onboarding.scene.log.not_taken", "не принят"), "drop") if raw >= gone else wait
+                site_from = gone
             elif packet.fate == "discard":
-                gate = (self._tr("onboarding.scene.log.passed", "пропустил"), "pass") if passed_gate else wait
+                verdict = (self._tr("onboarding.scene.log.passed", "пропустил"), "pass")
                 site = (self._tr("onboarding.scene.log.dropped", "отброшен"), "drop") if raw >= 1.0 else wait
             else:
-                gate = (self._tr("onboarding.scene.log.passed", "пропустил"), "pass") if passed_gate else wait
+                verdict = (self._tr("onboarding.scene.log.passed", "пропустил"), "pass")
                 site = (self._tr("onboarding.scene.log.accepted", "принят"), "ok") if raw >= 1.0 else wait
-            label = self._packet_label(packet, False)
+            # Пока пакет стоит у проверки, решения ещё нет: оно появляется в
+            # середине остановки — одновременно в журнале и под проверкой.
+            gate_alpha = 1.0
+            if active and self._hold_progress < VERDICT_AT:
+                gate = scanning
+                gate_alpha = _ease_out(self._hold_progress / TEXT_FADE_HOLD)
+            elif reached or active:
+                gate = verdict
+                if active:
+                    gate_alpha = _ease_out((self._hold_progress - VERDICT_AT) / TEXT_FADE_HOLD)
+            else:
+                gate = wait
+            site_alpha = 1.0
+            if site[1] not in ("wait", "none"):
+                site_alpha = _ease_out((raw - site_from) * scene.travel / TEXT_FADE)
             rows.append(
                 LogRow(
                     number=index + 1,
-                    label=label,
+                    label=self._packet_label(packet, False),
                     kind=packet.kind,
-                    length=len(label.split(". ", 1)[-1]),
                     gate=gate,
                     site=site,
                     alpha=_ease_out(raw * scene.travel / APPEAR),
+                    active=active,
+                    gate_alpha=gate_alpha,
+                    site_alpha=site_alpha,
                 )
             )
         return rows
 
-    def _paint_log(self, painter: QPainter, phase: float, fade: float, colors) -> None:
+    def _since_verdict(self, scene: Scene, phase: float, times: SceneTimes) -> float:
+        """Сколько круга прошло с решения проверки (реплика, обрыв, красный крест).
+
+        Пока пакет стоит у проверки, фаза сцены не идёт — счёт ведётся по самой
+        остановке, чтобы решение появилось в ней, а не после неё.
+        """
+        hold_tail = (1.0 - VERDICT_AT) * HOLD_MS / PERIOD_MS
+        if self._held_packet == scene.bubble_trigger:
+            return (self._hold_progress - VERDICT_AT) * HOLD_MS / PERIOD_MS
+        since = phase - times.verdict
+        if self._with_holds and since >= 0.0:
+            since += hold_tail
+        return since
+
+    def _paint_log(self, painter: QPainter, rows: list[LogRow], fade: float, colors) -> None:
         """Журнал под дорожкой: номер, пакет, длина, проверка провайдера, сайт."""
         if self._is_wide():
             # Широкая схема: журнал стоит справа от дорожки.
@@ -613,12 +698,12 @@ class TechniqueIllustration(QWidget):
         painter.translate(left, 0)
         font = self._detail_font()
         painter.setFont(font)
-        columns = (10.0, 48.0, width * 0.38, width * 0.5, width * 0.8)
+        columns = (10.0, 48.0, width * 0.34, width * 0.52, width * 0.82)
         flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         headers = (
             "№",
             self._tr("onboarding.scene.log.packet", "пакет"),
-            self._tr("onboarding.scene.log.length", "длина"),
+            self._tr("onboarding.scene.log.kind", "что это"),
             self._tr("onboarding.scene.log.gate", "ТСПУ"),
             self._tr("onboarding.scene.log.site", "сайт"),
         )
@@ -634,21 +719,37 @@ class TechniqueIllustration(QWidget):
             "ok": PASS_GREEN,
             "drop": FAKE_AMBER,
             "block": BLOCK_RED,
+            "scan": colors["accent"],
         }
-        marks = {"fake": " FAKE", "junk": " JUNK", "syn": " SYN"}
-        for row in self.log_rows(phase):
+        kinds = {
+            "fake": (self._tr("onboarding.scene.log.kind.fake", "подделка"), FAKE_AMBER),
+            "junk": (self._tr("onboarding.scene.log.kind.junk", "мусор"), colors["muted"]),
+            "syn": (self._tr("onboarding.scene.log.kind.syn", "SYN с данными"), colors["muted"]),
+        }
+        real_kind = (self._tr("onboarding.scene.log.kind.real", "данные"), colors["muted"])
+        for row in rows:
             y = top + LOG_HEADER_HEIGHT + (row.number - 1) * LOG_ROW_HEIGHT
             painter.setOpacity(row.alpha * fade)
+            if row.active:
+                # Строка пакета, который сейчас стоит у проверки.
+                strip = QColor(colors["accent"])
+                strip.setAlpha(30)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(strip)
+                painter.drawRoundedRect(QRectF(2, y + 1, width - 4, LOG_ROW_HEIGHT - 2), 3, 3)
             cells = (
-                (f"#{row.number}", colors["muted"]),
-                (row.label + marks.get(row.kind, ""), FAKE_AMBER if row.kind == "fake" else colors["text"]),
-                (str(row.length), colors["muted"]),
+                (f"#{row.number}", colors["accent"] if row.active else colors["muted"]),
+                (row.label, FAKE_AMBER if row.kind == "fake" else colors["text"]),
+                kinds.get(row.kind, real_kind),
                 (row.gate[0], tones[row.gate[1]]),
                 (row.site[0], tones[row.site[1]]),
             )
-            for x, (text, color) in zip(columns, cells):
+            # Новая надпись проявляется и чуть подъезжает снизу — глаз успевает её заметить.
+            shows = (1.0, 1.0, 1.0, row.gate_alpha, row.site_alpha)
+            for x, (text, color), show in zip(columns, cells, shows):
+                painter.setOpacity(row.alpha * fade * show)
                 painter.setPen(color)
-                painter.drawText(QRectF(x, y, width - x, LOG_ROW_HEIGHT), flags, text)
+                painter.drawText(QRectF(x, y + 4.0 * (1.0 - show), width - x, LOG_ROW_HEIGHT), flags, text)
         painter.setOpacity(1.0)
         painter.restore()
 
@@ -713,9 +814,11 @@ class TechniqueIllustration(QWidget):
         return self._chip_frames(scene, phase, layout, chips, times)
 
     def _chip_frames(
-        self, scene: Scene, phase: float, layout: _Layout, chips: list[float], times: SceneTimes
+        self, scene: Scene, phase: float, layout: _Layout, chips: list[float], times: SceneTimes, since=None
     ) -> list[ChipFrame]:
         span = layout.end_x - layout.start_x
+        # Сколько прошло с решения проверки; без остановок — просто по фазе.
+        since = phase - times.verdict if since is None else since
         frames: list[ChipFrame] = []
         for index, packet in enumerate(scene.packets):
             raw = (phase - times.starts[index]) / scene.travel
@@ -740,7 +843,7 @@ class TechniqueIllustration(QWidget):
                 wall = self._blocked_x(layout, chips[index])
                 if x >= wall:
                     x = wall
-                    shake = _clamp01((phase - times.verdict) / SHAKE)
+                    shake = _clamp01(since / SHAKE)
                     if shake < 1.0:
                         x += math.sin(shake * math.pi * 5) * 5.0 * (1.0 - shake)
             elif packet.fate == "die" and x > layout.gate_x:
@@ -774,9 +877,11 @@ class TechniqueIllustration(QWidget):
         metrics = QFontMetrics(chip_font)
         chips = self._chip_widths(scene, metrics)
         times = self._scene_times(scene, layout, chips)
-        frames = self._chip_frames(scene, phase, layout, chips, times)
+        since = self._since_verdict(scene, phase, times)
+        frames = self._chip_frames(scene, phase, layout, chips, times, since)
+        rows = self.log_rows(phase)
         fade = 1.0 if phase < FADE_FROM else max(0.0, 1.0 - (phase - FADE_FROM) / (1.0 - FADE_FROM))
-        blocked = 0.0 if scene.site_result else _ease_out((phase - times.verdict) / POP)
+        blocked = 0.0 if scene.site_result else _ease_out(since / POP)
         done = 0.0 if times.site_done is None else _ease_out((phase - times.site_done) / POP)
 
         self._paint_grid(painter, layout, colors)
@@ -799,15 +904,7 @@ class TechniqueIllustration(QWidget):
             text_rect=QRectF(layout.gate_rect.left(), layout.gate_rect.top() + 3, layout.gate_rect.width(), 22),
         )
         self._paint_scan(painter, layout, frames, chips, phase, colors)
-        painter.setPen(colors["muted"])
-        small = QFont(self.font())
-        small.setPointSizeF(max(7.0, small.pointSizeF() - 1.5))
-        painter.setFont(small)
-        painter.drawText(
-            QRectF(layout.gate_rect.left(), layout.gate_rect.bottom() + 2, layout.gate_rect.width(), 16),
-            Qt.AlignmentFlag.AlignCenter,
-            self._tr("onboarding.scene.check", "проверка"),
-        )
+        self._paint_gate_caption(painter, layout, rows, colors, fade)
         self._paint_node(
             painter,
             layout.site_rect,
@@ -828,10 +925,18 @@ class TechniqueIllustration(QWidget):
             # Пакет под лучом проверки увеличен (и его слитая половина тоже):
             # это тот момент, ради которого схема останавливается.
             together = {held, held + 1} if scene.packets[held].glued_to_next else {held}
-            frames = [
-                replace(frame, scale=frame.scale * HOLD_SCALE) if frame.index in together else frame
-                for frame in frames
-            ]
+            # Половины слитого пакета растут от общей середины, иначе наедут друг на друга.
+            grown = [frame for frame in frames if frame.index in together]
+            if grown:
+                left = min(frame.x - frame.width / 2 for frame in grown)
+                right = max(frame.x + frame.width / 2 for frame in grown)
+                middle = (left + right) / 2
+                frames = [
+                    replace(frame, scale=frame.scale * HOLD_SCALE, x=middle + (frame.x - middle) * HOLD_SCALE)
+                    if frame.index in together
+                    else frame
+                    for frame in frames
+                ]
             # Увеличенный пакет рисуется последним — поверх соседей.
             frames.sort(key=lambda frame: frame.index in together)
         for frame in frames:
@@ -854,8 +959,8 @@ class TechniqueIllustration(QWidget):
         painter.restore()
 
         # Реплика проверки.
-        if phase >= times.verdict:
-            self._paint_bubble(painter, scene, layout.gate_rect, colors, fade, (phase - times.verdict) / POP)
+        if since >= 0.0 and phase >= times.verdict:
+            self._paint_bubble(painter, scene, layout.gate_rect, colors, fade, since / POP)
 
         # Итог у сайта.
         if done > 0.0:
@@ -863,9 +968,40 @@ class TechniqueIllustration(QWidget):
             self._paint_result(painter, metrics, scene.site_result, layout.site_rect, colors, fade * done, done)
         if blocked > 0.0:
             self._paint_cross(
-                painter, QPointF(layout.gate_rect.left() - 4, layout.track_y), fade, (phase - times.verdict) / POP
+                painter, QPointF(layout.gate_rect.left() - 4, layout.track_y), fade, since / POP
             )
-        self._paint_log(painter, phase, fade, colors)
+        self._paint_log(painter, rows, fade, colors)
+
+    def _paint_gate_caption(self, painter, layout: _Layout, rows: list[LogRow], colors, fade: float) -> None:
+        """Подпись под проверкой: что она делает с пакетом, который стоит у неё.
+
+        Тот же текст и в тот же миг появляется в журнале — схема и журнал
+        говорят одно.
+        """
+        active = next((row for row in rows if row.active), None)
+        text, color, bold = self._tr("onboarding.scene.check", "проверка"), colors["muted"], False
+        if active is not None:
+            tones = {"ok": PASS_GREEN, "pass": colors["text"], "block": BLOCK_RED, "scan": colors["accent"]}
+            if active.gate[1] == "scan":
+                text = self._tr("onboarding.scene.checking", "проверяет #{number}…").format(number=active.number)
+            else:
+                text = f"#{active.number}: {active.gate[0]}"
+            color, bold = tones.get(active.gate[1], colors["muted"]), True
+        small = QFont(self.font())
+        small.setPointSizeF(max(7.0, small.pointSizeF() - 1.5))
+        small.setBold(bold)
+        show = active.gate_alpha if active is not None else 1.0
+        painter.save()
+        painter.setOpacity(fade * show)
+        painter.setFont(small)
+        painter.setPen(color)
+        gate = layout.gate_rect
+        painter.drawText(
+            QRectF(gate.center().x() - 130, gate.bottom() + 2 + 4.0 * (1.0 - show), 260, 16),
+            Qt.AlignmentFlag.AlignCenter,
+            text,
+        )
+        painter.restore()
 
     @staticmethod
     def _start_times(scene: Scene, chips: list[float], track: float) -> list[float]:
@@ -950,7 +1086,7 @@ class TechniqueIllustration(QWidget):
         painter.setPen(QPen(border, 1.5))
         painter.setBrush(fill)
         painter.drawRoundedRect(gate, NODE_RADIUS, NODE_RADIUS)
-        sweep = 0.5 - 0.5 * math.cos(phase * math.tau * 9)
+        sweep = 0.5 - 0.5 * math.cos(phase * math.tau * 9 + self._anim_ms / 260.0)
         x = gate.left() + 10 + (gate.width() - 20) * sweep
         beam = QLinearGradient(x, gate.top() + 22, x, gate.bottom() - 6)
         edge = QColor(accent)

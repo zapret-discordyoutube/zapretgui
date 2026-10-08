@@ -711,7 +711,7 @@ class AnalyzerSceneTests(unittest.TestCase):
 
         widget, early = self._rows("fake", 0.02)
         self.assertEqual(list(early), [1])
-        self.assertEqual((early[1].label, early[1].kind, early[1].length), ("google.com", "fake", 10))
+        self.assertEqual((early[1].label, early[1].kind), ("google.com", "fake"))
         self.assertEqual((early[1].gate[1], early[1].site[1]), ("wait", "wait"))
 
         _widget, done = self._rows("fake", STATIC_PHASE)
@@ -757,6 +757,33 @@ class AnalyzerSceneTests(unittest.TestCase):
         # Пакет в этот момент стоит ровно у проверки.
         held = next(frame for frame in widget.chip_frames(moment) if frame.index == index)
         self.assertAlmostEqual(held.x, widget._layout().gate_x, delta=1.0)
+
+    def test_verdict_appears_during_the_stop_in_log_and_on_track_together(self) -> None:
+        """Пока пакет стоит у проверки, журнал пишет «проверяет…», а с середины остановки — решение."""
+        from ui.onboarding.illustrations import HOLD_MS, PERIOD_MS, VERDICT_AT
+
+        widget, _frames = self._frames("fake", 0.1)
+        moment, index = widget.hold_points()[0]
+        reach = moment * PERIOD_MS
+
+        def rows_at(share: float):
+            widget._phase, widget._held_packet, widget._hold_progress = widget._clock_state(reach + HOLD_MS * share)
+            widget._with_holds = True
+            return {row.number: row for row in widget.log_rows(widget._phase)}
+
+        early = rows_at(VERDICT_AT / 2)[index + 1]
+        self.assertEqual((early.active, early.gate), (True, ("проверяет…", "scan")))
+
+        late = rows_at(0.95)[index + 1]
+        self.assertEqual((late.active, late.gate), (True, ("принял за настоящий", "ok")))
+        self.assertAlmostEqual(late.gate_alpha, 1.0)
+        # Реплика проверки тоже звучит во время остановки, а не после неё.
+        scene_times = widget.scene_times()
+        from ui.onboarding.illustrations import SCENES
+
+        self.assertGreater(widget._since_verdict(SCENES["fake"], widget._phase, scene_times), 0.0)
+        widget._hold_progress = VERDICT_AT / 2
+        self.assertLess(widget._since_verdict(SCENES["fake"], widget._phase, scene_times), 0.0)
 
     def test_glued_packet_stops_once_and_resume_continues_from_the_same_frame(self) -> None:
         from ui.onboarding.illustrations import PERIOD_MS
