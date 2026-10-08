@@ -218,6 +218,9 @@ class DomainLookupReport:
     quic: QuicVerdict | None = None
     # Где стоит фильтр; ищется, только если QUIC блокируют по имени.
     filter_facts: FilterFacts | None = None
+    # Как сайт открывается: TLS 1.2 и 1.3, «как Chrome», HTTP, QUIC, способ блокировки, реестр РКН.
+    # Та же запись сервиса, что в отчёте BlockCheck (``diagnostics.engine.check_site``); только для доменов.
+    site: dict | None = None
     finished: bool = False
     stopped: bool = False
     timed_out: bool = False
@@ -850,6 +853,13 @@ def _inspect_quic(domain: str, ip: str, max_ttl: int, cancel: SocketCancel) -> t
     return verdict, locate_filter(ip, domain, max_ttl=max_ttl, cancel=cancel)
 
 
+def _check_site(domain: str, should_stop: Callable[[], bool]) -> dict | None:
+    """Сайт теми же пробами, что в BlockCheck. Движок подключается здесь: остальной проверке адреса он не нужен."""
+    from diagnostics.engine import check_site
+
+    return check_site(domain, should_stop=should_stop)
+
+
 def _address_stage(run: _Run, report: DomainLookupReport, servers, use_external: bool, publish) -> DomainLookupReport:
     ip = report.primary_ip
     public = is_public_ip(ip)
@@ -873,6 +883,9 @@ def _address_stage(run: _Run, report: DomainLookupReport, servers, use_external:
         futures[run.pool.submit(trace_route, ip, should_stop=run.halted)] = "route"
         if domain and public:
             futures[run.pool.submit(_inspect_quic, domain, ip, PATH_MAX_TTL, run.cancel)] = "quic"
+    if domain and public:
+        # Домен проверяется не только по адресу, но и так же, как сайты в BlockCheck.
+        futures[run.pool.submit(_check_site, domain, run.halted)] = "site"
     if domain:
         order.append(SOURCE_CERT_NAMED)
         futures[run.pool.submit(_lookup_cert, ip, SOURCE_CERT_NAMED, domain)] = SOURCE_CERT_NAMED
@@ -909,6 +922,10 @@ def _address_stage(run: _Run, report: DomainLookupReport, servers, use_external:
             report = replace(report, route=result)
         elif key == "quic" and isinstance(result, tuple):
             report = replace(report, quic=result[0], filter_facts=result[1])
+        elif key == "site":
+            if not isinstance(result, dict):
+                continue
+            report = replace(report, site=result)
         elif key in ("network", "ripestat"):
             if not isinstance(result, NetworkInfo):
                 continue

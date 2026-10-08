@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import QAbstractScrollArea, QGridLayout, QHBoxLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets.common.font import getFont
 from qfluentwidgets import (
@@ -1134,7 +1134,25 @@ _LINE_ICONS = {
     "Адрес": "fa5s.link",
     "Сервер": "fa5s.server",
     "Время проверки": "fa5s.clock",
+    "Владелец сети": "fa5s.building",
+    "Владельцы сети (адрес объявляют несколько сетей)": "fa5s.building",
+    "ASN": "fa5s.project-diagram",
+    "Подсеть": "fa5s.network-wired",
+    "Страна": "fa5s.flag",
+    "IPv4": "fa5s.map-marker-alt",
+    "IPv6": "fa5s.map-marker-alt",
+    "Псевдонимы (CNAME)": "fa5s.random",
+    "Время ответа": "fa5s.clock",
+    "Способ запроса": "fa5s.exchange-alt",
 }
+# Строки, чьё название начинается с адреса или номера: значок — по началу названия.
+_LINE_ICON_PREFIXES = (
+    ("TLS", "fa5s.lock"),
+    ("HTTP", "fa5s.unlock-alt"),
+    ("Пинг", "fa5s.satellite-dish"),
+    ("Подключение к порту", "fa5s.plug"),
+    ("QUIC", "fa5s.bolt"),
+)
 _ADVICE_TITLE = "Что делать"
 _ABOUT_TITLE = "Что это за проверка"
 # Состояния, которые считаются в сводке отчёта, и подписи к их числам.
@@ -1155,11 +1173,12 @@ def line_icon(line: Line, section: Section) -> str:
     """Значок строки отчёта. Пусто — у строки точка состояния."""
     if section.title == _ADVICE_TITLE:
         return "fa5s.arrow-right"
-    if line.name.startswith("TLS"):
-        return "fa5s.lock"
-    if line.name.startswith("HTTP"):
-        return "fa5s.unlock-alt"
-    return _LINE_ICONS.get(line.name, "")
+    if line.name in _LINE_ICONS:
+        return _LINE_ICONS[line.name]
+    # Строка-фраза без значения («Сервер просто не отвечает на пинг…») остаётся с точкой.
+    if not line.text:
+        return ""
+    return next((icon for prefix, icon in _LINE_ICON_PREFIXES if line.name.startswith(prefix)), "")
 
 
 def section_icon(section: Section, card: Card) -> tuple[str, str]:
@@ -1362,6 +1381,8 @@ class Tile:
     hint: str
     # Свой значок вместо значка состояния (узел дороги, сайт).
     icon: str = ""
+    # Фирменный цвет значка: логотип DNS-сервиса или сайта. Состояние тогда — точкой у логотипа.
+    icon_color: str = ""
 
 
 _SECONDS = re.compile(r"^(.*) · (\d+(?:[.,]\d+)? с)$")
@@ -1399,6 +1420,12 @@ def plain_tile(line: Line, icon: str = "") -> Tile:
     seconds = next((part for part in parts if part.endswith(" мс")), "")
     result = " · ".join(part for part in parts if part != seconds)
     hint = "\n".join(part for part in (line.name.strip("─ "), line.text) if part)
+    if line.page is not None:
+        hint += "\nНажмите, чтобы открыть подробности"
+    # Сервис или сайт с известным логотипом (Cloudflare, Google, AdGuard) узнают по нему.
+    brand = named_brand(title)
+    if brand is not None:
+        return Tile(line.state, title, tag, result, seconds, hint, brand.icon, brand.color)
     return Tile(line.state, title, tag, result, seconds, hint, icon if line.state == "info" else "")
 
 
@@ -1646,10 +1673,21 @@ class TilesGrid(QWidget):
             painter.setBrush(hover if index == self._hover else base)
             painter.drawRoundedRect(rect, 6, 6)
             color = state_color(tile.state)
+            icon_left, icon_top = int(rect.left() + 11), int(rect.top() + (self.HEIGHT - 15) / 2)
             try:
-                name = tile.icon or _STATE_ICONS.get(tile.state, _STATE_ICONS["unknown"])
-                icon = get_cached_qta_pixmap(name, color=state_color("unknown") if tile.icon else color, size=15)
-                painter.drawPixmap(int(rect.left() + 11), int(rect.top() + (self.HEIGHT - 15) / 2), 15, 15, icon)
+                if tile.icon_color:
+                    from profile.ui.profile_icon import profile_icon_pixmap
+
+                    logo = profile_icon_pixmap(tile.icon, color=readable_color(tile.icon_color, light_theme=light), size=16)
+                    painter.drawPixmap(icon_left, icon_top, 16, 16, logo)
+                    # Состояние — точкой в углу логотипа: и сервис узнаётся, и итог виден.
+                    painter.setPen(QPen(QColor(245, 245, 245) if light else QColor(43, 43, 43), 1.5))
+                    painter.setBrush(QColor(color))
+                    painter.drawEllipse(QRectF(icon_left + 10, icon_top + 10, 8, 8))
+                else:
+                    name = tile.icon or _STATE_ICONS.get(tile.state, _STATE_ICONS["unknown"])
+                    icon = get_cached_qta_pixmap(name, color=state_color("unknown") if tile.icon else color, size=15)
+                    painter.drawPixmap(icon_left, icon_top, 15, 15, icon)
             except Exception:
                 pass
             left = rect.left() + 36
@@ -1742,7 +1780,10 @@ class _SectionBlock(QWidget):
         if tiles:
             if section.tiles:
                 tiles_list = [plain_tile(line, section.tile_icon) for line in section.lines]
-                self.grid = TilesGrid(tiles_list, self, clickable=False)
+                # Плитка со своей страницей (ответ DNS-сервера) нажимается; остальные — нет.
+                pages = [line.page for line in section.lines]
+                self.grid = TilesGrid(tiles_list, self, clickable=any(page is not None for page in pages))
+                self.grid.opened.connect(lambda index: pages[index] is not None and self.child_opened.emit(pages[index]))
             else:
                 self.grid = TilesGrid([line_tile(line) for line in section.lines], self)
                 self.grid.opened.connect(lambda index: self.child_opened.emit(server_card(section.lines[index], section)))

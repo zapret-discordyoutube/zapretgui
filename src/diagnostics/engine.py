@@ -85,6 +85,7 @@ from diagnostics.services import (
     Service,
     Target,
     build_services,
+    site_service,
 )
 from diagnostics.tls_probe import (
     CONNECT_TIMEOUT,
@@ -921,6 +922,35 @@ def run_blockcheck(
         return {"stopped": True}
     finally:
         run.close()
+
+
+def check_site(host: str, *, should_stop: ShouldStop | None = None, emit: Emit | None = None) -> dict | None:
+    """Один сайт теми же пробами, что в BlockCheck: TLS 1.2 и 1.3, «как Chrome», HTTP, QUIC, способ блокировки.
+
+    Возвращает запись сервиса — такую же, как в ``report["services"]`` полной
+    проверки (с отметкой реестра РКН), поэтому экран показывает её той же
+    карточкой сайта. ``None`` — проверку остановили. Нужна «Проверке домена»:
+    там сайт один, а остальные разделы BlockCheck не запускаются.
+    """
+    service = site_service(host)
+    services = {service.key: service}
+    run = _Run(should_stop, workers=_WORKERS_PER_TARGET + 12, deadline=SITE_CHECK_DEADLINE)
+    try:
+        zapret_running, _line = sections.zapret_status()
+        registry_wait = sections.start_registry()
+        collected = _run_probes(run, services, full=True, emit=emit or (lambda _line: None))
+        verdicts = {key: _service_verdict(item, collected[key], zapret_running=zapret_running) for key, item in services.items()}
+        report = report_text.services_report(services, verdicts, collected)
+        registry.annotate(report, registry_wait(REGISTRY_WAIT_S))
+        return report[0] if report else None
+    except _Stopped:
+        return None
+    finally:
+        run.close()
+
+
+# Один сайт проверяется быстрее целого набора: дольше ждать незачем.
+SITE_CHECK_DEADLINE = 35.0
 
 
 def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:

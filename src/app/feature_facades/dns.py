@@ -20,6 +20,8 @@ class DnsFeature:
     create_custom_server_worker: Callable
     create_domain_lookup_worker: Callable
     create_server_check_worker: Callable
+    # Текст прошлой проверки домена по пути из записи истории; пусто — файла нет.
+    load_past_domain_lookup: Callable = lambda _log_file: ""
 
 
 def build_dns_feature() -> DnsFeature:
@@ -176,4 +178,5 @@ def build_dns_feature() -> DnsFeature:
         create_custom_server_worker=_create_custom_server_worker,
         create_domain_lookup_worker=_create_domain_lookup_worker,
         create_server_check_worker=_create_server_check_worker,
+        load_past_domain_lookup=lambda log_file: _commands().load_past_domain_lookup(log_file),
     )

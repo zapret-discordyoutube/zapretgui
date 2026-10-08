@@ -5,6 +5,8 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from blockcheck.ui.page import BlockcheckPage
@@ -38,6 +40,110 @@ def _report(**overrides) -> engine.DomainLookupReport:
 def _names(view) -> list[str]:
     """Подписи всех строк, показанных в виде групп."""
     return [row.name for group in view.groups() for row in group.rows]
+
+
+class LookupCardsTests(unittest.TestCase):
+    """Карточки «Проверки домена»: сайт теми же пробами, что в BlockCheck, страница DNS-сервера, значки."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    SITE = {
+        "key": "user:example.com",
+        "label": "example.com",
+        "level": "fail",
+        "kind": "sni",
+        "headline": "example.com не открывается: блокировка по имени",
+        "dns_note": "",
+        "targets": [
+            {
+                "host": "example.com", "purpose": "сайт", "main": True, "ok": False, "state": "dpi",
+                "short": "соединение сброшено", "text": "соединение сброшено (93.184.216.34)",
+                "cause": "by_name", "cause_text": "Блокировка по имени сайта.", "quic": "ok", "quic_text": "работает",
+                "dns_state": "ok", "registry": {"listed": True, "name": "", "network": ""},
+                "protocols": [
+                    {"key": "tls12", "title": "TLS 1.2", "state": "fail", "word": "сброс", "text": "соединение сброшено"},
+                    {"key": "tls13", "title": "TLS 1.3", "state": "fail", "word": "сброс", "text": "соединение сброшено"},
+                    {"key": "chrome", "title": "Как Chrome", "state": "ok", "word": "проходит", "text": "проходит"},
+                    {"key": "http", "title": "HTTP", "state": "info", "word": "переход", "text": "переход на HTTPS"},
+                ],
+            }
+        ],
+    }
+
+    def test_domain_gets_the_same_site_card_as_in_blockcheck(self) -> None:
+        from dns import domain_lookup_plans as plans
+
+        # Пока сайт не проверен, карточки нет; адрес (не домен) так не проверяется вовсе.
+        self.assertNotIn("site:user:example.com", [card.key for card in lookup_cards.build_lookup_cards(_report())])
+        report = _report(site=self.SITE)
+        site = lookup_cards.build_lookup_cards(report)[0]
+        self.assertEqual((site.key, site.title, site.site, site.level), ("site:user:example.com", "example.com", True, "fail"))
+        self.assertEqual([mark.label for mark in site.marks], ["TLS 1.2", "TLS 1.3", "Chrome", "HTTP", "QUIC", "DNS"])
+        self.assertEqual([mark.state for mark in site.marks][:3], ["fail", "fail", "ok"])
+        self.assertIn(("в реестре РКН", "info"), site.tags)
+        # Текстовый отчёт и запись истории тоже говорят про сайт.
+        text = plans.build_text_report(report)
+        self.assertIn("=== Как открывается сайт ===", text)
+        self.assertIn("    TLS 1.2: соединение сброшено", text)
+        self.assertIn("    Как блокируют: Блокировка по имени сайта.", text)
+        entry = plans.build_history_entry(report)
+        self.assertEqual((entry["level"], entry["problems"][0]), ("fail", self.SITE["headline"]))
+
+    def test_dns_server_tile_opens_its_own_page_and_shows_the_service_logo(self) -> None:
+        from blockcheck.ui.result_cards import ResultDetailView, line_icon, plain_tile
+        from blockcheck.ui.result_cards_model import Line, Section
+
+        answers = engine.annotate_answers(
+            [engine.ResolverAnswer(engine.DnsServer("Cloudflare", "1.1.1.1"), "ok", ipv4=("93.184.216.34",), ipv6=("2606::1",), cnames=("a.example",), ttl=60, elapsed_ms=38.0)]
+        )
+        dns = next(card for card in lookup_cards.build_lookup_cards(_report(answers=answers)) if card.key == lookup_cards.KEY_DNS)
+        [line] = dns.sections[1].lines
+        page = line.page
+        self.assertEqual((page.title, page.level), ("Cloudflare", "ok"))
+        rows = {item.name: item.text for item in page.sections[0].lines}
+        self.assertEqual((rows["Адрес сервера"], rows["IPv4"], rows["IPv6"], rows["Время ответа"]), ("1.1.1.1", "93.184.216.34", "2606::1", "38 мс"))
+        self.assertIn("Способ запроса", rows)
+        # Плитка — с логотипом сервиса и подсказкой, что её можно открыть.
+        tile = plain_tile(line)
+        self.assertEqual((tile.icon, tile.icon_color), ("simple:cloudflare:CF", "#F38020"))
+        self.assertIn("Нажмите, чтобы открыть подробности", tile.hint)
+        self.assertEqual(plain_tile(Line("ok", "Системный DNS · 8.8.8.8", "1.2.3.4")).icon_color, "")
+
+        view = ResultDetailView()
+        self.addCleanup(view.deleteLater)
+        view.resize(900, 600)
+        view.show()
+        view.show_card(dns)
+        grid = view.blocks[1].grid
+        QTest.mouseClick(grid, Qt.MouseButton.LeftButton, pos=grid.tile_rect(0).center().toPoint())
+        self.assertEqual(view.card(), page)
+        self.assertTrue(view.go_back())
+        self.assertEqual(view.card(), dns)
+        grid = view.blocks[1].grid
+        grid.grab()
+        # У строк сети и пинга — свои значки, фраза без значения остаётся с точкой.
+        section = Section("Сеть адреса", ())
+        icons = [line_icon(Line("info", name, "x"), section) for name in ("Владелец сети", "ASN", "Подсеть", "Страна", "Пинг 1.2.3.4", "Подключение к порту 443 (HTTPS)")]
+        self.assertEqual(icons, ["fa5s.building", "fa5s.project-diagram", "fa5s.network-wired", "fa5s.flag", "fa5s.satellite-dish", "fa5s.plug"])
+        self.assertEqual(line_icon(Line("info", "Пинг до сервера не дошёл"), section), "")
+
+    def test_past_lookup_text_is_saved_to_a_file_and_read_back(self) -> None:
+        import tempfile
+        from types import SimpleNamespace as NS
+
+        from dns import commands
+
+        with tempfile.TemporaryDirectory() as folder, patch("config.runtime_layout.APPLICATION_PATHS", NS(logs_dir=folder)):
+            path = commands.save_domain_lookup_text("example.com", "строка 1\nстрока 2")
+            self.assertTrue(path.startswith(folder) and path.endswith(".json"))
+            self.assertEqual(commands.load_past_domain_lookup(path), "строка 1\nстрока 2")
+            # Чужой или пропавший файл — пусто, а не ошибка.
+            foreign = os.path.join(folder, "other.json")
+            with open(foreign, "w", encoding="utf-8") as stream:
+                stream.write('{"format": "something/else", "text": ["x"]}')
+            self.assertEqual((commands.load_past_domain_lookup(foreign), commands.load_past_domain_lookup(""), commands.load_past_domain_lookup(path + "x")), ("", "", ""))
 
 
 class DomainLookupPageTests(unittest.TestCase):
@@ -157,6 +263,21 @@ class DomainLookupPageTests(unittest.TestCase):
         # Прошлые проверки — плитками одной рисующей сетки, а не строкой-виджетом на запись.
         [block] = page.history_rows.blocks()
         self.assertEqual(block.grid.tiles()[0].title, _report().target)
+        # Нажатие на плитку открывает ту проверку страницей: текст — из её файла.
+        opened = []
+        page.report_requested.connect(opened.append)
+        feature.load_past_domain_lookup = Mock(return_value="полный текст")
+        page._history_runs[-1]["log_file"] = "C:/logs/domain_lookup_1.json"
+        QTest.mouseClick(block.grid, Qt.MouseButton.LeftButton, pos=block.grid.tile_rect(0).center().toPoint())
+        feature.load_past_domain_lookup.assert_called_once_with("C:/logs/domain_lookup_1.json")
+        self.assertEqual((opened[-1].text, opened[-1].title.split(" · ")[0]), ("полный текст", _report().target))
+        # Файла нет (старая запись) — показываем то, что записано в истории, и говорим об этом.
+        feature.load_past_domain_lookup = Mock(return_value="")
+        page._open_past(0)
+        self.assertIn("не сохранился", opened[-1].text)
+        self.assertIn(_report().target, opened[-1].text)
+        page.report_requested.disconnect(opened.append)
+        host._switch_tab(order.index("domain_lookup"))
 
         # Отчёт с путём и найденным фильтром: карточка видна, в таблице узлов стоит отметка.
         from diagnostics.path_trace import FilterFacts, Hop, RouteTrace

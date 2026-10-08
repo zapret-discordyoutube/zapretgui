@@ -467,13 +467,39 @@ def build_history_entry(report: DomainLookupReport) -> dict | None:
     verdict = _filter_verdict(report)
     if verdict is not None and verdict.code == FILTER_FOUND:
         problems.append(_capital_first(verdict.text))
-    if problems:
+    # Сайт не открывается или открывается с оговорками — это главное, что нашла проверка.
+    site = getattr(report, "site", None) or {}
+    site_level = str(site.get("level") or "")
+    hard = bool(problems) or site_level == "fail"
+    if site_level in ("fail", "warn") and site.get("headline"):
+        problems.insert(0, str(site["headline"]))
+    if hard:
         level = "fail"
+    elif problems:
+        level = "warn"
     elif not report.primary_ip or report.timed_out:
         level = "warn"
     else:
         level = "ok"
     return history.domain_entry(report.target, level, problems[0] if problems else build_status(report).text, problems)
+
+
+def build_site_lines(report: DomainLookupReport) -> list[str]:
+    """Раздел текстового отчёта «как открывается сайт»: те же пробы, что в BlockCheck."""
+    site = getattr(report, "site", None)
+    if not site:
+        return []
+    lines = ["", "=== Как открывается сайт ===", str(site.get("headline") or "")]
+    for target in site.get("targets") or ():
+        lines.append(f"{target.get('host', '')}: {target.get('text', '')}")
+        lines += [f"    {item.get('title', '')}: {item.get('text', '')}" for item in target.get("protocols") or ()]
+        for title, key in (("Как блокируют", "cause_text"), ("QUIC (UDP 443)", "quic_text"), ("DNS", "dns_reason")):
+            if target.get(key):
+                lines.append(f"    {title}: {target[key]}")
+        registry = target.get("registry") or {}
+        if registry.get("listed"):
+            lines.append("    Реестр РКН: сайт в реестре")
+    return [line for line in lines if line or line == ""]
 
 
 def build_text_report(report: DomainLookupReport) -> str:
@@ -492,6 +518,8 @@ def build_text_report(report: DomainLookupReport) -> str:
             lines.append(f"{row.server} [{row.address}] ({row.time}{ttl}): {row.result}")
             if answer.cnames:
                 lines.append("    CNAME: " + " → ".join(answer.cnames))
+
+    lines += build_site_lines(report)
 
     ping_lines = build_ping_lines(report)
     if ping_lines:

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -94,7 +96,7 @@ class _InfoLines(_HeightKeeper, QWidget):
 class _TilesGroup(QWidget):
     """Группа строк: заголовок со значком и сетка плиток, которую рисует один виджет."""
 
-    def __init__(self, group, icon: str, parent=None) -> None:
+    def __init__(self, group, icon: str, parent=None, *, clickable: bool = False) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -106,7 +108,9 @@ class _TilesGroup(QWidget):
         header.addWidget(self.title_label, 1, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header)
         tiles = [plain_tile(Line(row.state, row.name, row.text)) for row in group.rows]
-        self.grid = TilesGrid(tiles, self, clickable=False, min_width=TILE_MIN_WIDTH)
+        if clickable:
+            tiles = [replace(tile, hint=f"{tile.hint}\nНажмите, чтобы открыть эту проверку") for tile in tiles]
+        self.grid = TilesGrid(tiles, self, clickable=clickable, min_width=TILE_MIN_WIDTH)
         layout.addWidget(self.grid)
 
 
@@ -117,9 +121,13 @@ class RowsView(QWidget):
     десятки) делала вкладку тяжёлой: долго строилась и дёргалась при прокрутке.
     """
 
-    def __init__(self, parent=None, *, icon: str = "fa5s.list-ul") -> None:
+    # Нажали плитку: (номер группы, номер строки в ней).
+    opened = pyqtSignal(int, int)
+
+    def __init__(self, parent=None, *, icon: str = "fa5s.list-ul", clickable: bool = False) -> None:
         super().__init__(parent)
         self._icon = icon
+        self._clickable = clickable
         self._shown: tuple = ()
         self._blocks: list[QWidget] = []
         self._layout = QVBoxLayout(self)
@@ -147,7 +155,8 @@ class RowsView(QWidget):
         self._blocks = self._blocks[:same]
         self._shown = groups
         for group in groups[same:]:
-            block = _TilesGroup(group, self._icon, self)
+            block = _TilesGroup(group, self._icon, self, clickable=self._clickable)
+            block.grid.opened.connect(lambda row, order=len(self._blocks): self.opened.emit(order, row))
             self._layout.addWidget(block)
             self._blocks.append(block)
         set_state_text(self, "; ".join(f"{group.title}: строк {len(group.rows)}" for group in groups) or "нет данных")
@@ -263,7 +272,8 @@ class DomainLookupPage(BasePage):
         # Прошлые проверки: что проверяли и чем кончилось. Видна, пока есть записи.
         # Без своей подложки: она есть у каждой плитки внутри.
         self.history_card = FlatSection()
-        self.history_rows = RowsView(self.history_card, icon="fa5s.history")
+        self.history_rows = RowsView(self.history_card, icon="fa5s.history", clickable=True)
+        self.history_rows.opened.connect(lambda _group, row: self._open_past(row))
         self.history_card.add_widget(self.history_rows)
         self.layout.addWidget(self.history_card)
 
@@ -469,6 +479,31 @@ class DomainLookupPage(BasePage):
                 description=self._t(
                     "report.description", "Полный текст проверки: пинг, ответы DNS-серверов и домены на адресе."
                 ),
+            )
+        )
+
+    def _open_past(self, row: int) -> None:
+        """Нажатие на плитку «Прошлых проверок»: полный текст той проверки страницей."""
+        # На экране свежие сверху, а в списке они лежат от старых к новым.
+        runs = list(reversed(getattr(self, "_history_runs", [])))
+        if not 0 <= row < len(runs):
+            return
+        run = runs[row]
+        from diagnostics.history import format_time
+
+        loader = getattr(self._dns, "load_past_domain_lookup", None)
+        text = str(loader(str(run.get("log_file") or "")) if callable(loader) else "")
+        if not text:
+            # Запись сделана до того, как текст стали сохранять: показываем то, что есть в истории.
+            lines = [f"Проверка: {run.get('title', '')}", str(run.get("headline") or ""), *map(str, run.get("problems") or ())]
+            lines += ["", "Полный текст этой проверки не сохранился."]
+            text = "\n".join(line for line in lines if line is not None)
+        self.report_requested.emit(
+            LogReport(
+                title=f"{run.get('title', '')} · {format_time(str(run.get('time') or ''))}",
+                text=text,
+                root_title=self._t("title", "Проверка домена"),
+                description=self._t("report.past.description", "Полный текст прошлой проверки домена."),
             )
         )
 

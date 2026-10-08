@@ -33,6 +33,7 @@ __all__ = [
     "Service",
     "Target",
     "build_services",
+    "site_service",
 ]
 
 YOUTUBE_HOST = "www.youtube.com"
@@ -69,6 +70,12 @@ def _site(key: str, label: str, host: str, *, control: bool = False, domestic: b
     return Service(
         key, label, (Target(host, "сайт", read_body=True, main=True),), control=control, domestic=domestic
     )
+
+
+def site_service(host: str) -> Service:
+    """Один сайт по его адресу — так же, как «свой домен» в BlockCheck."""
+    host = str(host or "").strip().lower().rstrip(".")
+    return _site(f"user:{host}", host, host)
 
 
 SCOPE_MAIN = "main"

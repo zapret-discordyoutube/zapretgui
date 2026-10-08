@@ -78,6 +78,13 @@ class _Network:
         # Путь и QUIC ходят в сеть сами: по умолчанию «трассировка недоступна» и «QUIC не проверяли».
         self.route = route or (lambda ip: RouteTrace(target=ip, supported=False))
         self.quic = quic or (lambda domain, ip: (None, None))
+        # Проверка сайта «как в BlockCheck» тоже ходит в сеть: по умолчанию её итога нет.
+        self.site = None
+        self.site_calls: list[str] = []
+
+        def site_spy(domain, should_stop):
+            self.site_calls.append(domain)
+            return self.site
 
         def http_spy(method, url, **kwargs):
             self.http_calls.append(url)
@@ -91,6 +98,7 @@ class _Network:
             patch.object(engine, "trace_route", lambda ip, **_k: self.route(ip)),
             patch.object(engine, "_inspect_quic", lambda domain, ip, max_ttl, cancel: self.quic(domain, ip)),
             patch.object(engine, "_http", http_spy),
+            patch.object(engine, "_check_site", site_spy),
             patch.object(engine, "fetch_cert_names", lambda ip, server_name=None: CertNames("ok", ("cert.example",), "cn.example")),
             patch.object(engine, "_tcp_connect", lambda ip, port=443: engine.TcpReport(ip, port, "ok", 5.0)),
             patch("utils.windows_icmp.ping_ipv4_host_winapi", lambda *a, **k: ping),
@@ -286,6 +294,22 @@ class RunTests(unittest.TestCase):
     def _route(ip):
         hops = tuple(Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", float(ttl)) for ttl in range(1, 7))
         return RouteTrace(target=ip, hops=hops + (Hop(7, HOP_TARGET, ip, 40.0),), reached=True)
+
+    def test_domain_is_also_checked_like_a_site_in_blockcheck_and_an_address_is_not(self) -> None:
+        network = _Network(self)
+        network.site = {"key": "user:example.com", "label": "example.com", "level": "ok", "headline": "example.com открывается", "targets": []}
+        stages = []
+        report = engine.run_domain_lookup("example.com", servers=[GOOD], use_external=False, on_stage=stages.append)
+        # Домен проверен не только по адресу: в отчёте лежит запись сайта, как в BlockCheck.
+        self.assertEqual(network.site_calls, ["example.com"])
+        self.assertEqual(report.site, network.site)
+        self.assertTrue(any(stage.site == network.site for stage in stages))
+        self.assertIn("=== Как открывается сайт ===", plans.build_text_report(report))
+
+        # У голого адреса имени сайта нет — такой проверки не бывает; локальный адрес тоже не трогаем.
+        network.site_calls.clear()
+        self.assertIsNone(engine.run_domain_lookup("93.184.216.34", servers=[GOOD], use_external=False).site)
+        self.assertEqual(network.site_calls, [])
 
     def test_path_quic_and_filter_place_reach_the_report(self) -> None:
         blocked = QuicVerdict(QUIC_BLOCKED_BY_NAME, "блокируется по имени сайта")

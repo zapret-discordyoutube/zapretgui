@@ -84,6 +84,8 @@ class Line:
     text: str = ""
     # Только у выводов про DNS-серверы, и только если проверка отдала их частями.
     parts: FindingParts | None = None
+    # Своя страница строки-плитки (ответ одного DNS-сервера): открывается по нажатию на плитку.
+    page: Card | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +276,11 @@ def _registry_text(item: dict) -> str:
     if item.get("ok"):
         return "не значится"
     return "не значится — блокировать могут и без записи в реестре"
+
+
+def site_card(service: dict) -> Card:
+    """Карточка сайта по записи сервиса из отчёта (``report["services"]`` или ``engine.check_site``)."""
+    return _site_card(service)
 
 
 _MARK_ICONS = {"TLS 1.2": "fa5s.lock", "TLS 1.3": "fa5s.lock", "Как Chrome": "fa5b.chrome", "HTTP": "fa5s.unlock-alt"}

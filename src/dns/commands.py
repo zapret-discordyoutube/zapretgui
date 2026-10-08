@@ -291,10 +291,62 @@ def run_domain_lookup(target: str, *, use_external: bool = True, on_stage=None, 
         on_stage=on_stage,
         should_stop=should_stop,
     )
-    from dns.domain_lookup_plans import build_history_entry
+    from dns.domain_lookup_plans import build_history_entry, build_text_report
 
-    _remember_check("domain_history", build_history_entry(report))
+    entry = build_history_entry(report)
+    if entry is not None:
+        # Полный текст проверки — в файл: запись истории на вкладке открывает его страницей.
+        entry["log_file"] = save_domain_lookup_text(report.target, build_text_report(report))
+    _remember_check("domain_history", entry)
     return report
+
+
+DOMAIN_LOOKUP_FORMAT = "zapretgui.domain_lookup/1"
+# Столько файлов прошлых проверок домена хранится; история вкладки короче.
+DOMAIN_LOOKUP_FILES_KEPT = 40
+
+
+def save_domain_lookup_text(target: str, text: str) -> str:
+    """Кладёт текст проверки домена в папку журналов. Возвращает путь; пусто — записать не удалось."""
+    import json
+    import os
+    from datetime import datetime
+
+    try:
+        from config.runtime_layout import APPLICATION_PATHS
+
+        folder = str(APPLICATION_PATHS.logs_dir)
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"domain_lookup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        document = {"format": DOMAIN_LOOKUP_FORMAT, "target": str(target), "text": str(text).split("\n")}
+        with open(path, "w", encoding="utf-8") as stream:
+            json.dump(document, stream, ensure_ascii=False, indent=1)
+        old = sorted(name for name in os.listdir(folder) if name.startswith("domain_lookup_") and name.endswith(".json"))
+        for name in old[:-DOMAIN_LOOKUP_FILES_KEPT]:
+            try:
+                os.remove(os.path.join(folder, name))
+            except OSError:
+                pass
+        return path
+    except Exception:
+        return ""
+
+
+def load_past_domain_lookup(log_file: str | None) -> str:
+    """Текст прошлой проверки домена. Пусто — файла нет или он не читается."""
+    import json
+
+    if not log_file:
+        return ""
+    try:
+        with open(str(log_file), encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(document, dict) or document.get("format") != DOMAIN_LOOKUP_FORMAT:
+        return ""
+    lines = document.get("text")
+    return "\n".join(str(line) for line in lines) if isinstance(lines, list) else ""
 
 
 def _remember_check(key: str, entry: dict | None) -> None:
