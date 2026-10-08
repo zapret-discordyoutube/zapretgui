@@ -471,3 +471,93 @@ class PastCheckTextTests(unittest.TestCase):
             page._open_past(0)
             self.assertEqual(len(opened), 1)
 
+
+
+class OtherTabsPastChecksTests(unittest.TestCase):
+    """«DNS подмена» и «DNS-серверы»: прошлая проверка открывается тем же видом, что у вкладки."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_past_page_hosts_a_tab_view_instead_of_cards(self) -> None:
+        from PyQt6.QtWidgets import QLabel
+
+        from blockcheck.ui.past_cards_view import PastCardsView
+
+        view = PastCardsView()
+        self.addCleanup(view.deleteLater)
+        view.resize(900, 400)
+        view.show()
+        first = QLabel("итог первой проверки")
+        view.show_content("DNS подмена · 08.10 12:00", "Подмены нет", first, "текст", root_title="DNS подмена")
+        self.assertIs(view.content(), first)
+        self.assertIs(first.parentWidget(), view)
+        self.assertTrue(view.cards.isHidden())
+        self.assertEqual((view.title_label.text(), view.headline_label.text()), ("DNS подмена · 08.10 12:00", "Подмены нет"))
+        self.assertTrue(view.report_button.isEnabled())
+        # Следующая проверка заменяет вид; страница с карточками возвращает сетку.
+        second = QLabel("итог второй проверки")
+        view.show_content("DNS подмена · 08.10 13:00", "", second)
+        self.assertIs(view.content(), second)
+        self.assertFalse(view.report_button.isEnabled())
+        view.show_run("example.com", "Готово", [])
+        self.assertIsNone(view.content())
+        self.assertFalse(view.cards.isHidden())
+
+    def test_dns_spoofing_tab_opens_a_saved_check_and_falls_back_to_the_record(self) -> None:
+        from dns.ui.dns_check_page import DNSCheckPage
+
+        saved = {"summary": {}, "domains": {}}
+        feature = Mock()
+        feature.load_past_dns_check_report = Mock(side_effect=lambda path: saved if path else None)
+        page = DNSCheckPage(dns_feature=feature, embedded=True)
+        self.addCleanup(page.deleteLater)
+        opened, texts = [], []
+        page.past_view_opened.connect(lambda *args: opened.append(args))
+        page.report_requested.connect(texts.append)
+        run = {"kind": "dns", "time": "2026-10-08T12:00:00", "title": "DNS подмена", "level": "ok", "headline": "Подмены нет", "problems": [], "log_file": "C:/logs/dns_check_1.json"}
+        page.set_history([{**run, "log_file": ""}, run])
+
+        # Свежая запись сверху: у неё есть файл — открывается видом вкладки.
+        page._open_past(0)
+        [(title, headline, widget, _text)] = opened
+        self.addCleanup(widget.deleteLater)
+        self.assertTrue(title.startswith("DNS подмена · "))
+        self.assertEqual(headline, "Подмены нет")
+        self.assertTrue(hasattr(widget, "summary"))
+        feature.load_past_dns_check_report.assert_called_with("C:/logs/dns_check_1.json")
+        # У записи без файла — то, что есть в истории, и честная пометка.
+        page._open_past(1)
+        self.assertEqual(len(opened), 1)
+        self.assertIn("не сохранился", texts[-1].text)
+
+    def test_dns_servers_tab_keeps_history_and_opens_a_saved_check(self) -> None:
+        from dns.server_check import ServerCheckReport
+        from dns.ui.server_check_page import ServerCheckPage
+
+        past = ServerCheckReport(finished=True)
+        feature = Mock()
+        feature.load_past_server_check_report = Mock(side_effect=lambda path: past if path else None)
+        page = ServerCheckPage(dns_feature=feature, embedded=True)
+        self.addCleanup(page.deleteLater)
+        self.assertTrue(page.history_card.isHidden())
+        run = {"kind": "servers", "time": "2026-10-08T12:00:00", "title": "Адресов проверено: 42", "level": "warn", "headline": "DoH закрыт у части серверов", "problems": [], "log_file": "C:/logs/server_check_1.json"}
+        page.set_history([run])
+        self.assertFalse(page.history_card.isHidden())
+        [group] = page.history_rows.groups()
+        self.assertTrue(group.rows[0].name.startswith("Адресов проверено: 42"))
+
+        opened, texts = [], []
+        page.past_view_opened.connect(lambda *args: opened.append(args))
+        page.report_requested.connect(texts.append)
+        page._open_past(0)
+        [(title, headline, widget, _text)] = opened
+        self.addCleanup(widget.deleteLater)
+        self.assertEqual(headline, "DoH закрыт у части серверов")
+        self.assertTrue(hasattr(widget, "verdict") and hasattr(widget, "cards"))
+        # Запись без файла — запасной вид текстом.
+        page.set_history([{**run, "log_file": ""}])
+        page._open_past(0)
+        self.assertEqual(len(opened), 1)
+        self.assertIn("не сохранился", texts[-1].text)

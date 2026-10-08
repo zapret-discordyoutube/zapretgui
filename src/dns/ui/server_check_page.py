@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QTimer, pyqtSignal
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon, PrimaryPushButton, PushButton, StrongBodyLabel
 
 import dns.server_check_plans as plans
@@ -28,6 +29,10 @@ from ui.widgets.stagger_float_in import float_in
 _STAGE_INTERVAL_MS = 120
 
 
+# Столько прошлых проверок видно на вкладке.
+HISTORY_SHOWN = 20
+
+
 class ServerCheckPage(BasePage):
     """Какие DNS-серверы и какими способами доступны в этой сети."""
 
@@ -35,6 +40,8 @@ class ServerCheckPage(BasePage):
     details_requested = pyqtSignal(object)
     # Нажали «Отчёт»: страница-хозяин показывает его страницей (LogReport).
     report_requested = pyqtSignal(object)
+    # Нажали прошлую проверку: (название, итог одной фразой, готовый вид, текст) — страницей у хозяина вкладки.
+    past_view_opened = pyqtSignal(str, str, object, str)
 
     def __init__(self, parent=None, *, dns_feature, embedded: bool = False, open_dns_settings=None):
         super().__init__(
@@ -103,6 +110,17 @@ class ServerCheckPage(BasePage):
         self.servers_card.add_widget(self.cards)
         self.servers_card.setVisible(False)
         self.layout.addWidget(self.servers_card)
+
+        # Прошлые проверки DNS-серверов: когда проверяли и чем кончилось; плитка открывает ту проверку.
+        from dns.ui.domain_lookup_page import RowsView
+        from ui.widgets.flat_section import FlatSection
+
+        self.history_card = FlatSection()
+        self.history_rows = RowsView(self.history_card, icon="fa5s.history", clickable=True)
+        self.history_rows.opened.connect(lambda _group, row: self._open_past(row))
+        self.history_card.add_widget(self.history_rows)
+        self.history_card.setVisible(False)
+        self.layout.addWidget(self.history_card)
         self.layout.addStretch()
 
     def _apply_texts(self) -> None:
@@ -217,6 +235,70 @@ class ServerCheckPage(BasePage):
         self._show_report(report)
         self.stop_button.setEnabled(True)
         self._set_running(False)
+        # Запись в настройки уже сделал фоновый поток проверки; здесь — только экран.
+        entry = getattr(report, "history_entry", None)
+        if isinstance(entry, dict):
+            self.set_history([*getattr(self, "_history_runs", []), entry][-HISTORY_SHOWN:])
+
+    def set_history(self, runs) -> None:
+        """Показывает прошлые проверки (от старых к новым, как они лежат в настройках)."""
+        from dns.ui.domain_lookup_page import history_groups
+
+        self._history_runs = [dict(run) for run in runs or () if isinstance(run, dict)]
+        groups = history_groups(self._history_runs)
+        self.history_rows.show_groups(groups)
+        self.history_card.setVisible(bool(groups))
+
+    def _open_past(self, row: int) -> None:
+        """Нажатие на плитку «Прошлых проверок»: та проверка тем же видом, что у вкладки."""
+        # На экране свежие сверху, а в списке они лежат от старых к новым.
+        runs = list(reversed(getattr(self, "_history_runs", [])))
+        if not 0 <= row < len(runs):
+            return
+        run = runs[row]
+        from diagnostics.history import format_time
+
+        title = " · ".join(part for part in (str(run.get("title") or ""), format_time(str(run.get("time") or ""))) if part)
+        loader = getattr(self._dns, "load_past_server_check_report", None)
+        past = loader(str(run.get("log_file") or "")) if callable(loader) else None
+        if past is None:
+            # Запись сделана до того, как проверку стали сохранять целиком: показываем то, что есть в истории.
+            lines = [title, str(run.get("headline") or ""), *map(str, run.get("problems") or ()), "", "Полный отчёт этой проверки не сохранился."]
+            self.report_requested.emit(LogReport(title=title, text="\n".join(lines), root_title=self._t("title", "DNS-серверы")))
+            return
+        self.past_view_opened.emit(title, str(run.get("headline") or ""), self._build_past_view(past), plans.build_text_report(past))
+
+    def _build_past_view(self, report) -> QWidget:
+        """Итог и карточки серверов прошлой проверки — теми же виджетами, что на вкладке."""
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        verdict = ServerCheckVerdictPanel(parent=host)
+        verdict.fun_language = self._ui_language
+        verdict.show_verdict(verdicts.build_verdict(report), celebrate=False)
+        layout.addWidget(verdict)
+        cards = plans.build_cards(report)
+        counts = plans.count_cards(cards)
+        bar = SeverityBar(host)
+        bar.set_counts(counts, animate=False)
+        layout.addWidget(bar)
+        status_filter = StatusFilter(host)
+        status_filter.set_counts(counts)
+        layout.addWidget(status_filter)
+        view = ServerCardsView(host)
+        view.set_cards(cards)
+        status_filter.changed.connect(view.set_filter)
+
+        def open_details(server: str) -> None:
+            details = plans.build_details(report, server)
+            if details is not None:
+                self.details_requested.emit(details)
+
+        view.opened.connect(open_details)
+        layout.addWidget(view)
+        host.verdict, host.cards = verdict, view
+        return host
 
     def _on_failed(self, error: str) -> None:
         if self._closed:

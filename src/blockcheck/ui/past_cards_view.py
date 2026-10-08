@@ -60,13 +60,35 @@ class PastCardsView(QWidget):
         self.cards = CardsGrid(300, self)
         self.cards.opened.connect(self.card_opened)
         layout.addWidget(self.cards)
+        # Вместо карточек — готовый вид вкладки (итог и её собственные карточки), см. show_content.
+        self._content: QWidget | None = None
+        self._content_layout = QVBoxLayout()
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self._content_layout)
         layout.addStretch(1)
 
     def title(self) -> str:
         return self._title
 
+    def content(self) -> QWidget | None:
+        return self._content
+
+    def show_content(self, title: str, headline: str, widget: QWidget, text: str = "", *, root_title: str = "BlockCheck") -> None:
+        """Прошлая проверка тем же видом, что у её вкладки: ``widget`` собирает сама вкладка по сохранённому отчёту."""
+        self.show_run(title, headline, [], text, root_title=root_title)
+        self.cards.setVisible(False)
+        self._content = widget
+        self._content_layout.addWidget(widget)
+        widget.show()
+
     def show_run(self, title: str, headline: str, cards: list, text: str = "", *, root_title: str = "BlockCheck") -> None:
         """``cards`` — карточки той проверки; ``text`` — её полный текст для кнопки «Отчёт»."""
+        if self._content is not None:
+            self._content_layout.removeWidget(self._content)
+            self._content.setParent(None)
+            self._content.deleteLater()
+            self._content = None
+        self.cards.setVisible(True)
         self._title = str(title)
         self._text = str(text or "")
         self.breadcrumb.blockSignals(True)

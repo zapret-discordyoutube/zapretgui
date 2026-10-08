@@ -267,7 +267,11 @@ class BlockcheckPage(BasePage):
 
     def _push_tab_histories(self) -> None:
         """Отдаёт вкладкам «Проверка домена» и «DNS подмена» их прошлые проверки (если вкладки уже созданы)."""
-        for page, key in ((self._domain_lookup_tab_page, "domain_history"), (self._dns_spoofing_tab_page, "dns_history")):
+        for page, key in (
+            (self._domain_lookup_tab_page, "domain_history"),
+            (self._dns_spoofing_tab_page, "dns_history"),
+            (self._dns_servers_tab_page, "servers_history"),
+        ):
             if page is not None and hasattr(page, "set_history"):
                 page.set_history(tuple(getattr(self._initial_state, key, ()) or ()))
 
@@ -613,6 +617,8 @@ class BlockcheckPage(BasePage):
             )
             self._dns_servers_tab_page.details_requested.connect(self._open_server_detail)
             self._dns_servers_tab_page.report_requested.connect(self._open_log_report)
+            self._dns_servers_tab_page.past_view_opened.connect(self._open_past_content)
+            self._push_tab_histories()
             self._dns_servers_tab_page.setVisible(False)
             self.add_widget(self._dns_servers_tab_page)
             try:
@@ -639,6 +645,7 @@ class BlockcheckPage(BasePage):
                 open_dns_settings=self._open_dns_settings,
             )
             self._dns_spoofing_tab_page.report_requested.connect(self._open_log_report)
+            self._dns_spoofing_tab_page.past_view_opened.connect(self._open_past_content)
             self._push_tab_histories()
             self._dns_spoofing_tab_page.setVisible(False)
             self.add_widget(self._dns_spoofing_tab_page)
@@ -1126,6 +1133,13 @@ class BlockcheckPage(BasePage):
         self._show_over_tabs(self._past_cards_view)
         self._past_cards_view.show_run(title, headline, list(cards), text, root_title=root)
         self._past_cards_view.setFocus()
+
+    def _open_past_content(self, title: str, headline: str, widget, text: str) -> None:
+        """Прошлая проверка «DNS подмены» или «DNS-серверов»: тот же вид, что у вкладки, по сохранённому отчёту."""
+        self._open_past_cards(title, headline, [], text)
+        tab_item = self._tabs_pivot.items.get(self.TAB_ORDER[self._active_tab_index])
+        root = tab_item.text() if tab_item is not None and tab_item.text() else "BlockCheck"
+        self._past_cards_view.show_content(title, headline, widget, text, root_title=root)
 
     def _ensure_past_check_view(self):
         if self._past_check_view is None:

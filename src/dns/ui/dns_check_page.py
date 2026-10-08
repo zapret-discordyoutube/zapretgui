@@ -2,6 +2,7 @@
 """Страница проверки DNS подмены провайдером."""
 
 from PyQt6.QtCore import QTimer, pyqtSignal
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from ui.pages.base_page import BasePage
 from ui.latest_value_worker_state import LatestValueWorkerState
@@ -32,6 +33,8 @@ class DNSCheckPage(BasePage):
 
     # Просят показать отчёт страницей: её открывает страница-хозяин вкладки (LogReport).
     report_requested = pyqtSignal(object)
+    # Нажали прошлую проверку: (название, итог одной фразой, готовый вид, текст) — страницей у хозяина вкладки.
+    past_view_opened = pyqtSignal(str, str, object, str)
 
     def __init__(self, parent=None, *, dns_feature, embedded: bool = False, open_dns_settings=None):
         super().__init__(
@@ -190,7 +193,8 @@ class DNSCheckPage(BasePage):
 
         # Без своей подложки: она есть у каждой плитки внутри.
         self.history_card = FlatSection()
-        self.history_rows = RowsView(self.history_card, icon="fa5s.history")
+        self.history_rows = RowsView(self.history_card, icon="fa5s.history", clickable=True)
+        self.history_rows.opened.connect(lambda _group, row: self._open_past(row))
         self.history_card.add_widget(self.history_rows)
         self.history_card.setVisible(False)
         self.layout.addWidget(self.history_card)
@@ -205,6 +209,43 @@ class DNSCheckPage(BasePage):
         groups = history_groups(self._history_runs)
         self.history_rows.show_groups(groups)
         self.history_card.setVisible(bool(groups))
+
+    def _open_past(self, row: int) -> None:
+        """Нажатие на плитку «Прошлых проверок»: та проверка тем же видом, что у вкладки."""
+        # На экране свежие сверху, а в списке они лежат от старых к новым.
+        runs = list(reversed(getattr(self, "_history_runs", [])))
+        if not 0 <= row < len(runs):
+            return
+        run = runs[row]
+        from diagnostics.history import format_time
+
+        title = " · ".join(part for part in (str(run.get("title") or "DNS подмена"), format_time(str(run.get("time") or ""))) if part)
+        loader = getattr(self._dns, "load_past_dns_check_report", None)
+        past = loader(str(run.get("log_file") or "")) if callable(loader) else None
+        if not isinstance(past, dict):
+            # Запись сделана до того, как проверку стали сохранять целиком: показываем то, что есть в истории.
+            lines = [title, str(run.get("headline") or ""), *map(str, run.get("problems") or ()), "", "Полный отчёт этой проверки не сохранился."]
+            self.report_requested.emit(LogReport(title=title, text="\n".join(lines), root_title="DNS подмена"))
+            return
+        self.past_view_opened.emit(title, str(run.get("headline") or ""), self._build_past_view(past), "")
+
+    def _build_past_view(self, results: dict) -> QWidget:
+        """Итог и список доменов прошлой проверки — теми же виджетами, что на вкладке."""
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        summary = DnsSummaryPanel(parent=host)
+        summary.show_results(results)
+        layout.addWidget(summary)
+        domains = DnsDomainsView(host)
+        domains.show_results(results)
+        if domains.rows():
+            layout.addWidget(domains)
+        else:
+            domains.setVisible(False)
+        host.summary, host.domains = summary, domains
+        return host
 
     def _open_log(self) -> None:
         self.report_requested.emit(
@@ -320,8 +361,10 @@ class DNSCheckPage(BasePage):
         self.domains_card.setVisible(bool(self.domains_view.rows()))
         from diagnostics.history import dns_check_entry
 
-        # Запись в настройки уже сделал фоновый поток проверки; здесь — только экран.
-        entry = dns_check_entry(dict(results or {}))
+        # Запись в настройки уже сделал фоновый поток проверки; здесь — только экран. Берём её же:
+        # в ней путь к файлу проверки, по которому прошлую проверку потом открывают целиком.
+        saved = dict(results or {}).get("history_entry")
+        entry = dict(saved) if isinstance(saved, dict) else dns_check_entry(dict(results or {}))
         if entry is not None:
             self.set_history([*getattr(self, "_history_runs", []), entry][-20:])
 
