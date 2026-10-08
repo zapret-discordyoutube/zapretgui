@@ -749,6 +749,9 @@ class LightAndFittingTests(unittest.TestCase):
         self.assertEqual(band.counts(), [("помог", 2, "ok"), ("не помог", 1, "fail"), ("и так открывались", 1, "info")])
         # Фраза вывода — из отчёта как есть: она называет пресет, смысл её здесь не меняют.
         self.assertIn(headline, band.toolTip())
+        # Пресет назван прямо в заголовке полосы: это итог его одного.
+        self.assertEqual(band.title(), "С Zapret и без · пресет «Default»")
+        self.assertIn("одного пресета", band.toolTip())
         self.assertIn("Telegram", band.toolTip())
         band.grab()
         QTest.mouseClick(band, Qt.MouseButton.LeftButton)

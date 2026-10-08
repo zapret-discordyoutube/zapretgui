@@ -1003,7 +1003,7 @@ def build_cards(report: dict) -> list[Card]:
     if system:
         cards.append(_system_card(system))
     if report.get("compare"):
-        cards.append(_compare_card(report["compare"]))
+        cards.append(_compare_card(report["compare"], report.get("services") or ()))
     run = _run_card(report)
     if run is not None:
         cards.append(run)
@@ -1014,12 +1014,64 @@ _COMPARE_STATES = {"helped": OK, "not_helped": FAIL, "broken": WARN, "fine_anywa
 _COMPARE_STATUS = {OK: "Обход справляется", WARN: "Помогает не всем", FAIL: "Пресет не помог"}
 
 
-def _compare_card(compare: dict) -> Card:
+# Что было с сайтом в двух проверках — по группе сравнения: (с Zapret, без Zapret).
+_COMPARE_OPENS = {
+    "helped": ("открывается", "не открывается"),
+    "not_helped": ("не открывается", "не открывается"),
+    "broken": ("не открывается", "открывается"),
+    "fine_anyway": ("открывается", "открывается"),
+}
+
+
+def _one_preset_note(preset: str) -> str:
+    """Оговорка, без которой сравнение читают неверно: это итог одного пресета, а не Zapret вообще."""
+    name = f"«{preset}»" if preset else "выбранного сейчас"
+    return (
+        f"Это итог одного пресета — {name}. Пресет решает, для каких сайтов и какой обход включён: "
+        "с другим пресетом или после «Подбора стратегии» результат может быть другим."
+    )
+
+
+def _compare_site_page(name: str, key: str, compare: dict, services) -> Card:
+    """Страница сайта из сравнения: что было с Zapret и без, и все пробы этой проверки."""
+    from diagnostics.compare import GROUP_TITLES
+    from diagnostics.history import format_time
+
+    preset = str(compare.get("preset") or "")
+    with_zapret, without = _COMPARE_OPENS[key]
+    now, past = ("С Zapret", "Без Zapret") if compare.get("zapret_in") == "current" else ("Без Zapret", "С Zapret")
+    now_text, past_text = (with_zapret, without) if compare.get("zapret_in") == "current" else (without, with_zapret)
+    state = _COMPARE_STATES[key]
+    verdict = Section(
+        "С Zapret и без",
+        (
+            Line(state, "Итог", GROUP_TITLES[key]),
+            Line(OK if now_text == "открывается" else FAIL, f"{now} (эта проверка)", now_text),
+            Line(
+                OK if past_text == "открывается" else FAIL,
+                f"{past} (проверка {format_time(str(compare.get('other_time') or ''))})",
+                past_text,
+            ),
+            Line(INFO, "Пресет", preset or "не определён"),
+            Line(INFO, _one_preset_note(preset)),
+        ),
+    )
+    service = next((item for item in services if str(item.get("label") or "") == name), None)
+    if service is None:
+        # Сайта нет в этой проверке (другой набор сайтов): остаётся само сравнение.
+        return Card(f"compare:{name}", "fa5s.globe", name, state, GROUP_TITLES[key], sections=(verdict,), site=True)
+    site = _site_card(service)
+    # Уровень остаётся от самой проверки сайта: по нему рисуется дорога и место, где режут.
+    return replace(site, key=f"compare:{site.key}", status=GROUP_TITLES[key], kind="", sections=(verdict, *site.sections))
+
+
+def _compare_card(compare: dict, services=()) -> Card:
     """«С Zapret и без»: что дала пара проверок — эта и прошлая в противоположном состоянии обхода."""
     from diagnostics.compare import GROUP_TITLES
     from diagnostics.history import format_time
 
     level = _state(compare.get("level"))
+    preset = str(compare.get("preset") or "")
     groups = [(key, [str(name) for name in compare.get(key) or ()]) for key in _COMPARE_STATES]
     summary = tuple(
         Line(_COMPARE_STATES[key], GROUP_TITLES[key], ", ".join(names)) for key, names in groups if names
@@ -1028,9 +1080,15 @@ def _compare_card(compare: dict) -> Card:
     facts = [Line(INFO, f"Прошлая проверка {other}", format_time(str(compare.get("other_time") or "")))]
     if compare.get("preset"):
         facts.append(Line(INFO, "Пресет", str(compare["preset"])))
-    sections = [Section(str(compare.get("headline") or "С Zapret и без"), summary)]
+    # Первой строкой — что это итог одного пресета: без этого «не помог» читают как «Zapret не поможет».
+    sections = [Section(str(compare.get("headline") or "С Zapret и без"), (Line(INFO, _one_preset_note(preset)), *summary))]
     sections += [
-        Section(GROUP_TITLES[key], tuple(Line(_COMPARE_STATES[key], name) for name in names), tiles=True)
+        Section(
+            GROUP_TITLES[key],
+            # Плитка сайта открывает его страницу: что было в обеих проверках и все пробы этой.
+            tuple(Line(_COMPARE_STATES[key], name, page=_compare_site_page(name, key, compare, services)) for name in names),
+            tiles=True,
+        )
         for key, names in groups
         if names
     ]
@@ -1043,7 +1101,8 @@ def _compare_card(compare: dict) -> Card:
         icon="fa5s.balance-scale",
         title="С Zapret и без",
         level=level,
-        status=_COMPARE_STATUS.get(level, "Сравнение"),
+        # В слове итога назван пресет: сравнение говорит о нём одном.
+        status=" · ".join(part for part in (_COMPARE_STATUS.get(level, "Сравнение"), f"пресет «{preset}»" if preset else "") if part),
         lines=summary,
         sections=tuple(sections),
     )

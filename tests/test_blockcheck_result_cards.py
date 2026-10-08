@@ -261,6 +261,36 @@ class NewSectionsCardsTests(unittest.TestCase):
         # Пустые группы не показываются.
         self.assertFalse(any("перестали" in section.title for section in card.sections))
 
+    def test_compare_tile_opens_the_site_page_and_says_it_is_one_preset(self) -> None:
+        protocols = [{"key": "tls13", "title": "TLS 1.3", "state": "ok", "word": "проходит", "text": "проходит"}]
+        youtube = _service("youtube", "YouTube", "ok", [_target("www.youtube.com", main=True, protocols=protocols, quic="ok", dns_state="ok")])
+        card = self._card({"compare": self.COMPARE, "services": [youtube]}, "compare")
+        # Сравнение — итог одного пресета: это сказано в слове итога и первой строкой отчёта.
+        self.assertIn("пресет «Default»", card.status)
+        self.assertIn("Это итог одного пресета — «Default»", card.sections[0].lines[0].name)
+
+        helped = next(section for section in card.sections if section.title == "Обход помог")
+        page = helped.lines[0].page
+        # Страница сайта: что было с Zapret и без, пресет, и все пробы этой проверки ниже.
+        self.assertEqual((page.title, page.status, page.level, page.site), ("YouTube", "Обход помог", "ok", True))
+        verdict = page.sections[0]
+        rows = {line.name: line.text for line in verdict.lines}
+        self.assertEqual(rows["С Zapret (эта проверка)"], "открывается")
+        self.assertEqual(rows["Без Zapret (проверка 08.10 12:00)"], "не открывается")
+        self.assertEqual(rows["Пресет"], "Default")
+        self.assertTrue(any("одного пресета" in line.name for line in verdict.lines))
+        self.assertTrue(page.marks)
+        self.assertGreater(len(page.sections), 1)
+        # Сайта нет среди проверенных в этот раз — остаётся само сравнение.
+        alone = next(section for section in card.sections if section.title == "Не открываются и с обходом").lines[0].page
+        self.assertEqual((alone.title, len(alone.sections)), ("Telegram", 1))
+        self.assertEqual({line.name: line.text for line in alone.sections[0].lines}["С Zapret (эта проверка)"], "не открывается")
+
+        # Прошлая проверка была с Zapret, а эта — без: подписи меняются местами.
+        swapped = self._card({"compare": {**self.COMPARE, "zapret_in": "past"}, "services": [youtube]}, "compare")
+        rows = {line.name: line.text for line in next(s for s in swapped.sections if s.title == "Обход помог").lines[0].page.sections[0].lines}
+        self.assertEqual((rows["Без Zapret (эта проверка)"], rows["С Zapret (проверка 08.10 12:00)"]), ("не открывается", "открывается"))
+
     def test_no_comparison_no_card(self) -> None:
         self.assertFalse([card for card in build_cards({"compare": None}) if card.key == "compare"])
 

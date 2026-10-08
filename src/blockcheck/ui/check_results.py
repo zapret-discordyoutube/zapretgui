@@ -591,6 +591,11 @@ class CompareBand(QWidget):
     def compare(self) -> dict:
         return dict(self._compare)
 
+    def title(self) -> str:
+        """Заголовок полосы. В нём назван пресет: сравнение — итог его одного, а не Zapret вообще."""
+        preset = str(self._compare.get("preset") or "")
+        return f"С Zapret и без · пресет «{preset}»" if preset else "С Zapret и без"
+
     def counts(self) -> list[tuple[str, int, str]]:
         """Группы, в которых есть сайты: (подпись, сколько, состояние)."""
         return [
@@ -610,7 +615,8 @@ class CompareBand(QWidget):
             for key, caption, _state in _COMPARE_GROUPS
             if self._compare.get(key)
         )
-        set_tooltip(self, "\n".join(part for part in (headline, names, "Нажмите, чтобы открыть сравнение") if part))
+        one_preset = "Это итог одного пресета: с другим пресетом результат может быть другим."
+        set_tooltip(self, "\n".join(part for part in (self.title(), headline, names, one_preset, "Нажмите, чтобы открыть сравнение") if part))
         set_control_accessibility(self, name=f"С Zapret и без: {headline}", description="Открывает сравнение с прошлой проверкой.")
         set_state_text(self, f"С Zapret и без: {headline}")
         self.reveal.play()
@@ -675,7 +681,11 @@ class CompareBand(QWidget):
         room = max(40.0, right - 44)
         painter.setFont(self._title_font)
         painter.setPen(text)
-        painter.drawText(QRectF(44, 8, room, 18), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), "С Zapret и без")
+        painter.drawText(
+            QRectF(44, 8, room, 18),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            title_metrics.elidedText(self.title(), Qt.TextElideMode.ElideRight, int(room)),
+        )
         painter.setFont(self._text_font)
         painter.setPen(tone if level in ("fail", "warn") else muted)
         headline = metrics.elidedText(str(self._compare.get("headline") or ""), Qt.TextElideMode.ElideRight, int(room))
