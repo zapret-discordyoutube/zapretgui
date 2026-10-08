@@ -511,6 +511,7 @@ class OtherTabsPastChecksTests(unittest.TestCase):
         saved = {"summary": {}, "domains": {}}
         feature = Mock()
         feature.load_past_dns_check_report = Mock(side_effect=lambda path: saved if path else None)
+        feature.load_past_dns_check_text = Mock(return_value="текст проверки")
         page = DNSCheckPage(dns_feature=feature, embedded=True)
         self.addCleanup(page.deleteLater)
         opened, texts = [], []
@@ -521,8 +522,11 @@ class OtherTabsPastChecksTests(unittest.TestCase):
 
         # Свежая запись сверху: у неё есть файл — открывается видом вкладки.
         page._open_past(0)
-        [(title, headline, widget, _text)] = opened
+        [(title, headline, widget, text)] = opened
         self.addCleanup(widget.deleteLater)
+        # Текст для кнопки «Отчёт» — из того же файла проверки.
+        self.assertEqual(text, "текст проверки")
+        feature.load_past_dns_check_text.assert_called_once_with("C:/logs/dns_check_1.json")
         self.assertTrue(title.startswith("DNS подмена · "))
         self.assertEqual(headline, "Подмены нет")
         self.assertTrue(hasattr(widget, "summary"))

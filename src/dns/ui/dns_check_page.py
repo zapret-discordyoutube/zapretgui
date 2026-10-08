@@ -227,7 +227,10 @@ class DNSCheckPage(BasePage):
             lines = [title, str(run.get("headline") or ""), *map(str, run.get("problems") or ()), "", "Полный отчёт этой проверки не сохранился."]
             self.report_requested.emit(LogReport(title=title, text="\n".join(lines), root_title="DNS подмена"))
             return
-        self.past_view_opened.emit(title, str(run.get("headline") or ""), self._build_past_view(past), "")
+        # Текст той проверки лежит в её же файле; у записей постарше его нет — кнопка «Отчёт» тогда выключена.
+        text_loader = getattr(self._dns, "load_past_dns_check_text", None)
+        text = str(text_loader(str(run.get("log_file") or "")) if callable(text_loader) else "")
+        self.past_view_opened.emit(title, str(run.get("headline") or ""), self._build_past_view(past), text)
 
     def _build_past_view(self, results: dict) -> QWidget:
         """Итог и список доменов прошлой проверки — теми же виджетами, что на вкладке."""
