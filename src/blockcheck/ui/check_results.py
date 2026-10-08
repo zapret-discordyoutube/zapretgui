@@ -699,18 +699,22 @@ class _ProblemGroup(ToneGroup):
         keys = {key_for(problem) for problem in others}
         self.shared_action_button: PushButton | None = None
         self.report_button: TransparentToolButton | None = None
-        several = len(others) > 1 and not plain
+        # Одна находка — та же карточка, что и несколько: строка во всю ширину окна с
+        # абзацами текста выбивалась из ряда карточек.
+        targets = {str(problem.get("target") or "") for problem in others}
+        uniform = bool(others) and len(actions) == 1 and len(keys) == 1 and len(targets) == 1
+        target = next(iter(targets), "")
         action = next(iter(actions), "")
-        shared_action = several and len(actions) == 1 and on_action is not None and action in _ACTION_TEXT
+        shared_action = uniform and on_action is not None and action in _ACTION_TEXT
         if shared_action:
             self.shared_action_button = PushButton(_ACTION_TEXT[action], self)
-            self.shared_action_button.clicked.connect(lambda _checked=False, a=action: on_action(a, ""))
+            self.shared_action_button.clicked.connect(lambda _checked=False, a=action, t=target: on_action(a, t))
             set_control_accessibility(
                 self.shared_action_button, name=_ACTION_TEXT[action], description=f"{_ACTION_DESCRIPTION.get(action, '')}."
             )
             self.add_header_widget(self.shared_action_button)
         key = next(iter(keys), "")
-        shared_report = several and len(keys) == 1 and on_open is not None and bool(key)
+        shared_report = uniform and on_open is not None and bool(key)
         if shared_report:
             self.report_button = TransparentToolButton(self)
             self.report_button.setFixedSize(30, 30)
@@ -725,11 +729,11 @@ class _ProblemGroup(ToneGroup):
         # Несколько находок с общим действием и отчётом — карточками: заголовок и метки,
         # без абзацев пояснений (они в подсказке и в полном отчёте).
         self.findings_flow: CardsFlow | None = None
-        if shared_action and shared_report:
+        if uniform:
             self.findings_flow = CardsFlow(self, min_width=FindingCard.MIN_WIDTH, card_height=FindingCard.HEIGHT)
             for problem in others:
                 card = problem_finding_card(problem, self.findings_flow)
-                if on_open_child is not None:
+                if on_open_child is not None and shared_report:
                     # Карточка открывает свою страницу: полный текст находки, серверы и пояснение.
                     card.set_clickable()
                     card.clicked.connect(

@@ -10,7 +10,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QScrollArea
 
 from blockcheck.ui.check_results import BlockcheckSummaryPanel
-from blockcheck.ui.finding_parts import split_finding
+from blockcheck.ui.finding_parts import FindingCard, split_finding
 from blockcheck.ui.result_cards import ResultDetailView, finding_detail_card, server_card, wants_findings
 from blockcheck.ui.result_cards_model import Card, FindingParts, Line, Section, build_cards
 from blockcheck.ui.server_matrix import cell_state, count_state, parse_server_table, summarize_servers
@@ -342,15 +342,18 @@ class GroupActionsTests(unittest.TestCase):
         panel.overview.tiles()[0].opened.emit("dns")
         self.assertGreater(area.verticalScrollBar().value(), 0)
 
-    def test_single_row_keeps_its_own_button(self) -> None:
+    def test_single_finding_is_a_card_with_the_button_in_the_group_header(self) -> None:
         panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=lambda _key: None)
         self.addCleanup(panel.deleteLater)
         panel.show_report({"dns_servers": {"level": "fail", "findings": [], "text": ""}, "problems": [self._dns("Отвечают через раз: Quad9 (9.9.9.9)")]})
 
         [group] = panel.problem_groups()
-        self.assertIsNone(group.shared_action_button)
-        self.assertIsNotNone(group.rows[0].action_button)
-        self.assertEqual(group.rows[0].card_key, "dns_servers")
+        # Одна находка — такая же карточка ограниченной ширины, как несколько, а не строка во всё окно.
+        self.assertIsNotNone(group.shared_action_button)
+        self.assertIsNotNone(group.report_button)
+        [card] = group.findings_flow.cards()
+        self.assertIsInstance(card, FindingCard)
+        self.assertEqual(card.title, "Отвечают через раз")
 
 
 if __name__ == "__main__":

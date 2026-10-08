@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
-from PyQt6.QtWidgets import QAbstractScrollArea, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QAbstractScrollArea, QGridLayout, QHBoxLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     BreadcrumbBar,
@@ -838,6 +838,8 @@ ANIMATED_CARDS = 8
 TEXT_PREVIEW_LINES = 16
 # Сколько первых блоков отчёта появляется с анимацией.
 ANIMATED_BLOCKS = 4
+NARROW_NAME = 22
+NARROW_TEXT = 26
 NAME_COLUMN_MIN = 120
 NAME_COLUMN_MAX = 320
 
@@ -898,10 +900,20 @@ class _CountLabel(StrongBodyLabel):
         self._anim.setEndValue(1.0)
         self._anim.setDuration(REVEAL_MS)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._anim.valueChanged.connect(lambda share: self.setText(str(int(round(self._value * float(share))))))
+        # Метод, а не безымянная функция: её ссылка на счётчик пустела, когда отчёт закрывали
+        # посреди счёта, и следующий кадр анимации падал с ошибкой.
+        self._anim.valueChanged.connect(self._show_share)
 
     def value(self) -> int:
         return self._value
+
+    def _show_share(self, share) -> None:
+        self.setText(str(int(round(self._value * float(share)))))
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._anim.stop()
+        self.setText(str(self._value))
+        super().hideEvent(event)
 
     def play(self) -> None:
         if are_live_animations_enabled() and self._value:
@@ -1377,6 +1389,11 @@ class _SectionBlock(QWidget):
             layout.addWidget(self.editor)
             layout.addSpacing(8)
 
+    def set_narrow(self) -> None:
+        """Раздел стоит в столбце рядом с другими: полоса долей короче, чтобы заголовок помещался."""
+        if self.bar is not None:
+            self.bar.setFixedWidth(56)
+
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
         painter = QPainter(self)
@@ -1385,6 +1402,74 @@ class _SectionBlock(QWidget):
         painter.setBrush(QColor(0, 0, 0, 12) if _is_light() else QColor(255, 255, 255, 11))
         painter.drawRoundedRect(self.rect(), CARD_RADIUS, CARD_RADIUS)
         painter.end()
+
+
+def is_narrow_section(section: Section) -> bool:
+    """Раздел из коротких строк «что измеряли — что получилось» (пинг, порты одного сервера).
+
+    Во всю ширину окна такой раздел на три четверти пуст, поэтому соседние
+    узкие разделы встают в несколько столбцов.
+    """
+    if section.text or not section.lines:
+        return False
+    return all(len(line.name) <= NARROW_NAME and len(line.text) <= NARROW_TEXT for line in section.lines)
+
+
+class _BlocksFlow(QWidget):
+    """Узкие разделы отчёта в несколько столбцов: сколько помещается по ширине окна."""
+
+    MIN_WIDTH = 380
+    # Число столбцов изменилось — высота отчёта стала другой.
+    replaced = pyqtSignal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setSpacing(8)
+        # Ширину задаёт окно: иначе три столбца не дали бы странице сузиться обратно до одного.
+        self._grid.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self._blocks: list[QWidget] = []
+        self._columns = 0
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(200, self._grid.minimumSize().height())
+
+    def blocks(self) -> list[QWidget]:
+        return list(self._blocks)
+
+    def add(self, block: QWidget) -> None:
+        block.setParent(self)
+        self._blocks.append(block)
+        self._place(force=True)
+
+    def columns_for(self, width: int) -> int:
+        fit = max(1, (width + 8) // (self.MIN_WIDTH + 8))
+        return max(1, min(fit, len(self._blocks)))
+
+    def columns(self) -> int:
+        return self._columns
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._place()
+
+    def _place(self, *, force: bool = False) -> None:
+        columns = self.columns_for(self.width())
+        if columns == self._columns and not force:
+            return
+        for column in range(max(columns, self._columns)):
+            self._grid.setColumnStretch(column, 1 if column < columns else 0)
+        self._columns = columns
+        # Сетка не переставляет виджет сама: сначала убрать все места, потом раздать заново.
+        while self._grid.count():
+            self._grid.takeAt(0)
+        for order, block in enumerate(self._blocks):
+            self._grid.addWidget(block, order // columns, order % columns, Qt.AlignmentFlag.AlignTop)
+        self._grid.invalidate()
+        self._grid.activate()
+        self.updateGeometry()
+        self.replaced.emit()
 
 
 class _ReportHero(QWidget):
@@ -1556,6 +1641,7 @@ class ResultDetailView(QWidget):
         # Отчёт короче окна: лишняя высота уходит вниз, а не растягивает шапку и строки.
         self._layout.addStretch(1)
         self.blocks: list[_SectionBlock] = []
+        self._flows: list[_BlocksFlow] = []
 
     def card(self) -> Card | None:
         return self._card
@@ -1636,8 +1722,28 @@ class ResultDetailView(QWidget):
             block.text_opened.connect(self.text_opened)
             block.child_opened.connect(self.open_child)
             self.blocks.append(block)
+        for flow in self._flows:
+            flow.setParent(None)
+            flow.deleteLater()
+        self._flows = []
+        narrow = [is_narrow_section(block.section) and block.rows and block.grid is None for block in self.blocks]
+        flow: _BlocksFlow | None = None
         for order, block in enumerate(self.blocks):
-            self._sections_layout.addWidget(block)
+            # Узкие разделы, стоящие подряд, делят строку; одиночный узкий остаётся как был.
+            paired = narrow[order] and (
+                (order > 0 and narrow[order - 1]) or (order + 1 < len(narrow) and narrow[order + 1])
+            )
+            if not paired:
+                flow = None
+                self._sections_layout.addWidget(block)
+            else:
+                if flow is None:
+                    flow = _BlocksFlow(self._sections_host)
+                    self._flows.append(flow)
+                    flow.replaced.connect(self._sync_height, Qt.ConnectionType.QueuedConnection)
+                    self._sections_layout.addWidget(flow)
+                block.set_narrow()
+                flow.add(block)
             # Выплывают только первые блоки — те, что видны сразу. Анимация каждого из
             # десятков блоков длинного отчёта делала открытие страницы долгим и дёрганым.
             if order < ANIMATED_BLOCKS:

@@ -209,7 +209,7 @@ class OpenReportTests(unittest.TestCase):
             }
         )
 
-        system, telegram, x = sorted(panel.problem_rows(), key=lambda row: getattr(row, "title", ""))
+        telegram, x, system = sorted(panel.problem_rows(), key=lambda row: getattr(row, "title", ""))
         [ip_group] = [group for group in panel.problem_groups() if group.kind() == "ip"]
         # Оба сайта — в одной сетке; текста объяснения между карточками нет.
         self.assertEqual(ip_group.flow.cards(), [telegram, x])
@@ -230,6 +230,8 @@ class OpenReportTests(unittest.TestCase):
         x.action_button.click()
         self.assertEqual((acted, len(opened)), ([("strategy", "x.com")], 2))
         self.assertEqual(system.card_key, "")
+        QTest.mouseClick(system, Qt.MouseButton.LeftButton)
+        self.assertEqual(len(opened), 2)
         QTest.mouseClick(system, Qt.MouseButton.LeftButton)
         self.assertEqual(len(opened), 2)
 
@@ -434,16 +436,19 @@ class CardsOnScreenTests(unittest.TestCase):
         self.assertEqual((site.icon.icon_name(), site.icon.brand_color()), ("simple:telegram:TG", "#26A5E4"))
         self.assertEqual(site.title, "Telegram")
         self.assertIsNone(site.dot)
-        self.assertEqual(dns.text_label.text(), "Шифрованный DNS по DoT закрыт у части серверов")
+        self.assertEqual(dns.title, "Шифрованный DNS по DoT закрыт у части серверов")
         # Перечень адресов свёрнут в метку сервиса со счётчиком; остальное — пояснение.
         self.assertEqual([chip.text for chip in dns.server_chips], ["AdGuard ×2"])
         self.assertEqual(dns.server_chips[0].icon.icon_name(), "simple:adguard:AG")
         self.assertEqual(dns.more_label.text(), "и ещё 3")
-        self.assertEqual(dns.detail_label.text(), "Так бывает.")
-        # У строки не про сайт — точка важности вместо логотипа.
-        self.assertIsNone(dns.icon)
+        # Пояснение — в подсказке: на карточке только суть.
+        self.assertIn("Так бывает", dns.hint_text)
+        # У находки не про сайт — точка важности вместо логотипа.
         self.assertIsNotNone(dns.dot)
-        self.assertIsNotNone(dns.action_button)
+        # Кнопка действия — одна на группу, в её заголовке.
+        self.assertIsNone(dns.action_button)
+        [dns_group] = [group for group in panel.problem_groups() if group.kind() == "dns"]
+        self.assertEqual(dns_group.shared_action_button.text(), "Настройка DNS")
 
     def test_dns_problem_with_ready_parts_lists_every_server(self) -> None:
         text = "Обычные ответы подменяются у серверов: Cloudflare (1.1.1.1), Cloudflare (1.0.0.1), AdGuard (94.140.14.14), Quad9 (9.9.9.9) и ещё 2."
@@ -488,9 +493,10 @@ class CardsOnScreenTests(unittest.TestCase):
         self.addCleanup(panel.deleteLater)
         panel.show_report({"problems": [ready]})
         [row] = panel.problem_rows()
-        self.assertEqual(row.text_label.text(), "Обычные ответы подменяются у серверов")
-        self.assertEqual([chip.text for chip in row.server_chips], ["Cloudflare ×2", "AdGuard", "Quad9 ×2", "Google DNS"])
-        self.assertIsNone(row.more_label)
+        self.assertEqual(row.title, "Обычные ответы подменяются у серверов")
+        self.assertEqual([chip.text for chip in row.server_chips], ["Cloudflare ×2", "AdGuard", "Quad9 ×2"])
+        self.assertEqual(row.more_label.text(), "и ещё 1")
+        self.assertIn("Google DNS: 8.8.8.8", row.hint_text)
 
     def test_narrow_card_shows_title_and_status_in_full(self) -> None:
         card = Card(
@@ -517,3 +523,89 @@ class CardsOnScreenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LightAndFittingTests(unittest.TestCase):
+    """Метки без своей рамки и только целиком; узкие разделы отчёта — столбцами."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _card(self, width: int):
+        from blockcheck.ui.finding_parts import FindingCard
+
+        servers = [("www.youtube.com", []), ("www.facebook.com", []), ("www.linkedin.com", [])]
+        # Карточка стоит в сетке: ширину ей задаёт сетка, а не её собственное содержимое.
+        host = QWidget()
+        self.addCleanup(host.deleteLater)
+        card = FindingCard("DNS подменяет ответы", host, servers=servers, more=11)
+        card.setGeometry(0, 0, width, FindingCard.HEIGHT)
+        host.resize(700, 80)
+        host.show()
+        self.app.processEvents()
+        return card
+
+    def test_chips_are_never_cut_and_hidden_ones_are_counted(self) -> None:
+        wide = self._card(600)
+        self.assertEqual([chip.isVisible() for chip in wide.server_chips], [True, True, True])
+        self.assertEqual(wide.more_label.text(), "и ещё 11")
+        # Метка показывает название целиком: её ширина не меньше нужной тексту.
+        self.assertTrue(all(chip.width() >= chip.sizeHint().width() for chip in wide.server_chips))
+        self.assertEqual(wide.server_chips[0].label.text(), "youtube.com")
+
+        narrow = self._card(200)
+        self.assertEqual([chip.isVisible() for chip in narrow.server_chips], [True, False, False])
+        self.assertEqual(narrow.more_label.text(), "и ещё 13")
+        right = max(chip.geometry().right() for chip in narrow.server_chips if chip.isVisible())
+        self.assertLess(right, narrow.width())
+
+    def test_short_sections_share_a_row_instead_of_stretching(self) -> None:
+        from blockcheck.ui.result_cards import ResultDetailView, is_narrow_section
+        from blockcheck.ui.result_cards_model import Card, Line, Section
+
+        def server(address: str) -> Section:
+            return Section(address, (Line("ok", "Пинг", "5 мс"), Line("ok", "UDP 53", "43 мс"), Line("fail", "DoH 443", "обрыв")))
+
+        long_line = Line("warn", "Что найдено", "Провайдер подменяет ответы обычного DNS у этих серверов, поэтому сайты открываются не туда.")
+        card = Card(
+            key="service",
+            icon="fa5s.server",
+            title="Cloudflare",
+            level="fail",
+            status="Мешает работе",
+            sections=(Section("Что найдено", (long_line,)), server("1.1.1.1"), server("1.0.0.1"), server("2606:4700:4700::1111")),
+        )
+        self.assertEqual([is_narrow_section(section) for section in card.sections], [False, True, True, True])
+        view = ResultDetailView()
+        self.addCleanup(view.deleteLater)
+        view.resize(1300, 700)
+        view.show()
+        view.show_card(card)
+        self.app.processEvents()
+
+        wide, first, second, third = view.blocks
+        self.assertGreater(wide.width(), 1200)
+        self.assertEqual(len({first.y(), second.y(), third.y()}), 1)
+        self.assertLess(first.width(), 450)
+        # Узкое окно — те же разделы один под другим.
+        view.resize(500, 700)
+        self.app.processEvents()
+        self.assertLess(first.y(), second.y())
+        self.assertLess(second.y(), third.y())
+
+    def test_counter_stops_counting_when_its_report_is_closed(self) -> None:
+        from blockcheck.ui import result_cards
+
+        label = result_cards._CountLabel(12)
+        self.addCleanup(label.deleteLater)
+        # Кадр анимации приходит в метод счётчика: безымянная функция падала после закрытия отчёта.
+        label._show_share(0.5)
+        self.assertEqual(label.text(), "6")
+        label.show()
+        with patch.object(result_cards, "are_live_animations_enabled", return_value=True):
+            label.play()
+        self.assertEqual(label._anim.state(), label._anim.State.Running)
+        label.hide()
+        self.assertEqual(label._anim.state(), label._anim.State.Stopped)
+        self.assertEqual(label.text(), "12")

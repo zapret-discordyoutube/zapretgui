@@ -99,13 +99,18 @@ def split_server_list(detail: str) -> tuple[list[tuple[str, list[str]]], int, st
 
 
 class ServerChip(QWidget):
-    """Метка сервиса (DNS, хостинг, сайт): значок, название и сколько его адресов названо. Адреса — в подсказке."""
+    """Метка сервиса (DNS, хостинг, сайт): значок, название и сколько его адресов названо. Адреса — в подсказке.
+
+    Своей подложки у метки нет: она стоит на карточке, а карточка — в группе, и
+    третья рамка внутри двух делала экран тяжёлым.
+    """
 
     def __init__(self, name: str, addresses: list[str], parent=None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(22)
+        self.setFixedHeight(20)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(7, 0, 8, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
         brand = named_brand(name)
         self.icon: BrandIcon | None = None
@@ -113,19 +118,11 @@ class ServerChip(QWidget):
             self.icon = BrandIcon(brand.icon, brand.color, self, size=13)
             layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.text = name if len(addresses) < 2 else f"{name} ×{len(addresses)}"
-        layout.addWidget(CaptionLabel(self.text, self), 0, Qt.AlignmentFlag.AlignVCenter)
+        # Адрес сайта на метке — без «www.»: так он короче и не обрезается.
+        self.label = mute(CaptionLabel(self.text.removeprefix("www."), self))
+        layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignVCenter)
         if addresses:
             set_tooltip(self, f"{name}: {', '.join(addresses)}")
-        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        _ = event
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(theme_color("surface_bg_hover", QColor(255, 255, 255, 18)))
-        painter.drawRoundedRect(self.rect(), 4, 4)
-        painter.end()
 
 
 def theme_color(token: str, fallback: QColor) -> QColor:
@@ -196,8 +193,9 @@ class FindingCard(QWidget):
     """
 
     HEIGHT = 54
-    MIN_WIDTH = 300
+    MIN_WIDTH = 340
     CHIPS_SHOWN = 3
+    CHIP_GAP = 12
     # Нажали карточку (когда ей есть что открыть).
     clicked = pyqtSignal()
 
@@ -247,23 +245,25 @@ class FindingCard(QWidget):
         self.text_label.setFont(font)
         texts.addWidget(self.text_label)
         self.server_chips: list[ServerChip] = []
-        self.more_label: CaptionLabel | None = None
         self.note_label: ElidedLabel | None = None
         servers = list(servers)
+        # Сколько серверов не названо совсем (сверх меток) и надпись «и ещё N».
+        self._unnamed = int(more) + max(0, len(servers) - self.CHIPS_SHOWN)
+        self._more = mute(CaptionLabel("", self))
+        self._more.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._more.hide()
         if servers:
             chips = QHBoxLayout()
             chips.setContentsMargins(0, 0, 0, 0)
-            chips.setSpacing(6)
+            chips.setSpacing(self.CHIP_GAP)
             for name, addresses in servers[: self.CHIPS_SHOWN]:
                 chip = ServerChip(name, list(addresses), self)
                 chips.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
                 self.server_chips.append(chip)
-            hidden = int(more) + max(0, len(servers) - self.CHIPS_SHOWN)
-            if hidden:
-                self.more_label = mute(CaptionLabel(f"и ещё {hidden}", self))
-                chips.addWidget(self.more_label, 0, Qt.AlignmentFlag.AlignVCenter)
+            chips.addWidget(self._more, 0, Qt.AlignmentFlag.AlignVCenter)
             chips.addStretch(1)
             texts.addLayout(chips)
+            self._set_hidden(self._unnamed)
         elif note:
             self.note_label = mute(ElidedLabel(note, self))
             texts.addWidget(self.note_label)
@@ -274,6 +274,41 @@ class FindingCard(QWidget):
         set_tooltip(self, self.hint_text)
         set_state_text(self, state_text or self.title)
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+
+    @property
+    def more_label(self) -> CaptionLabel | None:
+        """Надпись «и ещё N»; ``None`` — все серверы названы метками."""
+        return None if self._more.isHidden() else self._more
+
+    def _set_hidden(self, count: int) -> None:
+        self._more.setText(f"и ещё {count}" if count else "")
+        self._more.adjustSize()
+        self._more.setVisible(bool(count))
+
+    def fit_chips(self, width: int) -> None:
+        """Показывает столько меток, сколько помещается целиком; остальные уходят в «и ещё N»."""
+        if not self.server_chips:
+            return
+        room = width - 12 - 10 - 10 - self.dot.width()
+        metrics = self._more.fontMetrics()
+        used, shown = 0, 0
+        for order, chip in enumerate(self.server_chips):
+            need = chip.sizeHint().width() + (self.CHIP_GAP if order else 0)
+            # Сколько останется за меткой: под надпись «и ещё N» нужно место.
+            left = self._unnamed + len(self.server_chips) - order - 1
+            tail = metrics.horizontalAdvance(f"и ещё {left}") + self.CHIP_GAP + 4 if left else 0
+            # Первая метка остаётся всегда: без неё на карточке нет ни одного сервера.
+            if order and used + need + tail > room:
+                break
+            used += need
+            shown += 1
+        for order, chip in enumerate(self.server_chips):
+            chip.setVisible(order < shown)
+        self._set_hidden(self._unnamed + len(self.server_chips) - shown)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.fit_chips(self.width())
 
     def set_clickable(self) -> None:
         """Карточка открывает свою страницу: рука вместо стрелки, Enter с клавиатуры, строка в подсказке."""

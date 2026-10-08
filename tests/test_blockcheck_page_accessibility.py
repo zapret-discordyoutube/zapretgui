@@ -259,8 +259,11 @@ class SummaryPanelTests(unittest.TestCase):
         rows = panel.problem_rows()
         rows[0].action_button.click()
         # У предупреждения про DNS — кнопка «Настройка DNS», у строки «Открываются» кнопки нет.
-        self.assertEqual(rows[1].action_button.text(), "Настройка DNS")
-        rows[1].action_button.click()
+        # Она одна на группу и стоит в её заголовке, а не в карточке находки.
+        [dns_group] = [group for group in panel.problem_groups() if group.shared_action_button is not None]
+        self.assertEqual(dns_group.shared_action_button.text(), "Настройка DNS")
+        dns_group.shared_action_button.click()
+        self.assertIsNone(rows[1].action_button)
         self.assertIsNone(rows[2].action_button)
         self.assertEqual(calls, [("strategy", "x.com"), ("dns", "")])
         self.assertIn("Zapret включён", panel.env_label.text())
