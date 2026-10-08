@@ -172,13 +172,13 @@ class PastCheckOnScreenTests(unittest.TestCase):
         self.assertFalse(view.isHidden())
         self.assertTrue(detail.isHidden())
         self.assertTrue(page._tabs_pivot.isHidden())
-        # Находка из прошлой проверки открывается страницей внутри отчёта своей карточки.
+        # Находка из прошлой проверки открывается своей страницей — сразу, без отчёта раздела перед ней.
         from blockcheck.ui.result_cards import finding_detail_card
 
-        view.child_opened.emit(view.cards.cards()[0].card, finding_detail_card("Отвечают через раз: Quad9 (9.9.9.9)", "warn"))
+        view.card_opened.emit(finding_detail_card("Отвечают через раз: Quad9 (9.9.9.9)", "warn"))
         self.assertEqual(detail.card().title, "Отвечают через раз")
-        self.assertEqual(detail.breadcrumb.count(), 4)
-        self.assertTrue(detail.go_back())
+        self.assertEqual(detail.breadcrumb.count(), 3)
+        self.assertFalse(detail.go_back())
         detail.closed.emit()
         self.assertFalse(view.isHidden())
         # А «BlockCheck» в строке пути ведёт сразу на вкладку.

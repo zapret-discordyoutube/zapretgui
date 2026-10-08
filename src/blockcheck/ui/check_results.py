@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PyQt6.QtCore import QEvent, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter
@@ -27,7 +27,7 @@ from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_group
 from blockcheck.ui.finding_parts import CardsFlow, FindingCard, ServerChip, split_server_list, theme_color
 from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
 from blockcheck.ui.result_cards import finding_detail_card
-from blockcheck.ui.result_cards_model import build_cards, read_finding_parts
+from blockcheck.ui.result_cards_model import Card, FindingParts, Line, Section, build_cards, read_finding_parts
 from blockcheck.ui.brand_icons import BrandIcon, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -45,7 +45,9 @@ ActionHandler = Callable[[str, str], None]
 # Открыть полный отчёт по карточке: получает её ключ («site:youtube», «hostings» …).
 OpenHandler = Callable[[str], None]
 # Открыть страницу на уровень глубже: ключ карточки-родителя и готовый отчёт находки.
-OpenChildHandler = Callable[[str, object], None]
+# Открыть страницу одной находки: ей передают готовый отчёт находки. Страница своя, отдельная —
+# не шаг внутрь отчёта раздела (у того своя карточка ниже и значок в заголовке группы).
+OpenPageHandler = Callable[[object], None]
 
 _LEVEL_ICONS = {
     "ok": ("fa5s.check-circle", "success"),
@@ -466,6 +468,20 @@ def problem_finding_card(problem: dict, parent=None) -> FindingCard:
     )
 
 
+def problem_detail_card(problem: dict) -> Card:
+    """Страница одной находки: что найдено, какие серверы названы, что это значит и что делать."""
+    parts = read_finding_parts(problem.get("parts"))
+    chips = problem.get("chips") or ()
+    if parts is None and chips:
+        # Серверы пришли метками (хостинги с обрывом): на странице они те же, что на карточке.
+        title, _servers, _more, rest, _detail = problem_parts(problem)
+        pairs = tuple((str(name), str(address)) for name, addresses in chips for address in (addresses or [""]))
+        parts = FindingParts(title, pairs, rest)
+    card = finding_detail_card(str(problem.get("text") or ""), str(problem.get("level") or ""), parts)
+    advice = tuple(Line("info", item) for item in _own_advice(problem))
+    return replace(card, sections=(*card.sections, Section("Что делать", advice))) if advice else card
+
+
 class _ProblemRow(QWidget):
     """Находка не про один сайт (DNS, компьютер, сеть, звонки): точка важности, заголовок, пояснение, совет, кнопка.
 
@@ -670,7 +686,7 @@ class _ProblemGroup(ToneGroup):
         *,
         card_key_for: Callable[[dict], str] | None = None,
         on_open: OpenHandler | None = None,
-        on_open_child: OpenChildHandler | None = None,
+        on_open_page: OpenPageHandler | None = None,
     ) -> None:
         info = kind_info(kind)
         # «Остальное» — не вид блокировки, но заголовок и подложка у группы те же:
@@ -742,19 +758,10 @@ class _ProblemGroup(ToneGroup):
             self.findings_flow = CardsFlow(self, min_width=FindingCard.MIN_WIDTH, card_height=FindingCard.HEIGHT)
             for problem in others:
                 card = problem_finding_card(problem, self.findings_flow)
-                if on_open_child is not None and shared_report:
-                    # Карточка открывает свою страницу: полный текст находки, серверы и пояснение.
+                if on_open_page is not None:
+                    # Карточка открывает одну страницу — свою: что найдено, серверы, пояснение и совет.
                     card.set_clickable()
-                    card.clicked.connect(
-                        lambda item=problem, parent_key=key: on_open_child(
-                            parent_key,
-                            finding_detail_card(
-                                str(item.get("text") or ""),
-                                str(item.get("level") or ""),
-                                read_finding_parts(item.get("parts")),
-                            ),
-                        )
-                    )
+                    card.clicked.connect(lambda item=problem: on_open_page(problem_detail_card(item)))
                 self.findings_flow.add(card)
                 self.rows.append(card)
             self.add_widget(self.findings_flow)
@@ -797,12 +804,12 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
         parent=None,
         *,
         on_open: OpenHandler | None = None,
-        on_open_child: OpenChildHandler | None = None,
+        on_open_page: OpenPageHandler | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_action = on_action
         self._on_open = on_open
-        self._on_open_child = on_open_child
+        self._on_open_page = on_open_page
         self._level = "idle"
 
         outer = QVBoxLayout(self)
@@ -1024,7 +1031,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
                 self._problems_host,
                 card_key_for=card_key_for,
                 on_open=self._on_open,
-                on_open_child=self._on_open_child,
+                on_open_page=self._on_open_page,
             )
             for kind, items in group_problems(problems)
         ]

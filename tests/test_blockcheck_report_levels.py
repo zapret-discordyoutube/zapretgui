@@ -297,7 +297,7 @@ class GroupActionsTests(unittest.TestCase):
 
         children = []
         panel = BlockcheckSummaryPanel(
-            on_action=lambda *_args: None, on_open=lambda _key: None, on_open_child=lambda key, child: children.append((key, child))
+            on_action=lambda *_args: None, on_open=lambda _key: None, on_open_page=children.append
         )
         self.addCleanup(panel.deleteLater)
         long = "Обычные DNS-запросы перехватываются по дороге (провайдером или роутером): запросы выполняет одна сеть. Отвечает перехватчик"
@@ -314,10 +314,38 @@ class GroupActionsTests(unittest.TestCase):
         self.assertIn("(провайдером или роутером)", first.hint_text)
         self.assertEqual((second.title, [chip.text for chip in second.server_chips], second.more_label.text()), ("DNS подменяет ответы", ["www.youtube.com", "rutracker.org"], "и ещё 9"))
         QTest.mouseClick(first, Qt.MouseButton.LeftButton)
-        [(key, child)] = children
-        self.assertEqual((key, child.title), ("dns_servers", "Обычные DNS-запросы перехватываются по дороге (провайдером или роутером)"))
+        # Карточка открывает одну страницу — свою, без отчёта раздела перед ней.
+        [child] = children
+        self.assertEqual(child.title, "Обычные DNS-запросы перехватываются по дороге (провайдером или роутером)")
         self.assertEqual(child.sections[0].lines[0].name, long)
-        self.assertEqual(child.sections[-1].title, "Что это значит")
+        self.assertEqual([section.title for section in child.sections[1:]], ["Что это значит"])
+
+    def test_finding_opens_its_own_page_even_without_a_section_report(self) -> None:
+        from blockcheck.ui.check_results import problem_detail_card
+
+        opened = []
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open_page=opened.append)
+        self.addCleanup(panel.deleteLater)
+        cut = {
+            "level": "fail",
+            "kind": "cut16",
+            "action": "strategy",
+            "text": "Обрывается загрузка с зарубежных серверов на 16–20 КБ",
+            "advice": ["Подберите стратегию"],
+            "chips": [("Akamai", ["US.AKM-01"]), ("Contabo", ["DE.CNT-01", "DE.CNT-02"])],
+        }
+        panel.show_report({"problems": [cut]})
+        [group] = panel.problem_groups()
+        # Отчёта раздела «Зарубежные хостинги» в этом итоге нет — страница находки открывается всё равно.
+        self.assertIsNone(group.report_button)
+        QTest.mouseClick(group.rows[0], Qt.MouseButton.LeftButton)
+        [page] = opened
+        self.assertEqual(page, problem_detail_card({**cut, "chips": cut["chips"]}))
+        self.assertEqual(page.title, "Обрывается загрузка с зарубежных серверов на 16–20 КБ")
+        # На странице — те же хостинги, что метками на карточке, со всеми серверами, и совет.
+        servers = next(section for section in page.sections if section.title == "Серверы")
+        self.assertEqual([(line.name, line.text) for line in servers.lines], [("Akamai", "US.AKM-01"), ("Contabo", "DE.CNT-01, DE.CNT-02")])
+        self.assertEqual(page.sections[-1].lines[0].name, "Подберите стратегию")
 
     def test_tile_scrolls_the_page_to_its_group(self) -> None:
         area = QScrollArea()

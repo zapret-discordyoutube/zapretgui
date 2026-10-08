@@ -343,7 +343,8 @@ class BlockcheckPage(BasePage):
             on_action=self._on_problem_action,
             parent=self.content,
             on_open=self._open_card_by_key,
-            on_open_child=self._open_card_child_by_key,
+            # Находка открывает свою страницу, а не шаг внутрь отчёта раздела.
+            on_open_page=self._open_card_detail,
         )
         # Esc закрывает любую подстраницу раздела, где бы ни стоял фокус.
         self._pending_partial = None
@@ -926,16 +927,6 @@ class BlockcheckPage(BasePage):
         if widget is not None:
             self._open_card_detail(widget.card)
 
-    def _open_card_child_by_key(self, key: str, child) -> None:
-        """Нажатие на находку в итоге: отчёт карточки и сразу страница этой находки внутри него."""
-        widget = self._result_cards.card(key)
-        if widget is not None:
-            self._open_card_child(widget.card, child)
-
-    def _open_card_child(self, card, child) -> None:
-        self._open_card_detail(card)
-        self._detail_view.open_child(child)
-
     def _close_subpage(self) -> None:
         """Esc: назад из подробностей карточки, DNS-сервера или отчёта."""
         if self._detail_view is not None and not self._detail_view.isHidden():
@@ -1114,7 +1105,6 @@ class BlockcheckPage(BasePage):
             self._past_check_view = PastCheckView(on_action=self._on_problem_action, parent=self.content)
             self._past_check_view.closed.connect(self._close_over_tabs)
             self._past_check_view.card_opened.connect(self._open_card_detail)
-            self._past_check_view.child_opened.connect(self._open_card_child)
             self._past_check_view.text_opened.connect(self._open_section_text)
             self._past_check_view.setVisible(False)
             self.add_widget(self._past_check_view)

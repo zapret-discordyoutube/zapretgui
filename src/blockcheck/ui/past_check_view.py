@@ -47,10 +47,8 @@ class PastCheckView(QWidget):
     """Одна прошлая проверка: строка пути, итог и карточки."""
 
     closed = pyqtSignal()
-    # Нажали карточку прошлой проверки: её полный отчёт.
+    # Нажали карточку или находку прошлой проверки: её страница.
     card_opened = pyqtSignal(object)
-    # Нажали находку: (карточка-родитель, отчёт находки) — страница на уровень глубже.
-    child_opened = pyqtSignal(object, object)
     # Просят открыть текст отчёта той проверки страницей-редактором: (название, текст).
     text_opened = pyqtSignal(str, str)
     ROOT_KEY = "blockcheck"
@@ -70,7 +68,7 @@ class PastCheckView(QWidget):
         self.note_label.setVisible(False)
         layout.addWidget(self.note_label)
         self.summary = BlockcheckSummaryPanel(
-            on_action=on_action, parent=self, on_open=self._open_card_by_key, on_open_child=self._open_child
+            on_action=on_action, parent=self, on_open=self._open_card_by_key, on_open_page=self.card_opened.emit
         )
         layout.addWidget(self.summary)
         # Текст той проверки лежит в её отчёте; у проверок, сохранённых раньше, его нет.
@@ -117,11 +115,6 @@ class PastCheckView(QWidget):
         widget = self.cards.card(key)
         if widget is not None:
             self.card_opened.emit(widget.card)
-
-    def _open_child(self, key: str, child) -> None:
-        widget = self.cards.card(key)
-        if widget is not None:
-            self.child_opened.emit(widget.card, child)
 
     def _on_breadcrumb(self, key: str) -> None:
         if key == self.ROOT_KEY:
