@@ -104,6 +104,9 @@ def update_blockcheck_tabs_accessibility(pivot, *, current: object | None = None
 # Page
 # ---------------------------------------------------------------------------
 
+# Как часто экран берёт свежий неполный отчёт, пока идёт проверка.
+PARTIAL_REDRAW_MS = 400
+
 class BlockcheckPage(BasePage):
     """BlockCheck — какие сайты открываются и что делать с остальными."""
 
@@ -343,6 +346,10 @@ class BlockcheckPage(BasePage):
             on_open_child=self._open_card_child_by_key,
         )
         # Esc закрывает любую подстраницу раздела, где бы ни стоял фокус.
+        self._pending_partial = None
+        self._partial_timer = QTimer(self)
+        self._partial_timer.setSingleShot(True)
+        self._partial_timer.timeout.connect(self._flush_partial)
         self._escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
         self._escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._escape_shortcut.activated.connect(self._close_subpage)
@@ -730,7 +737,8 @@ class BlockcheckPage(BasePage):
         for widget in self._tab_widgets:
             widget.setVisible(show_blockcheck)
         # Пример экскурсии показывает те же карточки, что и законченная проверка.
-        has_report = self._last_report is not None or self._tour_demo_shown()
+        # Карточки с хода идущей проверки тоже есть что показать.
+        has_report = self._last_report is not None or self._tour_demo_shown() or self._result_cards.has_cards()
         if self._results_card is not None and not has_report:
             self._results_card.setVisible(False)
         if not self._run_runtime.is_running():
@@ -784,6 +792,7 @@ class BlockcheckPage(BasePage):
         self._last_report = None
         self._report_lines = []
         self._summary_panel.set_pending()
+        self._drop_partial()
         self._result_cards.clear()
         self._results_card.setVisible(False)
         scope = self._current_scope()
@@ -810,6 +819,7 @@ class BlockcheckPage(BasePage):
             on_run_log_started=self._on_run_log_started,
             on_finished=self._on_finished,
             on_progress=self._on_progress,
+            on_partial=self._on_partial,
         )
         self._set_status_text(self._status_label.text())
 
@@ -818,12 +828,38 @@ class BlockcheckPage(BasePage):
             return
         self._progress_steps.set_progress(step, done, total)
 
+    def _on_partial(self, report) -> None:
+        """Неполный отчёт по ходу проверки. Их до шестидесяти за прогон, сайты идут пачками —
+        экран обновляется не чаще раза в ``PARTIAL_REDRAW_MS`` и берёт самый свежий."""
+        if self._cleanup_in_progress or not isinstance(report, dict):
+            return
+        self._pending_partial = report
+        if not self._partial_timer.isActive():
+            self._partial_timer.start(PARTIAL_REDRAW_MS)
+
+    def _flush_partial(self) -> None:
+        report, self._pending_partial = self._pending_partial, None
+        if report is None or self._cleanup_in_progress or not self._run_runtime.is_running():
+            return
+        # Пока на экране пример экскурсии, настоящие карточки ждут итога.
+        if self._tour_demo_shown():
+            return
+        self._result_cards.show_partial(report)
+        on_main_tab = self.TAB_ORDER[self._active_tab_index] == self.TAB_BLOCKCHECK
+        self._results_card.setVisible(on_main_tab and not self._tabs_pivot.isHidden() and self._result_cards.has_cards())
+
+    def _drop_partial(self) -> None:
+        self._partial_timer.stop()
+        self._pending_partial = None
+
     def _on_log(self, message: str):
         if self._cleanup_in_progress:
             return
         self._report_lines.append(str(message or ""))
 
     def _on_finished(self, report):
+        # Отложенный неполный отчёт уже не нужен: дальше идёт итог (или остановка).
+        self._drop_partial()
         if self._cleanup_in_progress:
             return
         self._reset_ui()

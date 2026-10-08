@@ -316,6 +316,51 @@ class CardsWidgetsTests(unittest.TestCase):
         self.assertEqual(one.height(), two.height())
         one.grab()
 
+    def test_cards_appear_as_the_check_goes_and_shown_ones_are_not_rebuilt(self) -> None:
+        view = ResultCardsView()
+        self.addCleanup(view.deleteLater)
+        view.resize(900, 600)
+        view.show()
+        first = _service("discord", "Discord", "ok", [_target("discord.com")])
+        second = _service("youtube", "YouTube", "fail", [_target("www.youtube.com", ok=False)])
+        empty = {"partial": True, "services": [], "freeze": None, "voice": None, "system": None}
+        view.show_partial(empty)
+        self.assertFalse(view.has_cards())
+
+        view.show_partial({**empty, "services": [first]})
+        [discord] = view.sites_grid.cards()
+        self.assertTrue(view.has_cards())
+        # Счётчики «что проверено» ждут итога.
+        self.assertEqual(view.counters.tiles(), [])
+
+        view.show_partial({**empty, "services": [first, second]})
+        # Сайт с проблемой встаёт первым; уже показанная карточка — тот же виджет, а не новый.
+        youtube, kept = view.sites_grid.cards()
+        self.assertIs(kept, discord)
+        self.assertEqual(youtube.card.title, "YouTube")
+        self.assertGreater(kept.x(), youtube.x())
+
+        # Сайт перепроверили, и он открылся: его карточка заменилась, соседняя не тронута.
+        fixed = _service("youtube", "YouTube", "ok", [_target("www.youtube.com")])
+        view.show_partial({**empty, "services": [first, fixed]})
+        by_key = {widget.card.key: widget for widget in view.sites_grid.cards()}
+        self.assertIs(by_key["site:discord"], discord)
+        self.assertIsNot(by_key["site:youtube"], youtube)
+        self.assertEqual(by_key["site:youtube"].card.level, "ok")
+
+        # Итог: карточки сайтов остаются те же, добавляются разделы и счётчики.
+        final = {**_REPORT, "services": [first, fixed], "partial": False}
+        view.show_report(final, animate=False)
+        after = {widget.card.key: widget for widget in view.sites_grid.cards()}
+        self.assertIs(after["site:discord"], discord)
+        self.assertIs(after["site:youtube"], by_key["site:youtube"])
+        self.assertTrue(view.checks_grid.cards())
+        self.assertTrue(view.counters.tiles())
+        # Новая проверка начинает с чистого места.
+        view.clear()
+        self.assertFalse(view.has_cards())
+        self.assertEqual(view.sites_grid.cards(), [])
+
     def test_card_shows_few_lines_and_says_how_many_are_hidden(self) -> None:
         view = ResultCardsView()
         self.addCleanup(view.deleteLater)

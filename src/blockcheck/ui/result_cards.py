@@ -670,6 +670,44 @@ class CardsGrid(QWidget):
                 if widget.dots is not None:
                     widget.dots.play()
 
+    def sync_cards(self, cards: list[Card], *, animate: bool = True) -> None:
+        """Приводит сетку к новому набору карточек, не трогая те, что не изменились.
+
+        Так результаты встают по ходу проверки: новая карточка появляется,
+        изменившаяся заменяется на своём месте, остальные стоят как стояли.
+        """
+        old = {widget.card.key: widget for widget in self.cards()}
+        result: list[ResultCard] = []
+        fresh: list[ResultCard] = []
+        for card in cards:
+            widget = old.pop(card.key, None)
+            if widget is not None and widget.card != card:
+                widget.setParent(None)
+                widget.deleteLater()
+                widget = None
+                replaced = True
+            else:
+                replaced = False
+            if widget is None:
+                widget = ResultCard(card, self)
+                widget.opened.connect(self.opened)
+                widget.show()
+                if not replaced:
+                    fresh.append(widget)
+            result.append(widget)
+        for widget in old.values():
+            widget.setParent(None)
+            widget.deleteLater()
+        self._cards = result
+        if not result:
+            self.setFixedHeight(0)
+            return
+        self._place()
+        if animate:
+            # Выплывает только то, чего на экране не было; обновлённая карточка просто меняет текст.
+            for order, widget in enumerate(fresh[:ANIMATED_CARDS]):
+                widget.play(order * 55)
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._place()
@@ -827,6 +865,8 @@ class ResultCardsView(QWidget):
         self.sites_grid.opened.connect(self.opened)
         self.checks_grid.opened.connect(self.opened)
         self._shown: list[Card] = []
+        # Карточки поставлены неполным отчётом по ходу проверки (см. show_partial).
+        self._live = False
         set_control_accessibility(
             self,
             name="Результаты BlockCheck",
@@ -845,24 +885,50 @@ class ResultCardsView(QWidget):
         self.checks_grid.clear()
         self.counters.show_counters([], animate=False)
         self._shown = []
+        self._live = False
         set_state_text(self, "Результаты BlockCheck: пока нет результатов")
+
+    def has_cards(self) -> bool:
+        """Есть ли что показать: итог или карточки с хода идущей проверки."""
+        return bool(self._shown)
+
+    def show_partial(self, report: dict) -> None:
+        """Неполный отчёт по ходу проверки: карточки появляются по мере готовности.
+
+        Счётчики «что проверено» ждут итога: пока проверка идёт, их числа
+        менялись бы каждую секунду.
+        """
+        cards = build_cards(report)
+        if cards == self._shown:
+            return
+        self._live = True
+        self._place_cards(cards, animate=True)
+        set_state_text(self, f"Результаты BlockCheck: проверка идёт, карточек {len(cards)}")
+
+    def _place_cards(self, cards: list[Card], *, animate: bool) -> None:
+        self._shown = cards
+        sites = [card for card in cards if card.site]
+        # Широкая карточка занимает весь ряд: стоя посреди списка, она оставляла перед собой
+        # ряд с одной карточкой и пустотой. Широкие идут первыми, остальные заполняют ряды подряд.
+        checks = sorted((card for card in cards if not card.site), key=lambda card: not card.wide)
+        self.sites_title.setVisible(bool(sites))
+        self.checks_title.setVisible(bool(checks))
+        if self._live:
+            # Карточки уже стоят с хода проверки: меняем только то, что изменилось.
+            self.sites_grid.sync_cards(sites, animate=animate)
+            self.checks_grid.sync_cards(checks, animate=animate)
+        else:
+            self.sites_grid.show_cards(sites, animate=animate)
+            self.checks_grid.show_cards(checks, animate=animate, first_delay_ms=200)
 
     def show_report(self, report: dict, *, animate: bool = True) -> None:
         cards = build_cards(report)
         # Тот же итог показывают повторно (вернулись на страницу): карточки уже стоят, заново не строим.
-        if cards and cards == self._shown:
+        if cards and cards == self._shown and not self._live:
             return
-        self._shown = cards
-        sites = [card for card in cards if card.site]
-        checks = [card for card in cards if not card.site]
         self.counters.show_counters(build_counters(report), animate=animate)
-        self.sites_title.setVisible(bool(sites))
-        self.checks_title.setVisible(bool(checks))
-        self.sites_grid.show_cards(sites, animate=animate)
-        # Широкая карточка занимает весь ряд: стоя посреди списка, она оставляла перед собой
-        # ряд с одной карточкой и пустотой. Широкие идут первыми, остальные заполняют ряды подряд.
-        checks = sorted(checks, key=lambda card: not card.wide)
-        self.checks_grid.show_cards(checks, animate=animate, first_delay_ms=200)
+        self._place_cards(cards, animate=animate)
+        self._live = False
         broken = sum(1 for card in cards if card.level in ("fail", "warn"))
         set_state_text(self, f"Результаты BlockCheck: карточек {len(cards)}, с проблемами {broken}")
 

@@ -123,6 +123,38 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
             "Что проверить BlockCheck: Полная проверка (около минуты), выбран",
         )
 
+    def test_partial_reports_show_cards_during_the_run_with_a_pause_between_redraws(self) -> None:
+        page = _make_page()
+        self.addCleanup(page.deleteLater)
+        service = {"key": "discord", "label": "Discord", "level": "ok", "kind": "", "targets": [{"host": "discord.com", "purpose": "сайт", "ok": True, "state": "ok", "short": "открывается", "text": "открывается"}]}
+        partial = {"partial": True, "services": [service]}
+
+        # Проверка не идёт (отчёт опоздал) — экран не трогаем.
+        page._on_partial(partial)
+        page._flush_partial()
+        self.assertFalse(page._result_cards.has_cards())
+
+        with patch.object(page._run_runtime, "is_running", return_value=True):
+            # Десяток отчётов подряд — одна перерисовка, и берётся самый свежий.
+            with patch.object(page._result_cards, "show_partial", wraps=page._result_cards.show_partial) as shown:
+                for _ in range(10):
+                    page._on_partial({"partial": True, "services": []})
+                page._on_partial(partial)
+                self.assertTrue(page._partial_timer.isActive())
+                shown.assert_not_called()
+                page._partial_timer.stop()
+                page._flush_partial()
+                shown.assert_called_once_with(partial)
+        self.assertTrue(page._result_cards.has_cards())
+        self.assertFalse(page._results_card.isHidden())
+        # Итог панели ждёт конца проверки.
+        self.assertIsNone(page._last_report)
+        # Конец проверки отменяет отложенную перерисовку.
+        page._on_partial(partial)
+        page._on_finished(None)
+        self.assertFalse(page._partial_timer.isActive())
+        self.assertIsNone(page._pending_partial)
+
     def test_cards_have_no_headers_to_save_space(self) -> None:
         page = _make_page()
         self.addCleanup(page.deleteLater)
