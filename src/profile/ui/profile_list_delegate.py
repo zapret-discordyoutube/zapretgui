@@ -28,7 +28,7 @@ from ui.widgets.folder_header import (
     paint_folder_header_row,
 )
 from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
-from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_icon_motion, row_hover_motion
+from ui.widgets.row_hover_motion import attach_row_hover_motion, row_hover_motion
 from ui.widgets.profile_row_style import (
     PROFILE_BADGE_HOSTLIST_BG,
     PROFILE_BADGE_HOSTLIST_FG,
@@ -332,7 +332,6 @@ class ProfileListDelegate(QStyledItemDelegate):
             fill_idle=False,
             show_active_marker=False,
             hover_level=hover_motion.hover_level(index) if live_hover else None,
-            sheen=hover_motion.sheen_progress(index) if live_hover else None,
         )
 
         in_preset = bool(index.data(ProfileListModel.InPresetRole))
@@ -356,21 +355,14 @@ class ProfileListDelegate(QStyledItemDelegate):
             icon_color = str(index.data(ProfileListModel.IconColorRole) or "#888888")
             if not in_preset:
                 icon_color = "#888888"
-            moving = hover_motion is not None and hover_motion.icon_moving(index)
             pixmap = profile_icon_pixmap(
                 str(index.data(ProfileListModel.IconNameRole) or ""),
                 color=icon_color,
-                size=self._ICON_SIZE * (2 if moving else 1),
+                size=self._ICON_SIZE,
                 theme_name=tokens.theme_name,
             )
             if not pixmap.isNull():
-                paint_icon_motion(
-                    painter,
-                    row_layout.icon_rect,
-                    hover_motion,
-                    index,
-                    lambda: painter.drawPixmap(row_layout.icon_rect, pixmap),
-                )
+                painter.drawPixmap(row_layout.icon_rect, pixmap)
 
         painter.setFont(text_font)
         painter.setPen(to_qcolor(tokens.fg if working else tokens.fg_muted, "#f5f5f5"))
@@ -490,7 +482,6 @@ class ProfileListDelegate(QStyledItemDelegate):
             hovered=hovered,
             show_active_marker=False,
             hover_level=hover_motion.hover_level(index) if live_hover else None,
-            sheen=hover_motion.sheen_progress(index) if live_hover else None,
         )
 
         strategy_name = str(index.data(ProfileListModel.StrategyNameRole) or "")
@@ -529,23 +520,14 @@ class ProfileListDelegate(QStyledItemDelegate):
         icon_color = str(index.data(ProfileListModel.IconColorRole) or "#888888")
         if not bool(index.data(ProfileListModel.InPresetRole)):
             icon_color = "#888888"
-        # Пока значок наклоняется, он рисуется из картинки двойного размера:
-        # так при повороте и увеличении края остаются чёткими.
-        moving = hover_motion is not None and hover_motion.icon_moving(index)
         pixmap = profile_icon_pixmap(
             str(index.data(ProfileListModel.IconNameRole) or ""),
             color=icon_color,
-            size=self._ICON_SIZE * (2 if moving else 1),
+            size=self._ICON_SIZE,
             theme_name=tokens.theme_name,
         )
         if not pixmap.isNull():
-            paint_icon_motion(
-                painter,
-                row_layout.icon_rect,
-                hover_motion,
-                index,
-                lambda: painter.drawPixmap(row_layout.icon_rect, pixmap),
-            )
+            painter.drawPixmap(row_layout.icon_rect, pixmap)
 
         painter.setFont(name_font)
         painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))

@@ -14,6 +14,7 @@ from ui.presets_menu import delegate as delegate_module
 from ui.presets_menu.delegate import PresetListDelegate
 from ui.presets_menu.model import PresetListModel, repeated_folder_prefix_length
 from ui.presets_menu.view import LinkedWheelListView
+from ui.widgets.row_hover_motion import row_hover_motion
 
 
 DATE = "05.10.2026 17:46"
@@ -136,12 +137,43 @@ class PresetRowQuietActionsTests(unittest.TestCase):
         self.assertEqual(texts, ["ALL TCP & UDP v1"])
 
     def test_hovered_tile_reveals_pin_and_menu_buttons(self) -> None:
-        icons, texts = self._paint(3, QStyle.StateFlag.State_MouseOver)
+        # «Живые анимации» выключены: кнопки показываются сразу по наведению.
+        with patch("ui.widgets.row_hover_motion.are_live_animations_enabled", return_value=False):
+            icons, texts = self._paint(3, QStyle.StateFlag.State_MouseOver)
 
         self.assertIn("fa5s.thumbtack", icons)
         self.assertIn("fa5s.ellipsis-v", icons)
         # Дата на плитку не выводится: она в подсказке.
         self.assertNotIn(DATE, texts)
+
+    def test_buttons_appear_together_with_the_hover_light(self) -> None:
+        motion = row_hover_motion(self.view)
+        index = self.model.index(4, 0)
+        opacities: dict[str, float] = {}
+
+        def paint_at(level: float) -> list[str]:
+            real_paint = self.delegate._paint_action_icon
+
+            def spy(painter, icon_name, *args, **kwargs):
+                opacities[icon_name] = painter.opacity()
+                return real_paint(painter, icon_name, *args, **kwargs)
+
+            with patch.object(motion, "hover_level", lambda _index: level), patch.object(
+                self.delegate, "_paint_action_icon", spy
+            ):
+                return self._paint(index.row())[1]
+
+        idle_texts = paint_at(0.0)
+        self.assertNotIn("fa5s.ellipsis-v", opacities)
+
+        half_texts = paint_at(0.5)
+        self.assertAlmostEqual(opacities["fa5s.ellipsis-v"], 0.5)
+
+        full_texts = paint_at(1.0)
+        self.assertAlmostEqual(opacities["fa5s.ellipsis-v"], 1.0)
+        # Имя обрезается один раз и при наведении не перескакивает.
+        self.assertEqual(idle_texts, half_texts)
+        self.assertEqual(idle_texts, full_texts)
 
     def test_keyboard_focus_reveals_the_same_buttons(self) -> None:
         icons, _texts = self._paint(3, QStyle.StateFlag.State_HasFocus)

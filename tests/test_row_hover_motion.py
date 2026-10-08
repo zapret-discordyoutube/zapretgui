@@ -65,68 +65,44 @@ class RowHoverMotionTests(unittest.TestCase):
         self.assertIs(attach_row_hover_motion(self.view), self.motion)
         self.assertIs(row_hover_motion(self.view), self.motion)
 
-    def test_hover_fades_in_tilts_icon_and_runs_sheen_after_dwell_then_settles(self) -> None:
+    def test_hover_answers_on_the_first_frames_and_settles_fast(self) -> None:
         self._move_to_row(2)
-        _wait(0.06)
+        _wait(0.03)
 
         level = self.motion.hover_level(self._index(2))
-        self.assertGreater(level, 0.0)
-        self.assertLess(level, 1.0)
-        angle = self.motion.icon_angle(self._index(2))
-        self.assertGreater(angle, 0.3)
-        self.assertLessEqual(angle, motion_module.TILT_PEAK_DEG)
-        self.assertGreater(self.motion.icon_scale(self._index(2)), 1.0)
-        # Блик ждёт, пока мышь задержится на строке.
-        self.assertIsNone(self.motion.sheen_progress(self._index(2)))
+        # Отклик виден сразу: за пару кадров пройдена заметная часть пути.
+        self.assertGreater(level, 0.4)
         self.assertEqual(self.motion.hover_level(self._index(3)), 0.0)
 
         _wait(0.2)
-        self.assertIsNotNone(self.motion.sheen_progress(self._index(2)))
-
-        _wait(0.9)
         self.assertEqual(self.motion.hover_level(self._index(2)), 1.0)
-        self.assertEqual(self.motion.icon_angle(self._index(2)), 0.0)
-        self.assertEqual(self.motion.icon_scale(self._index(2)), 1.0)
-        self.assertIsNone(self.motion.sheen_progress(self._index(2)))
         self.assertFalse(self.motion._timer.isActive())
 
-    def test_quick_pass_over_rows_does_not_flash_sheen(self) -> None:
-        for row in (1, 2, 3, 4):
-            self._move_to_row(row)
-            _wait(0.03)
-        _wait(0.3)
-        for row in (1, 2, 3):
-            self.assertIsNone(self.motion.sheen_progress(self._index(row)))
-        self.assertIsNotNone(self.motion.sheen_progress(self._index(4)))
+    def test_level_moves_without_jumps_when_mouse_turns_back(self) -> None:
+        self.motion._timer.stop()
+        self.motion._hover_row = 2
+        self.motion._levels = {2: 0.6}
+        self.motion._last_tick = time.monotonic() - 0.008
+        self.motion._tick()
+        rising = self.motion.hover_level(self._index(2))
+        self.motion._hover_row = -1
+        self.motion._last_tick = time.monotonic() - 0.008
+        self.motion._tick()
+        falling = self.motion.hover_level(self._index(2))
 
-    def test_sheen_is_not_repeated_right_away_on_the_same_row(self) -> None:
-        self._move_to_row(2)
-        _wait(1.0)
-        self._move_to_row(3)
-        _wait(0.02)
-        self._move_to_row(2)
-        _wait(0.25)
-        self.assertIsNone(self.motion.sheen_progress(self._index(2)))
+        self.assertGreater(rising, 0.6)
+        self.assertLess(falling, rising)
+        # Разворот начинается с того же места, а не с нуля или единицы.
+        self.assertGreater(falling, 0.5)
 
-    def test_icon_is_drawn_smoothly_while_moving(self) -> None:
-        painter = mock.Mock()
-        calls = []
-        motion_module.paint_rotated(painter, QRect(0, 0, 14, 14), 5.0, lambda: calls.append(True), scale=1.05)
-        hints = [call.args for call in painter.setRenderHint.call_args_list]
-        self.assertIn((QPainter.RenderHint.SmoothPixmapTransform, True), hints)
-        painter.rotate.assert_called_once_with(5.0)
-        painter.scale.assert_called_once_with(1.05, 1.05)
-        self.assertEqual(calls, [True])
-
-        still = mock.Mock()
-        motion_module.paint_rotated(still, QRect(0, 0, 14, 14), 0.0, lambda: calls.append(True))
-        still.rotate.assert_not_called()
+    def test_timer_is_precise(self) -> None:
+        self.assertEqual(self.motion._timer.timerType(), Qt.TimerType.PreciseTimer)
 
     def test_leaving_row_fades_out(self) -> None:
         self._move_to_row(2)
-        _wait(0.7)
+        _wait(0.25)
         QApplication.sendEvent(self.view.viewport(), QEvent(QEvent.Type.Leave))
-        _wait(0.08)
+        _wait(0.03)
 
         level = self.motion.hover_level(self._index(2))
         self.assertGreater(level, 0.0)
@@ -140,7 +116,6 @@ class RowHoverMotionTests(unittest.TestCase):
         _wait(0.06)
 
         self.assertEqual(self.motion.hover_level(self._index(0)), 0.0)
-        self.assertEqual(self.motion.icon_angle(self._index(0)), 0.0)
         self.assertFalse(self.motion._timer.isActive())
 
     def test_live_animations_off_keeps_instant_hover(self) -> None:
@@ -148,7 +123,6 @@ class RowHoverMotionTests(unittest.TestCase):
             self._move_to_row(2)
             _wait(0.06)
             self.assertIsNone(self.motion.hover_level(self._index(2)))
-            self.assertEqual(self.motion.icon_angle(self._index(2)), 0.0)
             self.assertFalse(self.motion._timer.isActive())
 
     def test_hover_level_blends_row_background(self) -> None:
@@ -161,7 +135,6 @@ class RowHoverMotionTests(unittest.TestCase):
             instant = paint_profile_hover_row(painter, rect, hovered=True, hover_level=None).background
             half = paint_profile_hover_row(painter, rect, hovered=True, hover_level=0.5).background
             pressed = paint_profile_hover_row(painter, rect, pressed=True, hover_level=0.0).background
-            paint_profile_hover_row(painter, rect, hovered=True, hover_level=1.0, sheen=0.4)
         finally:
             painter.end()
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import QEvent, QModelIndex, QRect, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFontMetrics, QHelpEvent, QMouseEvent, QPainter, QPen, QTransform
+from PyQt6.QtGui import QBrush, QColor, QFontMetrics, QHelpEvent, QLinearGradient, QMouseEvent, QPainter, QPen, QTransform
 from PyQt6.QtWidgets import QApplication, QListView, QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
 from ui.theme import get_theme_tokens
@@ -11,7 +11,7 @@ from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
 from ui.widgets.active_row_motion import active_row_motion
 from ui.widgets.hover_row import paint_profile_hover_row
-from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_icon_motion, row_hover_motion
+from ui.widgets.row_hover_motion import attach_row_hover_motion, row_hover_motion
 
 from .common import (
     PRESET_DROP_MARKER_PROPERTY,
@@ -46,6 +46,7 @@ class PresetListDelegate(QStyledItemDelegate):
     _MARK_GAP = 6
     # Место справа от имени под пометки (оценка, булавка, облако).
     _MARKS_SPACE = 40
+    _NAME_FADE_WIDTH = 18
     _RATING_STAR_GAP = 4
     _RATING_STAR_COLOR = "#d9a441"
 
@@ -506,18 +507,18 @@ class PresetListDelegate(QStyledItemDelegate):
         focused = bool(option.state & QStyle.StateFlag.State_HasFocus)
         pressed = self._pressed_row == index.row()
         file_name = str(index.data(PresetListModel.FileNameRole) or "")
-        # Кнопки не шумят на всём списке: они видны только на плитке под
-        # мышью или с клавиатурным фокусом.
-        revealed = (
-            bool(hovered)
-            or focused
-            or pressed
-            or (self._pending_destructive is not None and self._pending_destructive[0] == file_name)
-        )
-
         motion = active_row_motion(self._view)
         hover_motion = row_hover_motion(self._view)
         live_hover = hover_motion is not None and not focused
+        hover_level = hover_motion.hover_level(index) if live_hover else None
+        # Кнопки не шумят на всём списке: они проявляются только на плитке
+        # под мышью или с клавиатурным фокусом — вместе с подсветкой плитки.
+        if focused or pressed or (self._pending_destructive is not None and self._pending_destructive[0] == file_name):
+            reveal = 1.0
+        elif hover_level is not None:
+            reveal = hover_level
+        else:
+            reveal = 1.0 if hovered else 0.0
         row_paint = paint_profile_hover_row(
             painter,
             rect,
@@ -527,8 +528,7 @@ class PresetListDelegate(QStyledItemDelegate):
             show_active_marker=False,
             active_reveal=motion.row_reveal(index) if motion is not None else None,
             residual_active=motion.row_residual(index) if motion is not None else 0.0,
-            hover_level=hover_motion.hover_level(index) if live_hover else None,
-            sheen=hover_motion.sheen_progress(index) if live_hover else None,
+            hover_level=hover_level,
         )
         bg = row_paint.background
 
@@ -548,13 +548,7 @@ class PresetListDelegate(QStyledItemDelegate):
             icon_name = "fa5s.file-alt"
             wanted_color = normalize_preset_icon_color(str(index.data(PresetListModel.IconColorRole) or ""))
         icon_color = pick_contrast_color(wanted_color, bg, [tokens.accent_hex, tokens.fg], minimum_ratio=2.6)
-        paint_icon_motion(
-            painter,
-            icon_rect,
-            hover_motion,
-            index,
-            lambda: cached_icon(icon_name, icon_color).paint(painter, icon_rect),
-        )
+        cached_icon(icon_name, icon_color).paint(painter, icon_rect)
 
         text_left = icon_rect.right() + self._ICON_GAP
         center_y = rect.center().y()
@@ -564,24 +558,24 @@ class PresetListDelegate(QStyledItemDelegate):
         meta_metrics = QFontMetrics(meta_font)
 
         # Справа от имени: под мышью — кнопки, иначе — постоянные пометки.
+        # Имя обрезается один раз, по месту в покое, и при наведении не
+        # «прыгает»: кнопки проявляются поверх, а хвост имени под ними тает.
         right_cursor = rect.right() - self._TILE_PADDING
         rating_rect = QRect()
         pin_mark_rect = QRect()
-        if revealed:
-            right_cursor = actions[0][1].left() - self._MARK_GAP
-        else:
-            if is_pinned:
-                pin_mark_rect = QRect(
-                    right_cursor - self._MARK_SIZE + 1,
-                    center_y - self._MARK_SIZE // 2,
-                    self._MARK_SIZE,
-                    self._MARK_SIZE,
-                )
-                right_cursor = pin_mark_rect.left() - self._MARK_GAP
-            if rating:
-                rating_width = self._MARK_SIZE + self._RATING_STAR_GAP + meta_metrics.horizontalAdvance(str(rating))
-                rating_rect = QRect(right_cursor - rating_width + 1, center_y - 9, rating_width, 18)
-                right_cursor = rating_rect.left() - self._MARK_GAP
+        if is_pinned:
+            pin_mark_rect = QRect(
+                right_cursor - self._MARK_SIZE + 1,
+                center_y - self._MARK_SIZE // 2,
+                self._MARK_SIZE,
+                self._MARK_SIZE,
+            )
+            right_cursor = pin_mark_rect.left() - self._MARK_GAP
+        if rating:
+            rating_width = self._MARK_SIZE + self._RATING_STAR_GAP + meta_metrics.horizontalAdvance(str(rating))
+            rating_rect = QRect(right_cursor - rating_width + 1, center_y - 9, rating_width, 18)
+            right_cursor = rating_rect.left() - self._MARK_GAP
+        actions_left = actions[0][1].left() - self._MARK_GAP
 
         name_rect = QRect(text_left, center_y - 10, max(0, right_cursor - text_left), 20)
         name_font = painter.font()
@@ -589,13 +583,26 @@ class PresetListDelegate(QStyledItemDelegate):
         painter.setFont(name_font)
         name_metrics = QFontMetrics(name_font)
         elided_name = name_metrics.elidedText(name, Qt.TextElideMode.ElideRight, name_rect.width())
-        painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
+        name_end = name_rect.left() + name_metrics.horizontalAdvance(elided_name)
+        name_color = to_qcolor(tokens.fg, "#f5f5f5")
+        # Край, за которым имя уже не видно: в покое — конец строки, при
+        # наведении он плавно подъезжает к кнопкам.
+        name_limit = name_rect.right() + (actions_left - name_rect.right()) * reveal
+        if reveal > 0.0 and name_end > name_limit:
+            clear = QColor(name_color)
+            clear.setAlpha(0)
+            fade = QLinearGradient(name_limit - self._NAME_FADE_WIDTH, 0.0, name_limit, 0.0)
+            fade.setColorAt(0.0, name_color)
+            fade.setColorAt(1.0, clear)
+            painter.setPen(QPen(QBrush(fade), 1))
+        else:
+            painter.setPen(name_color)
         painter.drawText(name_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), elided_name)
 
         if bool(index.data(PresetListModel.RemoteRole)):
             remote_state = str(index.data(PresetListModel.RemoteStateRole) or "")
             cloud_left = name_rect.left() + name_metrics.horizontalAdvance(elided_name) + 6
-            if cloud_left + 14 <= name_rect.right():
+            if cloud_left + 14 <= min(name_rect.right(), name_limit):
                 cloud_color = tokens.fg_faint
                 if remote_state in ("detached", "error"):
                     try:
@@ -609,7 +616,11 @@ class PresetListDelegate(QStyledItemDelegate):
 
         meta_font.setBold(False)
         painter.setFont(meta_font)
-        if rating_rect.isValid():
+        # Пометки уступают место кнопкам и гаснут вдвое быстрее, чем те
+        # проявляются: друг сквозь друга они не просвечивают.
+        marks_opacity = max(0.0, 1.0 - reveal * 2.0)
+        painter.setOpacity(marks_opacity)
+        if rating_rect.isValid() and marks_opacity > 0.0:
             star_rect = QRect(
                 rating_rect.left(),
                 rating_rect.center().y() - self._MARK_SIZE // 2,
@@ -623,10 +634,11 @@ class PresetListDelegate(QStyledItemDelegate):
                 int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                 str(rating),
             )
-        if pin_mark_rect.isValid():
+        if pin_mark_rect.isValid() and marks_opacity > 0.0:
             self._paint_action_icon(painter, "fa5s.thumbtack", str(tokens.accent_hex), pin_mark_rect)
 
-        for action, action_rect in actions if revealed else ():
+        painter.setOpacity(reveal)
+        for action, action_rect in actions if reveal > 0.0 else ():
             btn_bg = to_qcolor(tokens.surface_bg_hover, tokens.surface_bg)
             if action == "pin" and is_pinned:
                 icon_color = str(tokens.accent_hex)
