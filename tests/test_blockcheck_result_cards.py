@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from blockcheck.ui.page import SCOPE_FULL, BlockcheckPage
 from blockcheck.ui.result_cards import (
@@ -264,8 +264,17 @@ class CardsWidgetsTests(unittest.TestCase):
         view.show_report(many, animate=False)
 
         card = view.card("system")
-        self.assertEqual(len(card.rows), PREVIEW_LINES)
-        self.assertIn("и ещё 3", card.more_label.text())
+        self.assertEqual(len(card.shown_lines()), PREVIEW_LINES)
+        self.assertIn("и ещё 3", card.more_text())
+        # Карточку рисует один виджет: надписей-виджетов на каждую строку в ней нет.
+        self.assertEqual(card.findChildren(QWidget), [])
+        self.assertEqual(card.height_for(330), card.heightForWidth(330))
+        self.assertGreater(card.height_for(330), PREVIEW_LINES * card.LINE)
+        card.resize(330, card.height_for(330))
+        card.grab()
+        # Тот же итог повторно (вернулись на страницу) карточки не пересобирает.
+        view.show_report(many, animate=False)
+        self.assertIs(view.card("system"), card)
         self.assertEqual(card.accessibleName(), f"Этот компьютер: В порядке: {PREVIEW_LINES + 3} из {PREVIEW_LINES + 3}")
 
     def test_click_and_enter_open_the_card(self) -> None:

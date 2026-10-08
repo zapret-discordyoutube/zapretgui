@@ -25,8 +25,9 @@ import re
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPixmap
 from PyQt6.QtWidgets import QAbstractScrollArea, QGridLayout, QHBoxLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout, QWidget
+from qfluentwidgets.common.font import getFont
 from qfluentwidgets import (
     BodyLabel,
     BreadcrumbBar,
@@ -39,7 +40,7 @@ from qfluentwidgets import (
 )
 
 from blockcheck.ui.block_kinds_view import kind_color
-from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
+from blockcheck.ui.brand_icons import BrandIcon, named_brand, readable_color, site_brand
 from blockcheck.ui.finding_parts import CardsFlow, FindingCard, split_finding, split_server_list
 from blockcheck.ui.server_matrix import ServerMatrix, ServiceSummary, cell_state, parse_server_table
 from blockcheck.ui.result_cards_model import (
@@ -65,7 +66,7 @@ from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
 from ui.widgets.hover_hint import HoverHint
 from ui.widgets.share_bar import ShareBar
 from ui.widgets.stagger_float_in import float_in
-from ui.widgets.tone_group import ToneDot, dot_on_first_line, mute
+from ui.widgets.tone_group import ToneDot, dot_on_first_line, mute, paint_dot
 
 CARD_RADIUS = 8
 GRID_GAP = 10
@@ -334,9 +335,27 @@ class HostingDots(QWidget):
 
 
 class ResultCard(QWidget):
-    """Карточка одной проверки. Нажатие (или Enter) открывает подробности."""
+    """Карточка одной проверки. Нажатие (или Enter) открывает подробности.
+
+    Всё на карточке — значок, название, слово итога, строки и метки — рисует
+    она сама за один проход. Раньше на каждую надпись был свой виджет: сетка из
+    сорока карточек — это шестьсот виджетов, и её показ подвешивал окно.
+    """
 
     opened = pyqtSignal(object)
+
+    PAD_X = 14
+    PAD_Y = 12
+    ICON = 22
+    HEADER = 36
+    HEADER_GAP = 12
+    LINE = 19
+    LINE_GAP = 6
+    MORE = 16
+    CHIP = 20
+    CHIP_PAD = 7
+    CHIP_GAP_X = 6
+    CHIP_GAP_Y = 4
 
     def __init__(self, card: Card, parent=None) -> None:
         super().__init__(parent)
@@ -349,64 +368,21 @@ class ResultCard(QWidget):
 
         self._surface = QColor(255, 255, 255, 10)
         self._surface_hover = QColor(255, 255, 255, 18)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(6)
-
-        header = QHBoxLayout()
-        header.setSpacing(11)
+        self._title_font = getFont(14, QFont.Weight.DemiBold)
+        self._text_font = getFont(12)
+        self._text_metrics = QFontMetrics(self._text_font)
         # Логотип сайта — в фирменном цвете; у остальных проверок значок нейтральный.
         brand = site_brand(card.key.removeprefix("site:"), card.title) if card.site else None
-        self._icon = BrandIcon(brand.icon if brand else card.icon, brand.color if brand else "", self, size=22)
-        header.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
-        # Слово результата стоит под названием, а не рядом: так оба текста видны целиком.
-        titles = QVBoxLayout()
-        titles.setSpacing(1)
-        self.title_label = _ElidedLabel(card.title, self, strong=True)
-        titles.addWidget(self.title_label)
-        status_row = QHBoxLayout()
-        status_row.setSpacing(6)
-        self._status_dot = ToneDot(
-            lambda tokens: card_color(card, tokens), self, size=7, hollow=card.level in _HOLLOW_STATES
-        )
-        status_row.addWidget(self._status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.status_label = _ElidedLabel(card.status, self)
-        status_row.addWidget(self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
-        titles.addLayout(status_row)
-        header.addLayout(titles, 1)
-        root.addLayout(header)
-        root.addSpacing(2)
-
-        self.rows = [_LineRow(line, self) for line in card.lines[:PREVIEW_LINES]]
-        for row in self.rows:
-            root.addWidget(row)
-        self.more_label: CaptionLabel | None = None
-        hidden = len(card.lines) - len(self.rows)
-        if hidden > 0:
-            self.more_label = mute(CaptionLabel(f"и ещё {hidden} — нажмите, чтобы увидеть всё", self))
-            root.addWidget(self.more_label)
+        self._icon_name = brand.icon if brand else card.icon
+        self._icon_color = brand.color if brand else ""
+        self._icon = QPixmap()
+        self._lines = tuple(card.lines[:PREVIEW_LINES])
+        hidden = len(card.lines) - len(self._lines)
+        self._more = f"и ещё {hidden} — нажмите, чтобы увидеть всё" if hidden > 0 else ""
 
         self.dots: HostingDots | None = None
         if card.dots:
             self.dots = HostingDots(card.dots, self)
-            root.addWidget(self.dots)
-
-        self.chip_labels: list[QLabel] = []
-        if card.chips:
-            chips = QWidget(self)
-            flow = FlowLayout(chips, needAni=False)
-            flow.setContentsMargins(0, 2, 0, 0)
-            flow.setHorizontalSpacing(6)
-            flow.setVerticalSpacing(4)
-            for text, state in card.chips:
-                chip = QLabel(text, chips)
-                chip.setFixedHeight(20)
-                chip.setProperty("chipState", state)
-                flow.addWidget(chip)
-                self.chip_labels.append(chip)
-            root.addWidget(chips)
-        root.addStretch(1)
 
         set_control_accessibility(
             self,
@@ -418,6 +394,75 @@ class ResultCard(QWidget):
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
         self._apply_theme_refresh()
 
+    def icon_name(self) -> str:
+        return self._icon_name
+
+    def brand_color(self) -> str:
+        return self._icon_color
+
+    def shown_lines(self) -> tuple[Line, ...]:
+        """Строки, которые видны на карточке; остальные — в подробностях."""
+        return self._lines
+
+    def more_text(self) -> str:
+        return self._more
+
+    def shown_header(self) -> tuple[str, str]:
+        """Название и слово итога так, как они видны при текущей ширине (с многоточием, если не влезли)."""
+        width = max(8, self.width() - self.PAD_X * 2 - self.ICON - 11)
+        title = QFontMetrics(self._title_font).elidedText(self.card.title, Qt.TextElideMode.ElideRight, width)
+        status = self._text_metrics.elidedText(self.card.status, Qt.TextElideMode.ElideRight, max(8, width - 13))
+        return title, status
+
+    def _chip_rects(self, width: int, top: float) -> list[QRectF]:
+        """Места меток: в ряд, с переносом на новую строку, когда ряд кончился."""
+        rects: list[QRectF] = []
+        left, right = self.PAD_X, width - self.PAD_X
+        x, y = float(left), float(top)
+        for text, _state in self.card.chips:
+            chip = min(self._text_metrics.horizontalAdvance(text) + self.CHIP_PAD * 2, right - left)
+            if x > left and x + chip > right:
+                x, y = float(left), y + self.CHIP + self.CHIP_GAP_Y
+            rects.append(QRectF(x, y, chip, self.CHIP))
+            x += chip + self.CHIP_GAP_X
+        return rects
+
+    def _places(self, width: int) -> tuple[float, float, float, list[QRectF], int]:
+        """Где что стоит при такой ширине: верх строк, надписи «и ещё», точек, места меток и высота карточки."""
+        y = float(self.PAD_Y + self.HEADER)
+        lines_top = y + self.HEADER_GAP if self._lines else y
+        if self._lines:
+            y = lines_top + len(self._lines) * (self.LINE + self.LINE_GAP) - self.LINE_GAP
+        more_top = y + self.LINE_GAP
+        if self._more:
+            y = more_top + self.MORE
+        dots_top = y + self.LINE_GAP
+        if self.dots is not None:
+            y = dots_top + self.dots.heightForWidth(max(1, width - self.PAD_X * 2))
+        chips = self._chip_rects(width, y + self.LINE_GAP + 2) if self.card.chips else []
+        if chips:
+            y = chips[-1].bottom()
+        return lines_top, more_top, dots_top, chips, int(y + self.PAD_Y)
+
+    def height_for(self, width: int) -> int:
+        return self._places(width)[4]
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        return self.height_for(width)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        width = max(240, self.width())
+        return QSize(width, self.height_for(width))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self.dots is not None:
+            inner = max(1, self.width() - self.PAD_X * 2)
+            self.dots.setGeometry(self.PAD_X, int(self._places(self.width())[2]), inner, self.dots.heightForWidth(inner))
+
     def play(self, delay_ms: int = 0) -> None:
         """Карточка выплывает, а точки хостингов проявляются."""
         float_in(self, delay_ms=delay_ms)
@@ -427,18 +472,19 @@ class ResultCard(QWidget):
     def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
         _ = force
         self._color = QColor(card_color(self.card, tokens))
-        self.status_label.setTextColor(self._color, self._color)
-        for chip in self.chip_labels:
-            state = str(chip.property("chipState") or "info")
-            chip.setStyleSheet(
-                _chip_style(state_color(state, tokens) if state in _LOUD_CHIPS else _muted_text(tokens), tokens)
-            )
+        self._light = _is_light(tokens)
         try:
+            from profile.ui.profile_icon import profile_icon_pixmap
             from ui.theme import get_theme_tokens, to_qcolor
 
             tokens = tokens or get_theme_tokens()
             self._surface = to_qcolor(tokens.surface_bg, "#0affffff")
             self._surface_hover = to_qcolor(tokens.surface_bg_hover, "#12ffffff")
+            if self._icon_color:
+                color = readable_color(self._icon_color, light_theme=bool(tokens.is_light))
+            else:
+                color = str(tokens.icon_fg_muted)
+            self._icon = profile_icon_pixmap(self._icon_name, color=color, size=self.ICON)
         except Exception:
             pass
         self.update()
@@ -446,10 +492,72 @@ class ResultCard(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self._surface_hover if self._hover or self.hasFocus() else self._surface)
         painter.drawRoundedRect(self.rect(), CARD_RADIUS, CARD_RADIUS)
+
+        light = self._light
+        text = QColor(0, 0, 0, 228) if light else QColor(255, 255, 255, 235)
+        muted = QColor(0, 0, 0, 158) if light else QColor(255, 255, 255, 158)
+        left_flag = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        left, right = self.PAD_X, self.width() - self.PAD_X
+        top = self.PAD_Y
+        if not self._icon.isNull():
+            painter.drawPixmap(left, top + (self.HEADER - self.ICON) // 2, self.ICON, self.ICON, self._icon)
+        # Слово результата стоит под названием, а не рядом: так оба текста видны целиком.
+        titles_left = left + self.ICON + 11
+        titles_width = max(8, right - titles_left)
+        title, status = self.shown_header()
+        painter.setFont(self._title_font)
+        painter.setPen(text)
+        painter.drawText(QRectF(titles_left, top, titles_width, 19), left_flag, title)
+        paint_dot(
+            painter, QRectF(titles_left, top + 25, 7, 7), self._color, hollow=self.card.level in _HOLLOW_STATES
+        )
+        metrics = self._text_metrics
+        painter.setFont(self._text_font)
+        painter.setPen(self._color)
+        painter.drawText(QRectF(titles_left + 13, top + 20, max(8, titles_width - 13), 17), left_flag, status)
+
+        lines_top, more_top, _dots_top, chips, _height = self._places(self.width())
+        inner = max(8, right - left - 14)
+        for order, line in enumerate(self._lines):
+            row_top = lines_top + order * (self.LINE + self.LINE_GAP)
+            paint_dot(
+                painter,
+                QRectF(left, row_top + (self.LINE - 7) / 2, 7, 7),
+                QColor(state_color(line.state)),
+                hollow=line.state in _HOLLOW_STATES,
+            )
+            # Название — целиком, сколько есть места; сокращается пояснение справа.
+            name_width = min(inner, metrics.horizontalAdvance(line.name) + 2) if line.text else inner
+            painter.setPen(text)
+            painter.drawText(
+                QRectF(left + 14, row_top, name_width, self.LINE),
+                left_flag,
+                metrics.elidedText(line.name, Qt.TextElideMode.ElideRight, int(name_width)),
+            )
+            rest = inner - name_width - 10
+            if line.text and rest > 16:
+                painter.setPen(muted)
+                painter.drawText(
+                    QRectF(left + 14 + name_width + 10, row_top, rest, self.LINE),
+                    int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                    metrics.elidedText(line.text, Qt.TextElideMode.ElideRight, int(rest)),
+                )
+        if self._more:
+            painter.setPen(muted)
+            painter.drawText(QRectF(left, more_top, right - left, self.MORE), left_flag, self._more)
+        back = QColor(0, 0, 0, 13) if light else QColor(255, 255, 255, 15)
+        for (label, state), rect in zip(self.card.chips, chips):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(back)
+            painter.drawRoundedRect(rect, 4, 4)
+            # Метка говорит о проблеме — её текст в цвете состояния; остальные приглушены.
+            painter.setPen(QColor(state_color(state)) if state in _LOUD_CHIPS else muted)
+            inside = rect.adjusted(self.CHIP_PAD, 0, -self.CHIP_PAD, 0)
+            painter.drawText(inside, left_flag, metrics.elidedText(label, Qt.TextElideMode.ElideRight, int(inside.width())))
         painter.end()
 
     def event(self, event) -> bool:
@@ -552,10 +660,7 @@ class CardsGrid(QWidget):
 
     @staticmethod
     def _card_height(widget: ResultCard, width: int) -> int:
-        layout = widget.layout()
-        if layout is not None and layout.hasHeightForWidth():
-            return max(layout.totalHeightForWidth(width), layout.totalMinimumSize().height())
-        return widget.sizeHint().height()
+        return widget.height_for(width)
 
 
 class _CounterTile(QWidget):
@@ -668,6 +773,7 @@ class ResultCardsView(QWidget):
         layout.addWidget(self.checks_grid)
         self.sites_grid.opened.connect(self.opened)
         self.checks_grid.opened.connect(self.opened)
+        self._shown: list[Card] = []
         set_control_accessibility(
             self,
             name="Результаты BlockCheck",
@@ -685,10 +791,15 @@ class ResultCardsView(QWidget):
         self.sites_grid.clear()
         self.checks_grid.clear()
         self.counters.show_counters([], animate=False)
+        self._shown = []
         set_state_text(self, "Результаты BlockCheck: пока нет результатов")
 
     def show_report(self, report: dict, *, animate: bool = True) -> None:
         cards = build_cards(report)
+        # Тот же итог показывают повторно (вернулись на страницу): карточки уже стоят, заново не строим.
+        if cards and cards == self._shown:
+            return
+        self._shown = cards
         sites = [card for card in cards if card.site]
         checks = [card for card in cards if not card.site]
         self.counters.show_counters(build_counters(report), animate=animate)
@@ -920,54 +1031,126 @@ class _CountLabel(StrongBodyLabel):
             self._anim.start()
 
 
-class _ReportRow(QWidget):
-    """Строка отчёта как в таблице: значок, что измеряли (столбец одной ширины) и что получилось."""
+class RowsTable(QWidget):
+    """Строки раздела отчёта, которые рисует один виджет: значок, что измеряли и что получилось.
 
-    def __init__(self, line: Line, icon: str, name_width: int, parent=None, *, divided: bool = False) -> None:
+    Раньше строка была четырьмя виджетами с надписями, и отчёт сайта из
+    тридцати строк строился заметную долю секунды. Здесь строки — просто текст
+    с переносом: высота каждой считается по ширине окна.
+    """
+
+    PAD = 7
+    MARK = 16
+    GAP = 10
+    MIN_ROW = 20
+
+    def __init__(self, lines, icons: list[str], name_width: int, parent=None) -> None:
         super().__init__(parent)
-        self.line = line
-        self._divided = divided
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 7, 0, 7)
-        layout.setSpacing(10)
-
-        state = line.state
-        holder = QWidget(self)
-        holder.setFixedSize(16, 20)
-        if icon:
-            self.marker = _StateIcon(state, holder, size=13, icon=icon)
-            self.marker.move(0, 2)
-        else:
-            self.marker = ToneDot(lambda tokens: state_color(state, tokens), holder, size=7, hollow=state in _HOLLOW_STATES)
-            self.marker.move(4, 6)
-        layout.addWidget(holder, 0, Qt.AlignmentFlag.AlignTop)
-
-        self.name_label = BodyLabel(line.name, self)
-        self.name_label.setWordWrap(True)
-        self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.text_label: BodyLabel | None = None
-        if line.text:
-            # «Что измеряли» — приглушённо и в столбец, «что получилось» — основным цветом.
-            mute(self.name_label)
-            self.name_label.setFixedWidth(name_width)
-            layout.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignTop)
-            self.text_label = BodyLabel(line.text, self)
-            self.text_label.setWordWrap(True)
-            self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            layout.addWidget(self.text_label, 1, Qt.AlignmentFlag.AlignTop)
-        else:
-            layout.addWidget(self.name_label, 1, Qt.AlignmentFlag.AlignTop)
-        set_state_text(self, f"{line.name}: {line.text}" if line.text else line.name)
+        self._lines = tuple(lines)
+        self._icons = list(icons)
+        self._name_width = int(name_width)
+        self._font = getFont(14)
+        self._metrics = QFontMetrics(self._font)
+        self._tops: list[tuple[float, float]] = []
+        self._placed_for = -1
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+        set_state_text(self, "; ".join(f"{line.name}: {line.text}" if line.text else line.name for line in self._lines))
+
+    def lines(self) -> tuple:
+        return self._lines
+
+    def name_width(self) -> int:
+        return self._name_width
+
+    def text_left(self) -> int:
+        """Где начинается столбец значений: одна линия у всех строк раздела."""
+        return self.MARK + self.GAP + self._name_width + self.GAP
+
+    def _wrap_flags(self) -> int:
+        return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap)
+
+    def _text_height(self, text: str, width: int) -> int:
+        return self._metrics.boundingRect(QRect(0, 0, max(40, width), 100000), self._wrap_flags(), text).height()
+
+    def _place(self, width: int) -> list[tuple[float, float]]:
+        if width == self._placed_for:
+            return self._tops
+        tops: list[tuple[float, float]] = []
+        y = 0.0
+        for line in self._lines:
+            if line.text:
+                height = max(
+                    self._text_height(line.name, self._name_width),
+                    self._text_height(line.text, width - self.text_left()),
+                )
+            else:
+                height = self._text_height(line.name, width - self.MARK - self.GAP)
+            height = max(self.MIN_ROW, height) + self.PAD * 2
+            tops.append((y, float(height)))
+            y += height
+        self._tops, self._placed_for = tops, width
+        return tops
+
+    def row_rect(self, index: int) -> QRectF:
+        top, height = self._place(self.width())[index]
+        return QRectF(0, top, self.width(), height)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        tops = self._place(width)
+        return int(tops[-1][0] + tops[-1][1]) if tops else 0
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        width = max(240, self.width())
+        return QSize(width, self.heightForWidth(width))
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(160, self.MIN_ROW + self.PAD * 2)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        height = self.heightForWidth(self.width())
+        if height != self.minimumHeight() or height != self.maximumHeight():
+            self.setFixedHeight(height)
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        _ = event
-        if not self._divided:
-            return
         painter = QPainter(self)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 20) if _is_light() else QColor(255, 255, 255, 18))
-        painter.drawRect(0, 0, self.width(), 1)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
+        light = _is_light()
+        text = QColor(0, 0, 0, 228) if light else QColor(255, 255, 255, 235)
+        muted = QColor(0, 0, 0, 158) if light else QColor(255, 255, 255, 158)
+        divider = QColor(0, 0, 0, 20) if light else QColor(255, 255, 255, 18)
+        painter.setFont(self._font)
+        flags = self._wrap_flags()
+        width = self.width()
+        for (top, height), line, icon in zip(self._place(width), self._lines, self._icons):
+            if top > event.rect().bottom() or top + height < event.rect().top():
+                continue
+            painter.fillRect(QRectF(0, top, width, 1), divider)
+            color = QColor(state_color(line.state))
+            y = top + self.PAD
+            if icon:
+                try:
+                    painter.drawPixmap(0, int(y + 3), 13, 13, get_cached_qta_pixmap(icon, color=color.name(), size=13))
+                except Exception:
+                    pass
+            else:
+                paint_dot(painter, QRectF(4, y + 6, 7, 7), color, hollow=line.state in _HOLLOW_STATES)
+            left = self.MARK + self.GAP
+            if line.text:
+                # «Что измеряли» — приглушённо и в столбец, «что получилось» — основным цветом.
+                painter.setPen(muted)
+                painter.drawText(QRectF(left, y, self._name_width, height), flags, line.name)
+                painter.setPen(text)
+                painter.drawText(QRectF(self.text_left(), y, width - self.text_left(), height), flags, line.text)
+            else:
+                painter.setPen(text)
+                painter.drawText(QRectF(left, y, width - left, height), flags, line.name)
         painter.end()
 
 
@@ -1355,6 +1538,7 @@ class _SectionBlock(QWidget):
         name_width = max(NAME_COLUMN_MIN, min(NAME_COLUMN_MAX, widest + 12))
         # Перечень серверов — сеткой карточек одним виджетом; остальное — строками таблицы.
         self.grid: TilesGrid | None = None
+        self.table: RowsTable | None = None
         self.rows: list = []
         self.findings_flow: CardsFlow | None = None
         if tiles:
@@ -1379,11 +1563,9 @@ class _SectionBlock(QWidget):
             layout.addWidget(self.findings_flow)
             layout.addSpacing(6)
         else:
-            self.rows = [
-                _ReportRow(line, line_icon(line, section), name_width, self, divided=True) for line in section.lines
-            ]
-            for row in self.rows:
-                layout.addWidget(row)
+            # Строки рисует один виджет: строка-виджет на каждое измерение делала отчёт тяжёлым.
+            self.table = RowsTable(section.lines, [line_icon(line, section) for line in section.lines], name_width, self)
+            layout.addWidget(self.table)
         # Длинный текст (таблица серверов, узлы по дороге) — в редакторе с подсветкой и своей
         # прокруткой. Одной надписью на сотни строк он перерисовывался целиком при каждой
         # прокрутке страницы, и страница заметно тормозила.
@@ -1677,7 +1859,12 @@ class ResultDetailView(QWidget):
 
     def show_card(self, card: Card, *, parent_title: str = "") -> None:
         """``parent_title`` — промежуточный шаг строки пути: прошлая проверка, из которой открыт отчёт."""
-        self._parent_title = str(parent_title or "")
+        parent_title = str(parent_title or "")
+        # Тот же отчёт открывают повторно: страница уже собрана, заново её не строим.
+        if card == self._card and parent_title == self._parent_title and not self._ancestors and self.blocks:
+            self.copy_button.setText("Скопировать")
+            return
+        self._parent_title = parent_title
         self._ancestors = []
         self._render(card)
 
@@ -1755,7 +1942,7 @@ class ResultDetailView(QWidget):
             flow.setParent(None)
             flow.deleteLater()
         self._flows = []
-        narrow = [is_narrow_section(block.section) and block.rows and block.grid is None for block in self.blocks]
+        narrow = [is_narrow_section(block.section) and block.table is not None for block in self.blocks]
         flow: _BlocksFlow | None = None
         for order, block in enumerate(self.blocks):
             # Узкие разделы, стоящие подряд, делят строку; одиночный узкий остаётся как был.

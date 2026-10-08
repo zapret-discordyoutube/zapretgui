@@ -397,12 +397,16 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(akamai.summary_label.text(), "в порядке 1 из 3")
         self.assertIsNone(advice.bar)
         # Названия измерений стоят столбцом одной ширины — значения начинаются с одной линии.
-        self.assertEqual(len({row.name_label.width() for row in akamai.rows}), 1)
-        self.assertEqual(len({row.text_label.x() for row in akamai.rows}), 1)
+        # Строки раздела рисует один виджет, а не строка-виджет на каждое измерение.
+        self.assertEqual(akamai.rows, [])
+        self.assertEqual(len(akamai.table.lines()), 3)
+        self.assertGreater(akamai.table.text_left(), akamai.table.name_width())
         # Отчёт короче окна: шапка и строки не растягиваются на всю его высоту.
         self.assertGreater(view.height(), view.minimumHeight() + 150)
         self.assertLess(view.hero.height(), 140)
-        self.assertLess(akamai.rows[0].height(), 50)
+        self.assertLess(akamai.table.row_rect(0).height(), 50)
+        self.assertEqual(akamai.table.height(), int(akamai.table.row_rect(2).bottom()))
+        akamai.table.grab()
         # Строка с переносом не раздувается: страница просит высоту по содержимому.
         view.resize(1000, view.minimumHeight())
         self.app.processEvents()
@@ -515,10 +519,10 @@ class CardsOnScreenTests(unittest.TestCase):
         widget.show()
         self.app.processEvents()
 
-        self.assertEqual(widget.title_label.text(), "Instagram")
-        self.assertEqual(widget.status_label.text(), "Способ не определён")
-        self.assertEqual(widget.rows[0].name_label.text(), "превью видео")
-        self.assertEqual(widget._icon.brand_color(), "#E4405F")
+        self.assertEqual(widget.shown_header(), ("Instagram", "Способ не определён"))
+        self.assertEqual(widget.shown_lines()[0].name, "превью видео")
+        self.assertEqual(widget.brand_color(), "#E4405F")
+        widget.grab()
 
 
 if __name__ == "__main__":
