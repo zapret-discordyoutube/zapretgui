@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.08.8")
+        self.assertEqual(catalog.catalog_version, "2026.10.09.1")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -112,7 +112,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(catalog.service_icons["ChatGPT & Sora (OpenAI)"], ("own:openai:AI", "#10a37f"))
         self.assertEqual(catalog.service_icons["Grok"], ("own:grok:GR", None))
         self.assertEqual(len(catalog.content_sha256), 64)
-        self.assertEqual(len(catalog.service_order), 86)
+        self.assertEqual(len(catalog.service_order), 106)
         self.assertEqual(len(catalog.dns_profiles), 6)
         for removed in ("xbox_dns_old", "malw_dns", "malw_dns_v2"):
             self.assertNotIn(removed, catalog.dns_profiles)
@@ -130,8 +130,8 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 850)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 4351)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 954)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 4836)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -232,7 +232,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             connection.close()
         index = self.proxy_domains.get_services_profile_index()
         self.assertNotIn("Tuta", index["services"])
-        for added in ("Cursor", "Groq", "MongoDB", "Brave", "Arduino"):
+        for added in ("Cursor", "Groq", "MongoDB", "Brave", "Arduino", "Crunchyroll", "LEGO", "IKEA", "Chess"):
             self.assertIn(added, index["services"], added)
             self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles(added), added)
 
