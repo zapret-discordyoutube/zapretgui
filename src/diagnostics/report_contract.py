@@ -41,6 +41,8 @@ CARD_FIELDS: tuple[str, ...] = (
     "environment",
     "zapret_line",
     "other_bypass_tools",
+    # Какие из них стояли на дороге проверки (VPN с проложенной дорогой, программы, меняющие пакеты).
+    "tools_in_path",
     "preset",
     # Карточка «С Zapret и без»: сравнение с прошлой проверкой в противоположном состоянии обхода.
     "compare",

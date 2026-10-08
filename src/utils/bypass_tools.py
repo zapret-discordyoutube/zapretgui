@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-__all__ = ["BYPASS_TOOLS", "bypass_tools_among", "running_bypass_tools"]
+__all__ = ["BYPASS_TOOLS", "PACKET_TOOLS", "bypass_tools_among", "running_bypass_tools", "tools_in_path"]
 
 # Имя процесса в нижнем регистре → как назвать программу пользователю.
 BYPASS_TOOLS: dict[str, str] = {
@@ -40,6 +40,25 @@ BYPASS_TOOLS: dict[str, str] = {
     "openvpn.exe": "OpenVPN",
     "tailscaled.exe": "Tailscale",
 }
+
+
+# Программы, которые переделывают сами пакеты компьютера: они задевают любое соединение,
+# включая пробы проверки, — куда бы ни вела дорога в интернет.
+PACKET_TOOLS = frozenset({"GoodbyeDPI"})
+
+
+def tools_in_path(tools: Iterable[str], vpn_routed: bool | None) -> tuple[str, ...]:
+    """Какие из запущенных программ стоят на дороге проверки, а какие просто запущены.
+
+    Проверка ходит в сеть напрямую. VPN и прокси её задевают, только когда через
+    их подключение проложена дорога в интернет (``vpn_routed``): запущенный, но
+    не включённый VPN ничего не меняет. ``None`` — узнать не удалось: тогда
+    считаем, что задевают, чтобы не выдать искажённый вывод за чистый.
+    """
+    tools = tuple(str(name) for name in tools)
+    if vpn_routed is not False:
+        return tools
+    return tuple(name for name in tools if name in PACKET_TOOLS)
 
 
 def bypass_tools_among(process_names: Iterable[str]) -> tuple[str, ...]:

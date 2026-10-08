@@ -132,6 +132,8 @@ class SiteVerdict:
     methods: tuple[MethodVerdict, ...] = ()
     # Сколько способов назвали этот узел.
     agreeing: int = 0
+    # Самое дальнее место, где режут этот сайт (у разных способов места бывают разные). 0 — то же, что ``hop``.
+    far_hop: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,15 +245,20 @@ def judge_site(facts: SiteFacts) -> SiteVerdict | None:
         best = named[0]
         return SiteVerdict(facts.host, facts.ip, FILTER_FOUND, best.hop, distance, best.text, tuple(methods), len(named))
     if len(hops) > 1:
-        both = " и ".join(f"{_METHOD_TITLES[item.method]} — узел {item.hop}" for item in named)
+        # Способы меряют разные механизмы (QUIC и сброс TCP), и стоять они могут на разных
+        # устройствах. Это не противоречие: место сайта — ближайшее, где его поток гаснет.
+        near = min(named, key=lambda item: item.hop)
+        both = ", ".join(f"{_METHOD_TITLES[item.method]} — на узле {item.hop}" for item in named)
         return SiteVerdict(
             facts.host,
             facts.ip,
-            path_trace.FILTER_UNSURE,
-            None,
+            FILTER_FOUND,
+            near.hop,
             distance,
-            f"два способа назвали разные узлы ({both}) — место не подтверждено",
+            f"режут в разных местах ({both}) — это разные устройства; ближайшее — на узле {near.hop}",
             tuple(methods),
+            1,
+            max(item.hop for item in named),
         )
     # Ни один способ места не назвал: показываем самый содержательный отказ.
     order = (FILTER_AT_TARGET, path_trace.FILTER_UNSURE, path_trace.FILTER_NOT_ON_PATH, path_trace.FILTER_NOT_STATEFUL)
@@ -419,6 +426,8 @@ def aggregate(
         confidence = CONFIDENCE_LOW
     distance = min((item.distance for item in found if item.distance), default=0)
     whose = _whose(hop, hops)
+    # Подделка должна дожить до самого дальнего фильтра: ближний её пропустит, а дальний иначе не увидит.
+    far = max((item.far_hop or item.hop for item in found), default=hop)
     where = "не дальше первого узла от вас" if hop == 1 else f"между узлами {hop - 1} и {hop} от вас"
     basis = f"совпало по {_sites_word(votes)}" if votes > 1 else "найдено по одному сайту"
     if local:
@@ -426,13 +435,20 @@ def aggregate(
         # Программа обхода на этом компьютере гасила бы поток уже на первом узле; раз место дальше,
         # это не она. Уверенность всё же на ступень ниже: VPN мог изменить саму дорогу.
         confidence = CONFIDENCE_MEDIUM if confidence == CONFIDENCE_HIGH else CONFIDENCE_LOW
+    several = far > hop
+    if several:
+        reasons.append(f"дальше по дороге есть ещё одно место, где режут: узел {far} (другим способом)")
     return Placement(
         STATE_FOUND,
-        f"Фильтр стоит {where}" + (f" — {whose}" if whose else "") + f". Уверенность {_CONFIDENCE_TEXT[confidence]}: {basis}.",
+        ("Ближайший фильтр стоит " if several else "Фильтр стоит ")
+        + where
+        + (f" — {whose}" if whose else "")
+        + f". Уверенность {_CONFIDENCE_TEXT[confidence]}: {basis}."
+        + (f" Фильтров на дороге не меньше двух: ещё один — на узле {far}." if several else ""),
         hop=hop,
         confidence=confidence,
         distance=distance,
-        ttl_advice=_ttl_advice(hop, distance),
+        ttl_advice=_ttl_advice(far, distance),
         reasons=tuple(reasons),
     )
 

@@ -120,7 +120,8 @@ def compare_runs(entry: dict, other: dict | None) -> dict | None:
     else:
         level, headline = "ok", "Всё открывается и без Zapret — обход этим сервисам не нужен"
     notes = [NOTE_PRESET] if (not_helped or broken) else []
-    if entry.get("tools") or other.get("tools"):
+    disturbed = bool(entry.get("tools") or other.get("tools"))
+    if disturbed:
         notes.append(NOTE_TOOLS)
     return {
         "level": level,
@@ -129,6 +130,8 @@ def compare_runs(entry: dict, other: dict | None) -> dict | None:
         # В какой из двух проверок работал Zapret: в этой ("current") или в прошлой ("past").
         "zapret_in": "current" if current_on else "past",
         "other_time": str(other.get("time") or ""),
+        # В одной из двух проверок на дороге стоял VPN или другой обход: сравнение неточное.
+        "disturbed": disturbed,
         "helped": helped,
         "not_helped": not_helped,
         "fine_anyway": fine_anyway,

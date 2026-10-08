@@ -291,6 +291,12 @@ _WAY_MEANING = {
 }
 
 
+MEANING_PACKETS_CUT = (
+    "так не проходит и безобидное имя, хотя целиком оно проходит: приветствие, разрезанное в этом месте, "
+    "рвут с любым именем — фильтр по дороге или защита самого сайта. Дробление здесь бесполезно"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class WayVerdict:
     way: str
@@ -341,13 +347,21 @@ def judge_split(facts: SplitFacts) -> SplitVerdict | None:
         return None
     found = {item.way: item for item in facts.ways}
     states = {way: _way_state(found[way]) if way in found else NOT_RUN for way in WAYS}
+    # Целиком безобидное имя проходит, а разрезанное на пакеты — дважды нет: такой разрез здесь не
+    # проходит ни с каким именем. Кто его рвёт (фильтр или защита сайта), отсюда не видно, но для
+    # выбора стратегии это одно и то же: дробление в этом месте не поможет.
+    packets_cut = {
+        way
+        for way in _TCP_WAYS
+        if states[way] == NO_CONTROL and states[WAY_WHOLE] in (PASSED, CUT) and len(found[way].control) > 1
+    }
     ways = tuple(
         WayVerdict(
             way,
             states[way],
             outcomes_text(found[way].real) if way in found else "",
             outcomes_text(found[way].control) if way in found else "",
-            _WAY_MEANING[states[way]],
+            MEANING_PACKETS_CUT if way in packets_cut else _WAY_MEANING[states[way]],
         )
         for way in WAYS
     )
@@ -392,10 +406,12 @@ def judge_split(facts: SplitFacts) -> SplitVerdict | None:
             ADVICE_RECORDS,
         )
     # «Собирает всё» — только если разрез пакета посреди имени действительно проверен.
-    if states[WAY_TCP_NAME] == CUT and all(states[way] in (CUT, NO_CONTROL) for way in (*_TCP_WAYS, *_RECORD_WAYS)):
+    name_checked = states[WAY_TCP_NAME] == CUT or WAY_TCP_NAME in packets_cut
+    if name_checked and all(states[way] in (CUT, NO_CONTROL) for way in (*_TCP_WAYS, *_RECORD_WAYS)):
         return verdict(
             HABIT_NONE,
-            "фильтр собирает приветствие обратно: ни один разрез пакета и записи шифрования не проходит",
+            "фильтр собирает приветствие обратно: ни один разрез пакета и записи шифрования не проходит"
+            + ("; приветствие, разрезанное у имени сайта, не проходит даже с безобидным именем" if packets_cut else ""),
             ADVICE_NONE,
         )
     return verdict(

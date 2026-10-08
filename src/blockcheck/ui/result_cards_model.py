@@ -1147,8 +1147,15 @@ def _run_card(report: dict) -> Card | None:
     if report.get("preset"):
         conditions.append(Line(INFO, "Выбранный пресет", str(report["preset"])))
     tools = [str(name) for name in report.get("other_bypass_tools") or ()]
-    if tools:
-        conditions.append(Line(WARN, "Другие программы обхода и VPN", ", ".join(tools)))
+    # В отчётах до появления этого поля его нет: тогда считаем, что мешали все запущенные.
+    in_path = report.get("tools_in_path")
+    in_path = tools if in_path is None else [str(name) for name in in_path]
+    idle = [name for name in tools if name not in in_path]
+    if in_path:
+        conditions.append(Line(WARN, "На дороге проверки стояли", ", ".join(in_path)))
+    if idle:
+        conditions.append(Line(INFO, "Запущены, но интернет шёл мимо них", ", ".join(idle)))
+    tools = in_path
     listing = _registry_lines(report.get("registry") or {})
     if not times and not conditions and not listing:
         return None

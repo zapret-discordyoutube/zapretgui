@@ -179,17 +179,27 @@ class SplitJudgeTests(unittest.TestCase):
         self.assertIn("fake", verdict.advice)
         self.assertTrue(all(state == fh.CUT for state in _states(verdict).values()))
 
-    def test_ways_the_server_does_not_take_are_not_blamed_on_the_filter(self) -> None:
-        # Сервер не терпит разрезанный пакет: по этим способам вывода нет, и «собирает всё» сказать нельзя.
+    def test_packet_split_failing_with_any_name_is_useless_whoever_cuts_it(self) -> None:
+        # Живой случай (адрес Google): целиком безобидное имя проходит, а разрезанное у имени — дважды сброс.
+        # Кто рвёт, не видно, но дробление в этом месте бесполезно — это и есть вывод для стратегий.
         verdict = _verdict(_Filter(joins_packets=True, joins_records=True, server_takes=lambda parts: len(parts) == 1))
         states = _states(verdict)
 
         self.assertEqual(states[fh.WAY_TCP_NAME], fh.NO_CONTROL)
         self.assertEqual(states[fh.WAY_REC_NAME], fh.CUT)
-        self.assertEqual(verdict.code, fh.HABIT_UNKNOWN)
+        self.assertEqual(verdict.code, fh.HABIT_NONE)
+        self.assertIn("даже с безобидным именем", verdict.text)
         way = next(item for item in verdict.ways if item.way == fh.WAY_TCP_NAME)
         self.assertEqual((way.real, way.control), ("", "молчание ×2"))
-        self.assertIn("не различить", way.meaning)
+        self.assertIn("Дробление здесь бесполезно", way.meaning)
+        self.assertNotIn("фильтр его режет", way.meaning)
+
+    def test_whole_hello_failing_with_harmless_name_still_gives_no_verdict(self) -> None:
+        # Не проходит даже целое приветствие с безобидным именем — сравнивать не с чем.
+        verdict = _verdict(_Filter(joins_packets=True, joins_records=True, server_takes=lambda parts: False))
+
+        self.assertEqual(verdict.code, fh.HABIT_UNKNOWN)
+        self.assertFalse(any("бесполезно" in way.meaning for way in verdict.ways))
 
     def test_no_working_control_for_the_whole_hello_is_said_plainly(self) -> None:
         verdict = _verdict(_Filter(server_takes=lambda parts: False))

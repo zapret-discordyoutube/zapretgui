@@ -151,6 +151,30 @@ def zapret_status() -> tuple[bool | None, str]:
     return False, f"❌ Zapret не запущен ({WINWS_EXE_FAMILY_LABEL} нет среди процессов)"
 
 
+def vpn_routed() -> bool | None:
+    """Идёт ли интернет через VPN-подключение. None — узнать не удалось."""
+    try:
+        return bool(system_state._read_tunnels_routed())
+    except Exception:
+        return None
+
+
+def tools_line(other_tools, in_path) -> str:
+    """Строка отчёта о запущенных VPN и программах обхода. Пусто — их нет."""
+    if not other_tools:
+        return ""
+    names = ", ".join(other_tools)
+    if in_path:
+        return (
+            f"ℹ️ Запущены другие программы обхода или VPN: {names}. "
+            "Если они сейчас включены, результат показывает сеть вместе с ними, а не «чистую» сеть провайдера."
+        )
+    return (
+        f"ℹ️ Запущены {names}, но интернет идёт напрямую, мимо них: проверка описывает сеть провайдера. "
+        "Браузер и приложения при этом могут ходить через них и открывать то, что здесь закрыто."
+    )
+
+
 def download(run: Run, host: str, path: str) -> ProbeResult | None:
     """Загрузка файла для проверки обрыва."""
     ip = net_access.known_address(run, host)

@@ -429,7 +429,8 @@
   }
  },
  "other_bypass_tools": [
-  "sing-box"
+  "sing-box",
+  "WireGuard"
  ],
  "partial": false,
  "system": [
@@ -540,6 +541,10 @@
   "broken": [],
   "notes": [
    "Это итог для выбранного пресета, а не для Zapret вообще."
-  ]
- }
+  ],
+  "disturbed": false
+ },
+ "tools_in_path": [
+  "sing-box"
+ ]
 }

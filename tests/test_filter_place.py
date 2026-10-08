@@ -68,11 +68,27 @@ class SiteJudgeTests(unittest.TestCase):
 
         self.assertEqual((verdict.code, verdict.hop, verdict.agreeing, verdict.distance), (pt.FILTER_FOUND, 4, 2, 7))
 
-    def test_two_methods_naming_different_hops_give_no_place(self) -> None:
+    def test_two_methods_naming_different_hops_are_two_devices_not_a_contradiction(self) -> None:
+        # Живой случай: QUIC режут на узле 2, сбросом TCP — на узле 4. Это разные механизмы
+        # и разные устройства; место сайта — ближайшее, дальнее запоминается.
         verdict = fp.judge_site(_site("x.com", "5.5.5.5", ("quic", _found(4)), ("tcp", _found(2))))
 
-        self.assertEqual((verdict.code, verdict.hop), (pt.FILTER_UNSURE, None))
-        self.assertIn("разные узлы", verdict.text)
+        self.assertEqual((verdict.code, verdict.hop, verdict.far_hop, verdict.agreeing), (pt.FILTER_FOUND, 2, 4, 1))
+        self.assertIn("разные устройства", verdict.text)
+
+    def test_placement_names_the_nearest_filter_and_keeps_fakes_alive_to_the_farthest(self) -> None:
+        sites = [
+            fp.judge_site(_site(host, ip, ("quic", _found(2)), ("tcp", _found(4))))
+            for host, ip in (("a.com", "5.5.5.5"), ("b.com", "6.6.6.6"), ("c.com", "7.7.7.7"))
+        ]
+        placement = fp.aggregate(sites)
+
+        self.assertEqual((placement.state, placement.hop), (fp.STATE_FOUND, 2))
+        self.assertIn("Ближайший фильтр", placement.sentence)
+        self.assertIn("не меньше двух", placement.sentence)
+        # Подделка с TTL 2 не дожила бы до второго фильтра на узле 4.
+        self.assertIn("от 4", placement.ttl_advice)
+        self.assertNotIn("от 2", placement.ttl_advice)
 
     def test_one_method_failing_does_not_cancel_the_other(self) -> None:
         silent_filter = pt.FilterFacts(control_ok=True, stateful=False, distance=7)

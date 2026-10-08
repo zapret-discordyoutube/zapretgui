@@ -96,7 +96,10 @@ class CompareTests(unittest.TestCase):
         with_zapret = _run("2026-10-08T13:00:00", "on", YouTube="ok")
         without = _run("2026-10-08T12:00:00", "off", tools=True, YouTube="fail")
 
-        self.assertTrue(any("VPN" in note for note in compare.compare_runs(with_zapret, without)["notes"]))
+        result = compare.compare_runs(with_zapret, without)
+        self.assertTrue(any("VPN" in note for note in result["notes"]))
+        self.assertTrue(result["disturbed"])
+        self.assertFalse(compare.compare_runs(with_zapret, dict(without, tools=False))["disturbed"])
 
     def test_nothing_to_compare_gives_nothing(self) -> None:
         self.assertIsNone(compare.compare_runs(_run("t", "on", YouTube="ok"), None))
@@ -119,11 +122,15 @@ class EntryAndSettingsTests(unittest.TestCase):
             "services": [],
             "zapret_running": True,
             "other_bypass_tools": ["AmneziaVPN"],
+            "tools_in_path": ["AmneziaVPN"],
             "habits": {"code": "none"},
         }
         entry = history.blockcheck_entry(report, preset="Default")
 
         self.assertEqual((entry["zapret"], entry["preset"], entry["tools"], entry["habit"]), ("on", "Default", True, "none"))
+        # VPN запущен, но интернет шёл мимо него — проверке он не мешал.
+        idle = history.blockcheck_entry({"scope": "all", "other_bypass_tools": ["WireGuard"], "tools_in_path": []})
+        self.assertFalse(idle["tools"])
         self.assertEqual(history.blockcheck_entry({"scope": "all", "zapret_running": None})["zapret"], "")
         self.assertEqual(history.blockcheck_entry({"scope": "all", "zapret_running": False})["zapret"], "off")
 

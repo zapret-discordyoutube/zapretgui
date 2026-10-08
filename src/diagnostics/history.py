@@ -71,7 +71,8 @@ def blockcheck_entry(report: dict, *, log_file: str = "", when: datetime | None 
         # При каких условиях шла проверка — для сравнения «с Zapret и без».
         "zapret": zapret_mark(report.get("zapret_running")),
         "preset": str(preset or ""),
-        "tools": bool(report.get("other_bypass_tools")),
+        # Только программы, которые стояли на дороге проверки: запущенный, но не включённый VPN не в счёт.
+        "tools": bool(report.get("tools_in_path")),
         # Как ведёт себя фильтр (код из ``filter_habits``) — подсказка подбору стратегий.
         "habit": str((report.get("habits") or {}).get("code") or ""),
     }

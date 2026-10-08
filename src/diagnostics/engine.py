@@ -96,7 +96,7 @@ from diagnostics.verdict import (
     judge_reach,
     summarize_service,
 )
-from utils.bypass_tools import running_bypass_tools
+from utils.bypass_tools import running_bypass_tools, tools_in_path
 from utils.dns_reference import REFERENCE_RESOLVERS
 from utils.dns_wire import TYPE_A, TYPE_AAAA
 from utils.windows_dns_query import (
@@ -585,16 +585,15 @@ def run_blockcheck(
         zapret_running, zapret_line = sections.zapret_status()
         emit(zapret_line)
         other_tools = running_bypass_tools()
+        # Запущенный VPN мешает проверке, только если интернет на самом деле идёт через него.
+        in_path = tools_in_path(other_tools, sections.vpn_routed() if other_tools else False)
         if other_tools:
-            emit(
-                f"ℹ️ Запущены другие программы обхода или VPN: {', '.join(other_tools)}. "
-                "Если они сейчас включены, результат показывает сеть вместе с ними, а не «чистую» сеть провайдера."
-            )
+            emit(sections.tools_line(other_tools, in_path))
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
         # Разделы, которых в этом режиме нет или которые не удались, в отчёте остаются пустыми.
         live = _Live(partial, fresh=lambda: {"step_seconds": step.seconds()}, scope=scope, environment=environment)
         live.data.update(zapret_running=zapret_running, zapret_line=zapret_line)
-        live.data.update(dict.fromkeys(_REPORT_SECTIONS), other_bypass_tools=list(other_tools), partial=True)
+        live.data.update(dict.fromkeys(_REPORT_SECTIONS), other_bypass_tools=list(other_tools), tools_in_path=list(in_path), partial=True)
 
         # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
         voice_future = run.later(STEP_VOICE, check_voice, run.submit, _wait_plain)
@@ -690,14 +689,14 @@ def run_blockcheck(
                 collected,
                 emit,
                 zapret_running=zapret_running,
-                other_tools=other_tools,
+                other_tools=in_path,
                 own_asn=str((network or {}).get("asn") or ""),
             )
             if full
             else None
         )
         extra = full and not run.dns_cancelled()
-        local = (["Zapret"] if zapret_running else []) + list(other_tools)
+        local = (["Zapret"] if zapret_running else []) + list(in_path)
         habits_call = functools.partial(sections.check_filter_habits, run, collected, emit, tools=local)
         habits = _attempt(emit, "Как работает фильтр", habits_call) if extra else None
         if full:
