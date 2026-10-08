@@ -30,6 +30,7 @@ from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
 from blockcheck.ui.result_cards import finding_detail_card, state_color
 from blockcheck.ui.result_cards_model import Card, FindingParts, Line, Section, build_cards, read_finding_parts
 from blockcheck.ui.brand_icons import BrandIcon, site_brand
+from diagnostics.compare import GROUP_TITLES
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip
@@ -553,6 +554,135 @@ def problem_finding_card(problem: dict, parent=None) -> FindingCard:
     )
 
 
+# Группы сравнения «с Zapret и без» в полосе итога: ключ отчёта, короткая подпись, состояние (цвет).
+# Полные названия групп — в отчёте сравнения; здесь место только на слово-два.
+_COMPARE_GROUPS = (
+    ("helped", "помог", "ok"),
+    ("not_helped", "не помог", "fail"),
+    ("broken", "сломалось", "warn"),
+    ("fine_anyway", "и так открывались", "info"),
+)
+
+
+class CompareBand(QWidget):
+    """Полоса «С Zapret и без» под шапкой итога: вывод одной фразой и счётчики по группам.
+
+    Сравниваются эта проверка и прошлая в противоположном состоянии обхода.
+    Фраза вывода приходит из отчёта готовой и называет пресет: «пресет не
+    помог» — не то же, что «Zapret не починит», поэтому здесь её не переписывают.
+    """
+
+    HEIGHT = 52
+    opened = pyqtSignal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._compare: dict = {}
+        self._hover = False
+        self.setFixedHeight(self.HEIGHT)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self._title_font = getFont(13, QFont.Weight.DemiBold)
+        self._text_font = getFont(12)
+        self.reveal = Reveal(self)
+        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+
+    def compare(self) -> dict:
+        return dict(self._compare)
+
+    def counts(self) -> list[tuple[str, int, str]]:
+        """Группы, в которых есть сайты: (подпись, сколько, состояние)."""
+        return [
+            (caption, len(self._compare.get(key) or ()), state)
+            for key, caption, state in _COMPARE_GROUPS
+            if self._compare.get(key)
+        ]
+
+    def show_compare(self, compare: dict | None) -> None:
+        self._compare = dict(compare or {})
+        self.setVisible(bool(self._compare))
+        if not self._compare:
+            return
+        headline = str(self._compare.get("headline") or "")
+        names = "; ".join(
+            f"{GROUP_TITLES.get(key, caption)}: {', '.join(map(str, self._compare.get(key) or ()))}"
+            for key, caption, _state in _COMPARE_GROUPS
+            if self._compare.get(key)
+        )
+        set_tooltip(self, "\n".join(part for part in (headline, names, "Нажмите, чтобы открыть сравнение") if part))
+        set_control_accessibility(self, name=f"С Zapret и без: {headline}", description="Открывает сравнение с прошлой проверкой.")
+        set_state_text(self, f"С Zapret и без: {headline}")
+        self.reveal.play()
+
+    def event(self, event) -> bool:
+        if event.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverLeave):
+            self._hover = event.type() == QEvent.Type.HoverEnter
+            self.update()
+        return super().event(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.opened.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.opened.emit()
+            return
+        super().keyPressEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        token = "surface_bg_hover" if self._hover or self.hasFocus() else "surface_bg"
+        painter.setBrush(theme_color(token, QColor(255, 255, 255, 18 if self._hover else 10)))
+        painter.drawRoundedRect(self.rect(), 6, 6)
+        level = str(self._compare.get("level") or "unknown")
+        tone = QColor(state_color(level))
+        muted = theme_color("fg_muted", QColor("#9aa0aa"))
+        text = theme_color("fg", QColor("#f2f2f2"))
+        try:
+            painter.drawPixmap(14, (self.HEIGHT - 18) // 2, 18, 18, get_cached_qta_pixmap("fa5s.balance-scale", color=tone.name(), size=18))
+        except Exception:
+            pass
+        # Счётчики групп — справа, каждая своим цветом; фраза вывода занимает остальное.
+        metrics = QFontMetrics(self._text_font)
+        title_metrics = QFontMetrics(self._title_font)
+        right = float(self.width() - 14)
+        counts = self.counts()
+        for order, (caption, count, state) in reversed(list(enumerate(counts))):
+            number = str(count)
+            need = title_metrics.horizontalAdvance(number) + 5 + metrics.horizontalAdvance(caption)
+            left = right - need
+            if left < 320:
+                break
+            painter.setOpacity(self.reveal.part(order, len(counts)))
+            painter.setFont(self._title_font)
+            painter.setPen(QColor(state_color(state)) if state != "info" else muted)
+            painter.drawText(QRectF(left, 0, need, self.HEIGHT), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), number)
+            painter.setFont(self._text_font)
+            painter.setPen(muted)
+            painter.drawText(
+                QRectF(left + title_metrics.horizontalAdvance(number) + 5, 0, need, self.HEIGHT),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                caption,
+            )
+            right = left - 18
+        painter.setOpacity(1.0)
+        room = max(40.0, right - 44)
+        painter.setFont(self._title_font)
+        painter.setPen(text)
+        painter.drawText(QRectF(44, 8, room, 18), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), "С Zapret и без")
+        painter.setFont(self._text_font)
+        painter.setPen(tone if level in ("fail", "warn") else muted)
+        headline = metrics.elidedText(str(self._compare.get("headline") or ""), Qt.TextElideMode.ElideRight, int(room))
+        painter.drawText(QRectF(44, 27, room, 17), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), headline)
+        painter.end()
+
+
 # Значок страницы находки — по виду проблемы.
 _KIND_ICONS = {"cut16": "fa5s.cut", "quic": "fa5s.bolt", "voice": "fa5s.phone-alt", "dns": "fa5s.network-wired", "ip": "fa5s.ban", "sni": "fa5s.lock"}
 
@@ -980,6 +1110,11 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
         self.overview = KindsOverview(self)
         self.overview.tile_opened.connect(self.scroll_to_group)
         self.overview.setVisible(False)
+        # Сравнение с прошлой проверкой в противоположном состоянии обхода: помог ли пресет.
+        self.compare_band = CompareBand(self)
+        self.compare_band.opened.connect(lambda: self._on_open is not None and self._on_open("compare"))
+        self.compare_band.setVisible(False)
+        outer.addWidget(self.compare_band)
         outer.addWidget(self.overview)
 
         self._problems_host = QWidget(self)
@@ -1041,6 +1176,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
         self._show_changes(None)
         self.overview.clear()
         self.overview.setVisible(False)
+        self.compare_band.show_compare(None)
         while self._problems_layout.count():
             item = self._problems_layout.takeAt(0)
             widget = item.widget()
@@ -1178,6 +1314,8 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
         for row in rows:
             self._problems_layout.addWidget(row)
         self._problems_host.setVisible(bool(rows))
+        compare = report.get("compare")
+        self.compare_band.show_compare(compare if isinstance(compare, dict) else None)
         groups = site_groups(report)
         self.overview.setVisible(bool(groups))
         self.overview.show_groups(groups)

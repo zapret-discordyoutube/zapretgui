@@ -723,3 +723,37 @@ class LightAndFittingTests(unittest.TestCase):
         strip = MarksStrip((Mark("TLS 1.2", "сброс", "fail", "fa5s.lock"), Mark("QUIC", "закрыт", "warn", "fa5s.bolt")))
         self.addCleanup(strip.deleteLater)
         self.assertEqual((len(strip.cells(40)), len(strip.cells(400))), (1, 2))
+
+    def test_compare_band_says_whether_the_preset_helped_and_opens_the_comparison(self) -> None:
+        from blockcheck.ui.check_results import CompareBand
+
+        opened = []
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=opened.append)
+        self.addCleanup(panel.deleteLater)
+        panel.show_report({"problems": []})
+        self.assertTrue(panel.compare_band.isHidden())
+
+        headline = "Пресет «Default» помог 2 сайтам из 3"
+        compare = {
+            "level": "warn", "headline": headline, "preset": "Default", "zapret_in": "current", "other_time": "2026-10-08T12:00:00",
+            "helped": ["YouTube", "Discord"], "not_helped": ["Telegram"], "fine_anyway": ["GitHub"], "broken": [], "notes": [],
+        }
+        panel.show_report({"problems": [], "compare": compare})
+        panel.resize(1100, 400)
+        panel.show()
+        self.app.processEvents()
+        band = panel.compare_band
+        self.assertIsInstance(band, CompareBand)
+        self.assertFalse(band.isHidden())
+        # Счётчики — только по группам, где есть сайты; пустая «сломалось» не показывается.
+        self.assertEqual(band.counts(), [("помог", 2, "ok"), ("не помог", 1, "fail"), ("и так открывались", 1, "info")])
+        # Фраза вывода — из отчёта как есть: она называет пресет, смысл её здесь не меняют.
+        self.assertIn(headline, band.toolTip())
+        self.assertIn("Telegram", band.toolTip())
+        band.grab()
+        QTest.mouseClick(band, Qt.MouseButton.LeftButton)
+        QTest.keyClick(band, Qt.Key.Key_Return)
+        self.assertEqual(opened, ["compare", "compare"])
+        # Новая проверка без пары для сравнения полосу убирает.
+        panel.set_pending()
+        self.assertTrue(band.isHidden())
