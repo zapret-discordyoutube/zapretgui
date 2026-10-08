@@ -27,7 +27,7 @@ from diagnostics.run_context import Probe, Run
 from diagnostics.tls_probe import CONNECT_TIMEOUT, KIND_CANCELLED, KIND_CERT, KIND_CONNECT, ProbeResult
 from utils.windows_dns_query import ERROR_CANCELLED
 
-__all__ = ["check_reach", "pause"]
+__all__ = ["check_reach", "pause", "same_network"]
 
 
 def _reach_order(probe: Probe, *, local_ok: bool) -> tuple[list[str], str]:
@@ -70,6 +70,11 @@ def _reach_candidates(probe: Probe, order: list[str]) -> list[str]:
             if items:
                 spread.append(items.pop(0))
     return [first, *spread]
+
+
+def same_network(first: str, second: str) -> bool:
+    """Адреса из одной сети (грубо: совпадают первые два числа)."""
+    return _network_of(first) == _network_of(second)
 
 
 def _network_of(ip: str) -> str:

@@ -99,6 +99,8 @@ def reach_text(probe: Probe) -> str:
             what = probe.cert.text if probe.cert is not None else "адрес из файла hosts не работает, запись в нём устарела"
             stale = f" — {what}; браузер пойдёт по этой записи и сайт не откроет"
         again = " — со второй проверки, поодиночке: первый сбой дала нагрузка самой проверки" if probe.rechecked == RECHECK_OPENED else ""
+        if probe.unstable:
+            again = f" — но через раз: {probe.unstable}"
         return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source}){stale}{again}"
     text = fail_text(probe)
     if result is None or not result.ip:
@@ -154,7 +156,7 @@ def probe_lines(probe: Probe, *, full: bool) -> list[str]:
     icon = "✅" if probe.reach_state == ReachState.OK else "❌"
     if probe.reach_state == ReachState.UNKNOWN:
         icon = "❔"
-    if probe.hosts_stale and probe.reach_state == ReachState.OK:
+    if (probe.hosts_stale or probe.unstable) and probe.reach_state == ReachState.OK:
         # Проверка сайт открыла, а браузер по записи в hosts — не откроет.
         icon = "⚠️"
     lines = [f"{icon} {title}: {reach_text(probe)}"]
@@ -216,6 +218,8 @@ def target_report(probe: Probe) -> dict:
         "hosts_stale": probe.hosts_stale,
         # Повторная проверка поодиночке: "opened" — открылся со второго раза, "same" — сбой повторился.
         "rechecked": probe.rechecked,
+        # Сайт открылся, но через раз или не по каждому адресу: что именно шатается. Пусто — стабилен.
+        "unstable": probe.unstable,
         # Чужой сертификат: кто ответил вместо сайта и что с этим делать. None — сертификат в порядке.
         "cert": None
         if probe.cert is None

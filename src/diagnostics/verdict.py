@@ -39,6 +39,7 @@ from utils.windows_dns_query import DNS_STATUS_NAME_ERROR, DNS_STATUS_NO_RECORDS
 
 __all__ = [
     "ADVICE_HOSTS_STALE",
+    "ADVICE_UNSTABLE",
     "DnsJudgement",
     "DnsState",
     "FREEZE_MAX_BYTES",
@@ -252,6 +253,8 @@ class TargetOutcome:
     kind: str = ""
     # Сам сайт открылся, но адрес, записанный для него в файле hosts, не работает.
     hosts_stale: bool = False
+    # Сайт открылся, но не каждый раз или не по каждому своему адресу.
+    unstable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,6 +302,10 @@ _ADVICE_CERT = (
 _ADVICE_HOSTS = (
     "Удалите или исправьте запись этого сайта в файле hosts (страница «Редактор hosts») — "
     "адрес в ней устарел."
+)
+ADVICE_UNSTABLE = (
+    "Так выглядит фильтр, который срабатывает не на каждое соединение, или линия, теряющая пакеты. "
+    "Повторите проверку через несколько минут: если сайт снова «через раз» — это фильтр."
 )
 ADVICE_HOSTS_STALE = (
     "Откройте «Редактор hosts», выключите и снова включите этот сервис или выберите для него другой "
@@ -408,6 +415,12 @@ def summarize_service(
                 "браузер пойдёт на него и сайт не откроет"
             )
             advice = (ADVICE_HOSTS_STALE,)
+        elif not secondary_broken and any(item.unstable and item.reach == ReachState.OK for item in targets):
+            # Не «открывается» и не «заблокирован»: третий исход, которого человеку и не хватает,
+            # когда сайт то грузится, то нет.
+            level = Level.WARN
+            headline = f"{label} открывается через раз"
+            advice = (_ADVICE_START if zapret_running is False else _ADVICE_STRATEGY, ADVICE_UNSTABLE)
         elif not secondary_broken:
             level = Level.WARN if spoofed else Level.OK
             headline = f"{label} открывается"

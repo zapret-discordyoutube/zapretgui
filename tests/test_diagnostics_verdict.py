@@ -717,6 +717,71 @@ class ForeignCertificateTests(unittest.TestCase):
         self.assertEqual(net.cert_asked, [])
 
 
+class UnstableSiteTests(unittest.TestCase):
+    """Третий исход: сайт не «открывается» и не «заблокирован», а открывается через раз."""
+
+    @staticmethod
+    def _discord(result) -> tuple[dict, dict]:
+        service = next(item for item in result["services"] if item["key"] == "discord")
+        return service, service["targets"][0]
+
+    def test_failure_success_failure_is_reported_as_every_other_time(self) -> None:
+        seen: dict[str, int] = {}
+
+        def _https(host, ip):
+            seen[host] = seen.get(host, 0) + 1
+            # Залп — сбой (три попытки), лёгкий повтор и полная перепроверка — успех, третья попытка — снова сбой.
+            if host == "discord.com" and (seen[host] <= 3 or seen[host] >= 6):
+                return ProbeResult(ip=ip, kind=KIND_CONNECT, connect_fail="timeout")
+            return _ok(ip)
+
+        net = _Net(https=_https)
+        with patch.object(reach, "RETRY_PAUSE_S", 0.0):
+            result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+        service, target = self._discord(result)
+
+        self.assertEqual((target["rechecked"], target["ok"]), ("unstable", True))
+        self.assertIn("из трёх попыток подряд прошла одна", target["unstable"])
+        self.assertEqual((service["level"], service["headline"]), ("warn", "Discord открывается через раз"))
+        problem = next(item for item in result["problems"] if item["target"] == "discord.com")
+        self.assertEqual((problem["level"], problem["action"]), ("warn", "strategy"))
+        self.assertTrue(any("трёх попыток подряд прошла одна" in line for line in problem["advice"]))
+        self.assertNotIn("Discord", result["working"])
+
+    def test_cut_on_one_address_of_two_is_every_other_time_not_a_full_block(self) -> None:
+        # Живое наблюдение из жалоб: обрыв на 16 КБ бывает на одном адресе сайта из нескольких.
+        vp = engine.volume_probe
+        good, bad = "162.159.137.232", "104.16.5.5"
+        stalled = vp.VolumeFacts(vp.VolumeRun(vp.RUN_STALLED, 14_500, 20), vp.VolumeRun(vp.RUN_STALLED, 14_100, 40))
+        passed = vp.VolumeFacts(vp.VolumeRun(vp.RUN_PASSED, 49_500, 4))
+        asked: list[str] = []
+
+        def volume(host, ip):
+            asked.append(ip)
+            return stalled if (host, ip) == ("discord.com", bad) else passed
+
+        net = _Net(system=(good, bad), reference=(good, bad))
+        net.volume_facts = volume
+        result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+        service, target = self._discord(result)
+
+        self.assertIn(bad, asked)
+        self.assertEqual((target["state"], target["volume"]), ("ok", "ok"))
+        self.assertIn(f"по адресу {bad} обрывается", target["unstable"])
+        self.assertEqual((service["level"], service["headline"]), ("warn", "Discord открывается через раз"))
+
+    def test_second_address_of_the_same_network_is_not_asked(self) -> None:
+        # Соседние адреса одной сети закрыты или открыты все разом: второй раз мерить нечего.
+        asked: list[str] = []
+        vp = engine.volume_probe
+        net = _Net()
+        net.volume_facts = lambda _host, ip: asked.append(ip) or vp.VolumeFacts(vp.VolumeRun(vp.RUN_PASSED, 49_500, 4))
+        result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+
+        self.assertNotIn(DISCORD_REAL[1], asked)
+        self.assertEqual(self._discord(result)[1]["unstable"], "")
+
+
 class SystemStateInReportTests(unittest.TestCase):
     @staticmethod
     def _item(key, level, text, advice=""):

@@ -68,8 +68,8 @@ from diagnostics.limits import (
     SITES_AT_ONCE,
     VIDEO_SERVERS,
 )
-from diagnostics.reach import check_reach as _check_reach, pause as _pause
-from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe as _Probe, Run as _Run
+from diagnostics.reach import check_reach as _check_reach, pause as _pause, same_network
+from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, RECHECK_UNSTABLE, Probe as _Probe, Run as _Run
 from diagnostics.run_context import Live as _Live, Steps as _Steps, Stopped as _Stopped
 from diagnostics.services import (
     GOOGLEVIDEO_FALLBACK_HOST,
@@ -358,6 +358,17 @@ def _check_volume(run: _Run, probe: _Probe) -> None:
     probe.volume = volume_probe.judge(facts)
     if probe.volume.code == volume_probe.VOLUME_CUT:
         probe.reach_state = ReachState.FREEZE
+        return
+    # Обрыв бывает на одном адресе сайта из нескольких: проверяем ещё адрес из другой сети.
+    other = next((ip for ip in (*probe.dns.ips, *probe.reference_ips) if ":" not in ip and not same_network(ip, result.ip)), "")
+    if probe.volume.code != volume_probe.VOLUME_OK or not other or run.dns_cancelled():
+        return
+    second = volume_probe.judge(volume_probe.collect(probe.host, other, probe.target.path, cancel=run.probe_cancel))
+    if second.code == volume_probe.VOLUME_CUT and not run.dns_cancelled():
+        probe.unstable = (
+            f"по адресу {result.ip} загрузка идёт, а по адресу {other} обрывается: {second.text}. "
+            "Браузер попадает то на один адрес, то на другой"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +488,12 @@ def _recheck_failed(run: _Run, services: dict[str, Service], done_probes: list) 
             # Повтор не успел — остаётся первый результат, без пометки.
             return None
         again.rechecked = RECHECK_OPENED if again.reach_state == ReachState.OK else RECHECK_SAME
+        if again.rechecked == RECHECK_OPENED and not run.dns_cancelled():
+            # Сбой и успех — счёт равный. Третья попытка решает: случайный это сбой или сайт открывается через раз.
+            third = net_access.get(run, again.host, again.reach.ip, target.path)
+            if not third.ok and third.kind != KIND_CANCELLED:
+                again.rechecked = RECHECK_UNSTABLE
+                again.unstable = "из трёх попыток подряд прошла одна: сбой, успех и снова сбой"
         if first.reach_state != again.reach_state and again.reach_state != ReachState.OK:
             # Сбой другого вида: берём свежий, но «подтверждённым» его не считаем.
             again.rechecked = ""
@@ -507,6 +524,7 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
             main=probe.target.main,
             kind=probe.kind,
             hosts_stale=probe.hosts_stale,
+            unstable=bool(probe.unstable),
         )
         for probe in probes
     ]

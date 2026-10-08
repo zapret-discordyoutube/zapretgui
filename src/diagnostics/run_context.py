@@ -31,6 +31,8 @@ ShouldStop = Callable[[], bool]
 
 RECHECK_OPENED = "opened"
 RECHECK_SAME = "same"
+# Сбой, успех и снова сбой: сайт открывается через раз.
+RECHECK_UNSTABLE = "unstable"
 
 
 class Stopped(Exception):
@@ -65,6 +67,8 @@ class Probe:
     reach_state: ReachState = ReachState.UNKNOWN
     # Как именно блокируют (по имени сайта, по адресу, страницей провайдера), если удалось выяснить.
     cause: block_cause.Cause | None = None
+    # Сайт открылся, но не каждый раз или не по каждому адресу: что именно шатается. Пусто — стабилен.
+    unstable: str = ""
     # Кто ответил вместо сайта, когда сертификат не прошёл проверку (``cert_owner.CertVerdict``).
     cert: object | None = None
     # Проходит ли QUIC (UDP 443) к этому сайту. None — не проверяли или проверку сняли.

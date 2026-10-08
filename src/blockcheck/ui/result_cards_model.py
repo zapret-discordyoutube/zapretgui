@@ -243,7 +243,7 @@ def site_level(service: dict) -> str:
     if level in (OK, WARN) and targets and all(item.get("ok") for item in targets):
         # Сайт открывается, но приветствие с составом Chrome не проходит: в браузере он может висеть.
         # Или запись в hosts ведёт на нерабочий адрес: проверка сайт открыла, а браузер не откроет.
-        return WARN if _by_fingerprint(targets) or any(item.get("hosts_stale") for item in targets) else OK
+        return WARN if _by_fingerprint(targets) or any(item.get("hosts_stale") or item.get("unstable") for item in targets) else OK
     return level
 
 
@@ -384,7 +384,9 @@ def _site_card(service: dict) -> Card:
                     ", ".join(f"{step.get('address', '')} — {_TRIED_WORDS.get(str(step.get('result')), 'сбой')}" for step in tried),
                 )
             )
-        if item.get("rechecked") == "opened":
+        if item.get("unstable"):
+            rows.append(Line(WARN, "Открывается через раз", str(item["unstable"])))
+        elif item.get("rechecked") == "opened":
             rows.append(Line(INFO, "Повторная проверка", "открылся со второго раза, поодиночке — первый сбой дала нагрузка самой проверки"))
         elif item.get("rechecked") == "same":
             rows.append(Line(INFO, "Повторная проверка", "поодиночке, когда остальные проверки закончились, — результат тот же"))
