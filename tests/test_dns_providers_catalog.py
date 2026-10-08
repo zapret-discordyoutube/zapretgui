@@ -98,6 +98,20 @@ class DnsProvidersCatalogTests(unittest.TestCase):
         with patch.object(dns_providers, "DNS_PROVIDERS", broken):
             self.assertIn("DNS-AI: сервер только с шифрованием должен иметь адрес DoH", catalog_problems())
 
+    def test_dead_servers_are_gone_and_old_xbox_addresses_lead_to_the_live_one(self) -> None:
+        names = {name for _group, name, _data in iter_providers()}
+
+        self.assertNotIn("dns.malw.link", names)
+        self.assertNotIn("Xbox DNS (old)", names)
+        for dead in ("176.99.11.77", "80.78.247.254", "95.216.204.218", "80.253.249.40"):
+            self.assertIsNone(find_provider_by_address(dead), dead)
+        # Замены ведут только на адреса, которые есть в списке, и не на мёртвые.
+        for old, new in dns_providers.OUTDATED_DNS_ADDRESS_REPLACEMENTS.items():
+            with self.subTest(old=old):
+                self.assertIsNone(find_provider_by_address(old))
+                self.assertEqual(find_provider_by_address(new)[1], "Xbox DNS")
+        self.assertNotIn("87.228.47.200", doh_templates())
+
     def test_dns_sb_is_not_among_popular_servers(self) -> None:
         self.assertNotIn("Dns.SB", DNS_PROVIDERS["Популярные"])
         self.assertIn("Dns.SB", DNS_PROVIDERS["Малоизвестные"])

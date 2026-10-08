@@ -23,12 +23,13 @@ class DnsAddressMigrationPlanTests(unittest.TestCase):
 
         self.replacements = OUTDATED_DNS_ADDRESS_REPLACEMENTS
 
-    def test_old_malw_and_xbox_addresses_are_replaced_in_place(self) -> None:
+    def test_old_xbox_addresses_are_replaced_in_place(self) -> None:
         from dns.address_migration import plan_dns_server_migration
 
+        # «Xbox DNS (old)» молчит: его адреса меняются на действующий Xbox DNS.
         self.assertEqual(
-            plan_dns_server_migration(["84.21.189.133", "64.188.98.242"], self.replacements),
-            ["95.216.204.218", "80.253.249.40"],
+            plan_dns_server_migration(["176.99.11.77", "80.78.247.254"], self.replacements),
+            ["111.88.96.54", "111.88.96.55"],
         )
         self.assertEqual(
             plan_dns_server_migration(["111.88.96.50", "111.88.96.51"], self.replacements),
@@ -39,8 +40,8 @@ class DnsAddressMigrationPlanTests(unittest.TestCase):
         from dns.address_migration import plan_dns_server_migration
 
         self.assertEqual(
-            plan_dns_server_migration(["1.1.1.1", "84.21.189.133", "8.8.8.8"], self.replacements),
-            ["1.1.1.1", "95.216.204.218", "8.8.8.8"],
+            plan_dns_server_migration(["1.1.1.1", "176.99.11.77", "8.8.8.8"], self.replacements),
+            ["1.1.1.1", "111.88.96.54", "8.8.8.8"],
         )
 
     def test_nothing_to_change_returns_none(self) -> None:
@@ -54,15 +55,17 @@ class DnsAddressMigrationPlanTests(unittest.TestCase):
         from dns.address_migration import plan_dns_server_migration
 
         self.assertEqual(
-            plan_dns_server_migration(["84.21.189.133", "95.216.204.218"], self.replacements),
-            ["95.216.204.218"],
+            plan_dns_server_migration(["111.88.96.50", "111.88.96.54"], self.replacements),
+            ["111.88.96.54"],
         )
 
     def test_ipv6_is_matched_in_any_spelling(self) -> None:
         from dns.address_migration import plan_dns_server_migration
 
+        # В списке замен сейчас только IPv4, поэтому пара IPv6 задана прямо здесь.
+        replacements = {"2a12:bec4:1460:d5::2": "2a01:4f9:c014:6dac::1"}
         self.assertEqual(
-            plan_dns_server_migration(["2A12:BEC4:1460:D5:0:0:0:2"], self.replacements),
+            plan_dns_server_migration(["2A12:BEC4:1460:D5:0:0:0:2"], replacements),
             ["2a01:4f9:c014:6dac::1"],
         )
 

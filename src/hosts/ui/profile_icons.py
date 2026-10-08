@@ -8,10 +8,7 @@ from __future__ import annotations
 
 _PROFILE_ICONS: dict[str, tuple[str, str]] = {
     "xbox_dns": ("fa5b.xbox", "#107C10"),
-    "xbox_dns_old": ("fa5s.gamepad", "#7A9A01"),
     "comss_dns": ("fa5s.shield-alt", "#2F80ED"),
-    "malw_dns": ("fa5s.bug", "#E5484D"),
-    "malw_dns_v2": ("fa5s.spider", "#C2410C"),
     "astracat": ("fa5s.cat", "#F59E0B"),
     "geohide": ("fa5s.globe-europe", "#8B5CF6"),
 }

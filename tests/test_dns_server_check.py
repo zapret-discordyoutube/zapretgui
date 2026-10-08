@@ -111,8 +111,8 @@ class TargetTests(unittest.TestCase):
         google = by_address["8.8.4.4"]
         self.assertEqual((google.dot_host, google.doh_host, google.doh_port, google.doh_path), ("dns.google", "dns.google", 443, "/dns-query"))
         self.assertEqual(by_address["194.180.189.33"].doh_port, 444)
-        # У этого сервера DoT не подтверждён: проверять его нельзя.
-        self.assertEqual(by_address["87.228.47.200"].dot_host, "")
+        # У этого сервера ни DoT, ни DoH не отвечают: проверять их нельзя.
+        self.assertEqual((by_address["87.228.47.200"].dot_host, by_address["87.228.47.200"].doh_host), ("", ""))
 
     def test_servers_without_plain_dns_are_marked(self) -> None:
         by_address = {target.address: target for target in sc.build_targets(DNS_PROVIDERS, ipv6=True)}

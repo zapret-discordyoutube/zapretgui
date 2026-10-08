@@ -161,7 +161,7 @@ class DnsRuntimeTests(unittest.TestCase):
     def test_migration_replaces_only_outdated_static_addresses(self) -> None:
         fake = _FakeWinApi()
         adapters = (
-            DnsAdapter(ETH, "Ethernet", "", "ethernet", True, True, static_ipv4=("84.21.189.133", "64.188.98.242"), static_ipv6=("2a12:bec4:1460:d5::2",)),
+            DnsAdapter(ETH, "Ethernet", "", "ethernet", True, True, static_ipv4=("176.99.11.77", "80.78.247.254"), static_ipv6=("2a00:ab00:1233:26::50",)),
             DnsAdapter(WIFI, "Wi-Fi", "", "wifi", True, False, static_ipv4=("1.1.1.1",)),
         )
 
@@ -170,12 +170,10 @@ class DnsRuntimeTests(unittest.TestCase):
 
         self.assertEqual(
             fake.writes,
-            [
-                (ETH, ("95.216.204.218", "80.253.249.40"), False, None),
-                (ETH, ("2a01:4f9:c014:6dac::1",), True, None),
-            ],
+            # Адреса IPv6 действующего сервера в заменах нет: их не трогают.
+            [(ETH, ("111.88.96.54", "111.88.96.55"), False, None)],
         )
-        self.assertEqual(len(changes), 2)
+        self.assertEqual(len(changes), 1)
         self.assertEqual(fake.flushes, 1)
 
 
@@ -198,7 +196,9 @@ class DnsProviderCatalogTests(unittest.TestCase):
         self.assertEqual(ai["Xbox DNS"]["ipv4"], ["111.88.96.54", "111.88.96.55"])
         self.assertEqual(ai["AstraCat"]["ipv4"], ["135.106.217.200", "135.106.197.22"])
         self.assertEqual(ai["GeoHide"]["ipv4"], ["193.233.112.67", "193.233.112.68"])
-        self.assertEqual(ai["dns.malw.link"]["ipv4"], ["95.216.204.218", "80.253.249.40"])
+        # Серверы, которые перестали отвечать, из списка убраны.
+        self.assertNotIn("dns.malw.link", ai)
+        self.assertNotIn("Xbox DNS (old)", ai)
 
 
 if __name__ == "__main__":
