@@ -359,114 +359,169 @@ class ProfilePageTourStatesTests(unittest.TestCase):
         self.assertFalse(card.is_shown())
 
 
-# Шаги, которые обязаны найти свою цель на страницах с заглушками вместо данных.
-STEPS_WITH_TARGET = (
-    "control_nav",
-    "start",
-    "status",
-    "preset",
-    "presets_list",
-    "presets_toolbar",
-    "profiles_toolbar",
-    "profile_order",
-    "dpi_mode",
-    "tools",
-    "geo_blocks",
-    "diagnostics",
-    "appearance",
-    "finish",
-    "quick_actions",
-    "program_settings",
-    "windows_settings",
-    "fine_tuning",
-    "fakes",
-    "fakes_table",
-    "fakes_own",
-    "dpi_modes",
-    "dns_now",
-    "dns_providers",
-    "dns_ai",
-    "dns_custom",
-    "hosts_summary",
-    "hosts_file",
-    "telegram_status",
-    "telegram_connect",
-    "telegram_settings",
-    "telegram_hosts",
-    "telegram_logs",
-    "telegram_advanced",
-    "telegram_cloudflare",
-    "blockcheck_start",
-    "blockcheck_domains",
-    "blockcheck_summary",
-    "blockcheck_cards",
-    "blockcheck_checks",
-    "blockcheck_card_detail",
-    "blockcheck_history",
-    "blockcheck_past_check",
-    "blockcheck_report",
-    "blockcheck_tabs",
-    "strategy_scan",
-    "strategy_scan_result",
-    "domain_lookup",
-    "dns_servers_check",
-    "dns_spoofing_check",
-    "log_analyzer_source",
-    "log_analyzer_connections",
-    "log_analyzer_packets",
-    "appearance_theme",
-    "appearance_accent",
-    "appearance_performance",
-    "logs_view",
-    "logs_send",
-    "about_version",
-    "about_help",
-    "updates",
-)
-
-# Шаги, цели которых появляются только с настоящими данными: строка пресета,
-# текст пресета в редакторе, профили и их стратегии, плитки сервисов hosts,
-# запись реестра фейков. Общий прогон ниже их не видит; шаги про страницу
-# профиля проверяет ProfilePageTourStatesTests.
-STEPS_NEEDING_REAL_DATA = (
-    "preset_menu",
-    "preset_file",
-    "preset_header",
-    "preset_lua_init",
-    "preset_engine_options",
-    "preset_interception",
-    "preset_blobs",
-    "preset_profile",
-    "preset_profile_name",
-    "preset_profile_match",
-    "preset_profile_packets",
-    "preset_profile_strategy",
-    "preset_profile_new",
-    "profiles_list",
-    "profile_group",
-    "profile_row",
-    "profile_menu",
-    "list_type",
-    "ranges",
-    "profile_tabs",
-    "strategy_choice",
-    "strategy_try",
-    "strategy_find",
-    "strategy_details",
-    "strategy_details_places",
-    "profile_geo_notice",
-    "list_entries",
-    "fakes_blob",
-    "hosts_direct",
-    "hosts_ai",
-)
-
 _NAV_GROUPS = {
     "root": (PageName.ZAPRET2_MODE_CONTROL,),
     "settings": (PageName.ZAPRET2_USER_PRESETS, PageName.ZAPRET2_PRESET_SETUP, PageName.DPI_SETTINGS),
     "system": (PageName.NETWORK, PageName.HOSTS, PageName.TELEGRAM_PROXY),
     "diagnostics": (PageName.BLOCKCHECK, PageName.WINWS_LOG_ANALYZER),
     "appearance": (PageName.APPEARANCE, PageName.PREMIUM, PageName.LOGS, PageName.ABOUT),
+}
+
+
+# ── данные для страниц, которым мало заглушек ──────────────────────────────
+# Пресеты, профили и стратегии программа читает с диска в фоне. На стенде
+# фоновых работников нет, поэтому страницы получают пример через свой обычный
+# вход — тот же, куда приходит результат настоящей загрузки.
+
+EXAMPLE_PRESET_FILE = "Default.txt"
+
+EXAMPLE_PRESET_TEXT = """# Preset: Default
+# BuiltinVersion: 3.4
+
+--lua-init=@lua/zapret-lib.lua
+--lua-init=@lua/zapret-antidpi.lua
+--ctrack-disable=0
+--ipcache-lifetime=8400
+--wf-tcp-out=80,443
+--wf-udp-out=443
+--blob=tls_google:@bin/tls_clienthello_www_google_com.bin
+
+--name=YouTube
+--filter-tcp=443
+--hostlist=lists/youtube.txt
+--out-range=-d10
+--payload=tls_client_hello
+--lua-desync=fake:blob=tls_google:repeats=6
+--lua-desync=multisplit:pos=1,midsld
+
+--new
+--name=Discord
+--filter-tcp=443
+--hostlist=lists/discord.txt
+--lua-desync=hostfakesplit:host=google.com
+"""
+
+
+def _example_profile_items():
+    from profile.state import ProfileListItem
+
+    def item(index: int, name: str, group: str, group_name: str, *, enabled: bool, in_preset: bool, list_type: str):
+        return ProfileListItem(
+            key=f"profile:{index}",
+            persistent_key=f"uid:{name.lower()}",
+            profile_index=index,
+            display_name=name,
+            enabled=enabled,
+            in_preset=in_preset,
+            strategy_id="host-01" if in_preset else "",
+            strategy_name="host 01" if in_preset else "",
+            match_lines=("--filter-tcp=443", f"--{list_type}=lists/{name.lower()}.txt"),
+            list_type=list_type,
+            rating="",
+            favorite=False,
+            group=group,
+            group_name=group_name,
+            order=index,
+            source_order=index,
+        )
+
+    return (
+        item(0, "YouTube", "video", "Видео", enabled=True, in_preset=True, list_type="hostlist"),
+        item(1, "Twitch", "video", "Видео", enabled=False, in_preset=True, list_type="hostlist"),
+        item(2, "Discord", "chat", "Общение", enabled=True, in_preset=True, list_type="hostlist"),
+        item(3, "Telegram", "chat", "Общение", enabled=False, in_preset=False, list_type="ipset"),
+    )
+
+
+def _fill_user_presets(host: "_PageHost", page) -> None:
+    from folders.defaults import build_default_preset_folders
+    from presets.user_presets_page_plans import build_preset_rows_plan
+
+    service = page._runtime_service
+    service.active_preset_file_name = lambda: EXAMPLE_PRESET_FILE
+    plan = build_preset_rows_plan(
+        all_presets={
+            EXAMPLE_PRESET_FILE: {"display_name": "Default", "is_builtin": True},
+            "Game.txt": {"display_name": "Game", "is_builtin": True},
+            "Manual.txt": {"display_name": "Мой пресет", "is_builtin": False},
+        },
+        query="",
+        active_file_name=EXAMPLE_PRESET_FILE,
+        language="ru",
+        folder_state=build_default_preset_folders(),
+        empty_not_found_key="page.winws2_user_presets.empty.not_found",
+        empty_none_key="page.winws2_user_presets.empty.none",
+    )
+    page._apply_presets_rows_plan(plan)
+    page._open_preset_raw_editor_callback = lambda _name: host.show_page(PageName.ZAPRET2_PRESET_RAW_EDITOR)
+
+
+def _fill_preset_editor(_host: "_PageHost", page) -> None:
+    from settings.mode import ZAPRET2_MODE
+
+    # Настоящий host передаёт странице режим; заглушка вместо него сбила бы разбор текста.
+    page._launch_method = ZAPRET2_MODE
+    page._preset_file_name = EXAMPLE_PRESET_FILE
+    page._apply_raw_editor_text(EXAMPLE_PRESET_TEXT)
+
+
+def _fill_preset_setup(host: "_PageHost", page) -> None:
+    from profile.list_view_state import build_profile_list_view_state
+    from profile.state import ProfileListPayload
+
+    items = _example_profile_items()
+    page._apply_payload(
+        ProfileListPayload(items=items, selected_preset_file_name=EXAMPLE_PRESET_FILE, selected_preset_name="Default"),
+        # Строки списка программа считает в фоне; здесь — тем же расчётом, но сразу.
+        view_state=build_profile_list_view_state(
+            items, active_profile_types={"all"}, search_query="", group_expanded={}
+        ),
+    )
+    page._open_profile_setup = lambda _reference=None: host.show_page(PageName.ZAPRET2_PROFILE_SETUP)
+
+
+def _fill_profile_setup(_host: "_PageHost", page) -> None:
+    from profile.state import ProfileSetupPayload
+
+    item = _example_profile_items()[0]
+    page._profile_key = item.key
+    page._apply_payload(
+        ProfileSetupPayload(
+            item=item,
+            strategy_entries=_strategy_entries(12),
+            strategy_states={},
+            raw_profile_text="--filter-tcp=443\n--hostlist=lists/youtube.txt",
+            raw_strategy_text="--lua-desync=hostfakesplit",
+            match_summary="TCP 443",
+            strategy_open_group=None,
+        )
+    )
+
+
+def _fill_hosts(_host: "_PageHost", page) -> None:
+    from hosts.page_snapshot import CATEGORY_AI, CATEGORY_DIRECT, CATEGORY_OTHER, HostsPageSnapshot, HostsServiceEntry
+
+    page._set_snapshot(
+        HostsPageSnapshot(
+            services=(
+                HostsServiceEntry("Discord", CATEGORY_DIRECT, "fa5s.globe", None, ("hosts",), None),
+                HostsServiceEntry("Gemini", CATEGORY_AI, "fa5s.globe", None, ("p1", "p2"), None),
+                HostsServiceEntry("Steam", CATEGORY_OTHER, "fa5s.globe", None, ("p1",), None),
+            ),
+            dns_profiles=(("p1", "Профиль 1"), ("p2", "Профиль 2")),
+            direct_profile="hosts",
+            rows={},
+            blocks=(),
+        )
+    )
+
+
+_EXAMPLE_DATA = {
+    PageName.HOSTS: _fill_hosts,
+    PageName.ZAPRET2_USER_PRESETS: _fill_user_presets,
+    PageName.ZAPRET2_PRESET_RAW_EDITOR: _fill_preset_editor,
+    PageName.ZAPRET2_PRESET_SETUP: _fill_preset_setup,
+    PageName.ZAPRET2_PROFILE_SETUP: _fill_profile_setup,
 }
 
 
@@ -501,6 +556,12 @@ class _PageHost:
             if page_name is PageName.NETWORK:
                 # Настоящая страница открывает «Свой DNS» через окно; здесь — через этот же host.
                 page._open_custom_server = lambda _server=None: self.show_page(PageName.NETWORK_CUSTOM_DNS)
+            self._stack.setCurrentWidget(page)
+            fill = _EXAMPLE_DATA.get(page_name)
+            if fill is not None:
+                # Как настоящая загрузка: данные приходят, когда страница уже показана.
+                QApplication.processEvents()
+                fill(self, page)
         self._stack.setCurrentWidget(self.pages[page_name])
         return True
 
@@ -511,97 +572,50 @@ class _PageHost:
         return self._stack.currentWidget()
 
 
-class TourWalkOverRealPagesTests(unittest.TestCase):
-    def setUp(self) -> None:
-        _app()
-        # Заглушки зависимостей иногда роняют фоновые обработчики страниц; без своего
-        # перехватчика PyQt завершил бы процесс на первом же таком исключении.
-        self.slot_errors: list[str] = []
-        hook = patch.object(sys, "excepthook", lambda kind, value, _tb: self.slot_errors.append(f"{kind.__name__}: {value}"))
-        hook.start()
-        self.addCleanup(hook.stop)
+def build_tour_window(test_case: unittest.TestCase):
+    """Окно как у программы: боковое меню с настоящими названиями и страницы, которые строит host."""
+    from app.ui_texts import get_nav_page_label
 
-    def _window(self):
-        window = QWidget()
-        self.addCleanup(window.deleteLater)
-        window.resize(1280, 860)
-        root = QHBoxLayout(window)
-        nav = QWidget(window)
-        nav.setFixedWidth(210)
-        nav_layout = QVBoxLayout(nav)
-        stack = QStackedWidget(window)
-        root.addWidget(nav)
-        root.addWidget(stack, 1)
-        nav_items, nav_header_by_group, nav_headers = {}, {}, []
-        for group, page_names in _NAV_GROUPS.items():
-            if group != "root":
-                header = QLabel(group, nav)
-                nav_layout.addWidget(header)
-                nav_header_by_group[group] = header
-                nav_headers.append((header, page_names, f"nav.header.{group}"))
-            for page_name in page_names:
-                item = QPushButton(page_name.name, nav)
-                nav_layout.addWidget(item)
-                nav_items[page_name] = item
-        nav_layout.addStretch(1)
-        host = _PageHost(window, stack)
-        window.ui_session = SimpleNamespace(
-            nav_items=nav_items,
-            nav_header_by_group=nav_header_by_group,
-            nav_headers=nav_headers,
-            page_host=host,
-        )
-        return window, host
+    window = QWidget()
+    test_case.addCleanup(window.deleteLater)
+    window.resize(1280, 860)
+    root = QHBoxLayout(window)
+    nav = QWidget(window)
+    nav.setFixedWidth(210)
+    nav_layout = QVBoxLayout(nav)
+    stack = QStackedWidget(window)
+    root.addWidget(nav)
+    root.addWidget(stack, 1)
+    nav_items, nav_header_by_group, nav_headers = {}, {}, []
+    for group, page_names in _NAV_GROUPS.items():
+        if group != "root":
+            header = QLabel(group, nav)
+            nav_layout.addWidget(header)
+            nav_header_by_group[group] = header
+            nav_headers.append((header, page_names, f"nav.header.{group}"))
+        for page_name in page_names:
+            item = QPushButton(get_nav_page_label(page_name, language="ru"), nav)
+            nav_layout.addWidget(item)
+            nav_items[page_name] = item
+    nav_layout.addStretch(1)
+    host = _PageHost(window, stack)
+    window.ui_session = SimpleNamespace(
+        nav_items=nav_items,
+        nav_header_by_group=nav_header_by_group,
+        nav_headers=nav_headers,
+        page_host=host,
+    )
+    return window, host
 
-    def test_every_step_with_a_target_is_checked_on_real_pages_or_listed_as_needing_data(self) -> None:
-        from ui.onboarding.steps import TOUR_STEPS
 
-        with_target = {step.key for step in TOUR_STEPS if step.target is not None}
-        self.assertEqual(set(STEPS_WITH_TARGET) & set(STEPS_NEEDING_REAL_DATA), set())
-        self.assertEqual(
-            sorted(with_target - set(STEPS_WITH_TARGET) - set(STEPS_NEEDING_REAL_DATA)),
-            [],
-            "Новый шаг с подсветкой не проверяется на настоящей странице. Добавьте его ключ в "
-            "STEPS_WITH_TARGET (или в STEPS_NEEDING_REAL_DATA, если цели нет без настоящих данных). "
-            "Как править экскурсию: .codex/skills/zapretgui-guided-tour/SKILL.md",
-        )
-        # Удалённый шаг не остаётся в списках.
-        self.assertEqual(sorted((set(STEPS_WITH_TARGET) | set(STEPS_NEEDING_REAL_DATA)) - with_target), [])
-
-    def test_every_new_step_finds_its_target_on_the_real_page(self) -> None:
-        from ui.onboarding.overlay import OnboardingOverlay
-        from ui.onboarding.steps import TOUR_STEPS, build_tour_context
-
-        window, host = self._window()
-        window.show()
-        host.show_page(PageName.ZAPRET2_MODE_CONTROL)
-        QApplication.processEvents()
-        context = build_tour_context(window)
-        context.current_page = host.current_page()
-        with patch("ui.onboarding.overlay.are_live_animations_enabled", return_value=False):
-            overlay = OnboardingOverlay(window, context, TOUR_STEPS)
-        self.assertTrue(overlay.start())
-        self.addCleanup(lambda: overlay.finish("skipped", immediate=True))
-
-        with_target: set[str] = set()
-        on_screen: set[str] = set()
-        for _ in range(len(TOUR_STEPS)):
-            for _ in range(4):
-                QApplication.processEvents()
-                overlay._on_frame()
-            key = overlay.current_step_key()
-            if overlay._targets:
-                with_target.add(key)
-            if overlay._hole is not None:
-                on_screen.add(key)
-            if overlay._index >= len(overlay._steps) - 1:
-                break
-            overlay.go_next()
-
-        self.assertEqual(overlay.current_step_key(), "finish")
-        self.assertEqual(sorted(set(STEPS_WITH_TARGET) - with_target), [])
-        # Цель не только найдена, но и докручена в видимую часть окна.
-        self.assertEqual(sorted(set(STEPS_WITH_TARGET) - on_screen), [])
+def collect_slot_errors(test_case: unittest.TestCase) -> list[str]:
+    """Заглушки зависимостей иногда роняют фоновые обработчики страниц; без своего
+    перехватчика PyQt завершил бы процесс на первом же таком исключении."""
+    errors: list[str] = []
+    hook = patch.object(sys, "excepthook", lambda kind, value, _tb: errors.append(f"{kind.__name__}: {value}"))
+    hook.start()
+    test_case.addCleanup(hook.stop)
+    return errors
 
 
 if __name__ == "__main__":

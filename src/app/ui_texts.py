@@ -6593,16 +6593,18 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     },
     "onboarding.step.list_entries.body": {
         "ru": (
-            "Сверху — «База»: системные записи. Они приходят с программой и обновляются вместе с ней.\n\n"
-            "Снизу — «Ваши записи». Добавляйте сюда свои сайты или адреса, по одному на строку. Они "
-            "лежат в отдельном файле в папке lists/user и не пропадут при обновлении.\n\n"
-            "Движок получает общий список: базу плюс ваши записи."
+            "«Ваши записи» — поле для ваших сайтов или адресов, по одному на строку. Они лежат в "
+            "отдельном файле в папке lists/user и не пропадут при обновлении.\n\n"
+            "«Встроенные записи (только просмотр)» — список, который приходит с программой и обновляется "
+            "вместе с ней; менять его здесь нельзя. В широком окне он стоит справа, в узком — ниже.\n\n"
+            "Движок получает общий список: встроенные записи плюс ваши."
         ),
         "en": (
-            "At the top is Base: the built-in entries. They come with the app and are updated with it.\n\n"
-            "Below are Your entries. Add your own sites or addresses here, one per line. They are "
-            "kept in a separate file in the lists/user folder and survive updates.\n\n"
-            "The engine gets one combined list: the base plus your entries."
+            "Your entries is the field for your own sites or addresses, one per line. They live in a "
+            "separate file in the lists/user folder and survive updates.\n\n"
+            "Built-in entries (read-only) is the list that comes with the app and is updated with it; it "
+            "cannot be changed here. In a wide window it stands on the right, in a narrow one below.\n\n"
+            "The engine receives the combined list: the built-in entries plus yours."
         ),
     },
     "onboarding.step.fakes.title": {

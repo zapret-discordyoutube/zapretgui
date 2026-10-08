@@ -31,16 +31,23 @@ QUOTES_NOT_FROM_THE_PROGRAM = frozenset(
         "на этом сервисе в 13 пресетах",
         "на 28 сервисах",
         "ещё 2",
+        "3 из 5",
         "Снова открываются: Discord",
         # технические примеры
         "multisplit seqovl700",
         "you#tube.com",
+        "you",
+        "tube.com",
         # надписи на чужих сайтах
         "недоступно в вашей стране",
         "not available in your region",
         # пояснения и образные слова
         "имя сайта → адрес",
         "стучится",
+        "испорчен",
+        "срочный",
+        "до",
+        "после",
     }
 )
 
@@ -123,7 +130,8 @@ class TourTextsNameRealThingsTests(unittest.TestCase):
                 if quote in QUOTES_NOT_FROM_THE_PROGRAM:
                     used_exceptions.add(quote)
                     continue
-                if quote not in program:
+                # Название целиком, а не кусок другого слова: «База» не должна находиться в «базах».
+                if re.search(rf"(?<!\w){re.escape(quote)}(?!\w)", program) is None:
                     unknown.setdefault(quote, []).append(key)
 
         self.assertEqual(
