@@ -56,6 +56,11 @@ def _common_candidate_paths() -> list[str | None]:
     ]
 
 
+BLOCKCHECK_RECENT_PATTERNS = ("blockcheck_run_*.json", "zapret_winws2_debug_*.log")
+# Сколько последних файлов каждого вида класть в архив BlockCheck.
+BLOCKCHECK_RECENT_REPORTS = 2
+
+
 def prepare_blockcheck_support_request(
     *,
     run_log_file: str | None,
@@ -63,7 +68,7 @@ def prepare_blockcheck_support_request(
     extra_domains: list[str],
 ) -> SupportRequestFeedback:
     extra_note = (
-        "В архив добавлен отчёт последней проверки BlockCheck (.json), если она уже прошла: в нём и данные, и "
+        "В архив добавлены отчёты двух последних проверок BlockCheck (.json), если они уже прошли: в них и данные, и "
         "текст отчёта, и состояние компьютера (служба фильтрации, антивирус, прокси, часы). "
         "Если вы добавляли свои домены, обязательно укажите в обращении, какие именно адреса дали TIMEOUT, FAIL или TCP_RESET."
     )
@@ -77,7 +82,10 @@ def prepare_blockcheck_support_request(
         bundle_prefix="blockcheck_support",
         context_label=f"BlockCheck: {mode_label}",
         candidate_paths=[run_log_file, report_file, *_common_candidate_paths()],
-        recent_patterns=("blockcheck_run_*.log", "blockcheck_run_*.json", "zapret_winws2_debug_*.log"),
+        # Текстовый журнал проверки больше не пишется: шаблон «blockcheck_run_*.log» подбирал бы
+        # в архив давно устаревший файл. Берём два последних отчёта — пару «с Zapret и без».
+        recent_patterns=BLOCKCHECK_RECENT_PATTERNS,
+        recent_limit=BLOCKCHECK_RECENT_REPORTS,
         extra_note=extra_note,
         discussions_url=BLOCKCHECK_ISSUES_URL,
     )

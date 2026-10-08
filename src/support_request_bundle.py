@@ -379,8 +379,9 @@ def prepare_support_request(
     discussions_url: str | None = None,
     open_discussions: bool = True,
     open_bundle_folder: bool = True,
+    recent_limit: int = 1,
 ) -> PreparedSupportRequest:
-    recent_files = find_recent_logs(patterns=recent_patterns)
+    recent_files = find_recent_logs(patterns=recent_patterns, limit_per_pattern=recent_limit)
     archive_paths, included_files = create_support_archives(
         bundle_prefix=bundle_prefix,
         candidate_paths=[*candidate_paths, *recent_files],

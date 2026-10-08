@@ -52,3 +52,27 @@ class SupportRequestClipboardBoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BlockcheckBundleFilesTests(unittest.TestCase):
+    """В архив обращения BlockCheck идут свежие отчёты, а не забытый текстовый журнал."""
+
+    def test_old_text_log_is_not_picked_and_two_latest_reports_are(self) -> None:
+        import os
+        import tempfile
+        from pathlib import Path
+
+        import support_request_actions as actions
+        from support_request_bundle import find_recent_logs
+
+        # Шаблона текстового журнала проверки больше нет: файл давно не пишется.
+        self.assertFalse(any(pattern.startswith("blockcheck_run_") and pattern.endswith(".log") for pattern in actions.BLOCKCHECK_RECENT_PATTERNS))
+        with tempfile.TemporaryDirectory() as folder:
+            names = ["blockcheck_run_2026-10-08_14-29-04_full.log", "blockcheck_run_1_full.json", "blockcheck_run_2_full.json", "blockcheck_run_3_full.json"]
+            for order, name in enumerate(names):
+                path = Path(folder) / name
+                path.write_text("x", encoding="utf-8")
+                os.utime(path, (1000 + order, 1000 + order))
+            found = find_recent_logs(logs_folder=folder, patterns=actions.BLOCKCHECK_RECENT_PATTERNS, limit_per_pattern=actions.BLOCKCHECK_RECENT_REPORTS)
+        # Два последних отчёта — пара «с Zapret и без»; старый .log в архив не попадает.
+        self.assertEqual([path.name for path in found], ["blockcheck_run_3_full.json", "blockcheck_run_2_full.json"])
