@@ -150,3 +150,32 @@ class BusyThreadsReportTests(unittest.TestCase):
         watchdog._busy_threads_fn = lambda: "  поток: файл.py:1 работа"
         watchdog._report_freeze_started(3.0)
         self.assertIn("Занятые фоновые потоки", logged[0])
+
+
+class FreezeSamplesTests(unittest.TestCase):
+    def test_end_of_freeze_tells_where_the_gui_thread_spent_the_time(self) -> None:
+        # Один стек в начале заморозки — случайное место. Замеры на каждом шаге
+        # показывают, на что ушли секунды: самое частое место идёт первым.
+        from ui import ui_freeze_watchdog as module
+
+        logged: list[str] = []
+        places = iter(["а.py:1 тяжёлое", "а.py:1 тяжёлое", "б.py:2 мелочь", "а.py:1 тяжёлое"])
+        watchdog = module.UiFreezeWatchdog(
+            log_fn=lambda message, _level: logged.append(message),
+            stack_fn=lambda: "стек",
+            busy_threads_fn=lambda: "",
+            sample_fn=lambda: next(places),
+            native_timer=object(),
+        )
+        watchdog.beat = lambda: None
+        watchdog._last_beat = 100.0
+        for moment in (103.0, 103.5, 104.0, 104.5):
+            watchdog.check_once(now=moment)
+        watchdog._last_beat = 104.9
+        watchdog.check_once(now=105.0)
+
+        ended = logged[-1]
+        self.assertIn("Где стоял поток окна", ended)
+        self.assertLess(ended.index("3 из 4: а.py:1 тяжёлое"), ended.index("1 из 4: б.py:2 мелочь"))
+        # Следующая заморозка начинает счёт заново.
+        self.assertEqual(watchdog._samples, {})

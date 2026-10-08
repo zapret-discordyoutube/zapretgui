@@ -64,6 +64,35 @@ def _format_gui_stack() -> str:
     return "".join(lines[-25:]).rstrip()
 
 
+# Сколько верхних кадров стека берётся в один замер и сколько мест показывать в итоге.
+_SAMPLE_DEPTH = 4
+_SAMPLE_PLACES_SHOWN = 6
+
+
+def _sample_gui_stack() -> str:
+    """Короткая метка «где сейчас поток окна»: несколько верхних кадров одной строкой.
+
+    Один стек в начале заморозки показывает случайное место. Чтобы понять, на
+    что ушли секунды, наблюдатель снимает такую метку на каждом шаге, пока
+    окно стоит, и в конце пишет, какие места встречались чаще всего.
+    """
+    import sys
+
+    from ui.ui_thread_guard import gui_thread_id
+
+    try:
+        frame = sys._current_frames().get(gui_thread_id())
+    except Exception:
+        return ""
+    parts: list[str] = []
+    while frame is not None and len(parts) < _SAMPLE_DEPTH:
+        code = frame.f_code
+        name = code.co_filename.replace("\\", "/").rsplit("/", 2)
+        parts.append(f"{'/'.join(name[-2:])}:{frame.f_lineno} {code.co_name}")
+        frame = frame.f_back
+    return " ← ".join(parts)
+
+
 # Вершины стека потоков, которые просто ждут: очередь, условие, сон, select.
 _IDLE_THREAD_FUNCTIONS = frozenset({"wait", "get", "sleep", "select", "_worker", "run_forever", "_run_once"})
 
@@ -125,6 +154,7 @@ class UiFreezeWatchdog(QObject):
         log_fn=None,
         stack_fn=None,
         busy_threads_fn=None,
+        sample_fn=None,
         dump_dir=None,
         native_timer=None,
         parent: QObject | None = None,
@@ -141,6 +171,9 @@ class UiFreezeWatchdog(QObject):
         self._log_fn = log_fn
         self._stack_fn = stack_fn or _format_gui_stack
         self._busy_threads_fn = busy_threads_fn or _format_busy_threads
+        self._sample_fn = sample_fn or _sample_gui_stack
+        # Замеры «где стоит поток окна» за текущую заморозку: место → сколько раз.
+        self._samples: dict[str, int] = {}
         self._dump_dir = dump_dir
         self._native_timer = native_timer
         self._native_timer_owned = native_timer is None
@@ -220,6 +253,7 @@ class UiFreezeWatchdog(QObject):
         stall = self.stall_seconds(moment)
 
         if stall >= self._freeze_threshold:
+            self._take_sample()
             if self._freeze_started_at is None:
                 self._freeze_started_at = moment - stall
                 self._last_report_at = moment
@@ -234,7 +268,25 @@ class UiFreezeWatchdog(QObject):
             self.longest_freeze_seconds = max(self.longest_freeze_seconds, duration)
             self._freeze_started_at = None
             self._report_freeze_ended(duration)
+            self._samples = {}
         return stall
+
+    def _take_sample(self) -> None:
+        try:
+            place = str(self._sample_fn() or "")
+        except Exception:
+            return
+        if place:
+            self._samples[place] = self._samples.get(place, 0) + 1
+
+    def _samples_tail(self) -> str:
+        """Хвост сообщения о конце заморозки: где поток окна стоял чаще всего."""
+        total = sum(self._samples.values())
+        if total < 2:
+            return ""
+        top = sorted(self._samples.items(), key=lambda item: -item[1])[:_SAMPLE_PLACES_SHOWN]
+        lines = [f"  {count} из {total}: {place}" for place, count in top]
+        return "\nГде стоял поток окна (замеры за время блокировки):\n" + "\n".join(lines)
 
     def _watch_loop(self) -> None:
         interval = self._heartbeat_interval_ms / 1000.0
@@ -308,7 +360,9 @@ class UiFreezeWatchdog(QObject):
         if self._is_jitter_mode():
             self._log(f"Интерфейс снова отвечает, рывок длился {self._format_stall(duration)}", "INFO")
             return
-        self._log(f"Интерфейс снова отвечает, блокировка длилась {duration:.1f}с", "INFO")
+        self._log(
+            f"Интерфейс снова отвечает, блокировка длилась {duration:.1f}с{self._samples_tail()}", "INFO"
+        )
 
     # ------------------------------------------------------------------
     # Дампы всех потоков
