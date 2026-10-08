@@ -249,7 +249,7 @@ class BlockcheckProblemsGeoTests(unittest.TestCase):
         from diagnostics.services import _site
 
         service = _site("site", host, host)
-        probe = SimpleNamespace(host=host, reach_state=ReachState.DPI, judgement=None, cause=None, quic=None)
+        probe = SimpleNamespace(host=host, reach_state=ReachState.DPI, judgement=None, cause=None, quic=None, cert=None, hosts_stale=False)
         verdict = ServiceVerdict(Level.FAIL, f"{host} не открывается", (ADVICE_VIA_ZAPRET[0],))
         found, _working, _spoofed = problems.collect_problems(
             {"site": service},

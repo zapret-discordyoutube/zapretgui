@@ -130,7 +130,8 @@ class ProtocolCardsTests(unittest.TestCase):
         rows = {line.name: line.text for line in card.sections[0].lines}
         self.assertEqual(rows["Адрес сервера"], "104.244.42.1")
         self.assertEqual(rows["Какие адреса пробовали"], "151.101.130.146 — нет соединения, 104.244.42.1 — открылся")
-        self.assertIn("запись устарела", rows["Файл hosts"])
+        self.assertIn("записанный в нём адрес не работает", rows["Файл hosts"])
+        self.assertIn("браузер пойдёт по записи", rows["Файл hosts"])
         self.assertEqual(rows["TLS 1.3"], "сброшено")
         counters = {counter.caption: counter.value for counter in build_counters(self.REPORT)}
         self.assertEqual(counters["проб TLS 1.2 / 1.3 / Chrome / HTTP"], 2)
