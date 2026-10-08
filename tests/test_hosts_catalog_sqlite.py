@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.09.2")
+        self.assertEqual(catalog.catalog_version, "2026.10.09.3")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -131,7 +131,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 954)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 5784)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 5799)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -259,8 +259,11 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(first[hostname], "144.31.82.230", hostname)
         # Раздача Spotify идёт напрямую: у неё нет гео-ограничения.
         self.assertNotEqual(first["image-cdn-fa.spotifycdn.com"], "144.31.82.230")
-        for service in ("ChatGPT & Sora (OpenAI)", "Claude", "Gemini AI", "Spotify"):
+        for service in ("ChatGPT & Sora (OpenAI)", "Claude", "Gemini AI", "Spotify", "Twitch", "Web Archive", "Weather.com"):
             self.assertEqual(self.proxy_domains.get_service_available_dns_profiles(service)[0], "zapret_dns", service)
+        # Canva и Intel через сервер не открываются (проверено 2026-10-09): профиля у них нет.
+        for service in ("Canva", "Intel"):
+            self.assertNotIn("zapret_dns", self.proxy_domains.get_service_available_dns_profiles(service), service)
 
     def test_geohide_opens_spotify_through_its_relays(self) -> None:
         """Имена Spotify с гео-ограничением идут через посредников GeoHide, раздача — напрямую."""
