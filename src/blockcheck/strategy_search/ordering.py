@@ -7,6 +7,11 @@
 3. В конец — те, что недавно не сработали на этой цели. Поэтому повторный
    «Быстрый» подбор сам берёт ещё не проверенные стратегии.
 
+Если BlockCheck недавно выяснил, как ведёт себя фильтр (``habit`` — код из
+``diagnostics.filter_habits``), внутри шагов 2 и 3 порядок уточняется: вперёд
+идут приёмы, у которых на таком фильтре есть шанс, в конец — заведомо слабые.
+Ничего не выбрасывается: подсказка меняет только очерёдность.
+
 Стратегия «ничего не делать» (``pass``) в кандидаты не входит: подбор
 использует её как контроль.
 """
@@ -31,6 +36,62 @@ class Candidate:
     strategy_id: str
     name: str
     args: str
+
+
+# Простое дробление пакета: куски идут подряд и ничем не прикрыты.
+_PLAIN_SPLIT = frozenset({"multisplit", "multisplit_tls", "tls_multisplit_sni", "tls_split_gentle", "slowsplit"})
+_DISORDER = frozenset({"multidisorder", "multidisorder_legacy", "fakeddisorder", "tls_disorder_gentle"})
+_FAKES = frozenset({"fake", "fakedsplit", "fakeddisorder", "hostfakesplit", "hostfakesplit_multi", "syndata"})
+_RECORDS = frozenset({"tlsrec"})
+# Привычка фильтра → (каким приёмам дать дорогу, считать ли простое дробление слабым, пояснение для журнала).
+_HABIT_PLANS: dict[str, tuple[frozenset[str], bool, str]] = {
+    "tcp": (_PLAIN_SPLIT | _DISORDER, False, "фильтр не склеивает пакеты — сначала стратегии с дроблением"),
+    "timer": (
+        _DISORDER | _FAKES,
+        True,
+        "фильтр склеивает куски, пришедшие подряд, — сначала смена порядка кусков и подделки, простое дробление в конце",
+    ),
+    "records": (
+        _RECORDS | _FAKES,
+        True,
+        "фильтр склеивает пакеты, но не записи TLS — сначала дробление записи и подделки, простое дробление в конце",
+    ),
+    "none": (
+        _FAKES,
+        True,
+        "фильтр собирает приветствие целиком — сначала подделки и наложение кусков, простое дробление в конце",
+    ),
+}
+
+
+def habit_note(habit: str) -> str:
+    """Пояснение для журнала подбора: как учтена проверка «Как работает фильтр». Пусто — подсказки нет."""
+    plan = _HABIT_PLANS.get(str(habit or ""))
+    return plan[2] if plan else ""
+
+
+def habit_rank(candidate: Candidate, habit: str) -> int:
+    """0 — приём с шансом на таком фильтре, 1 — обычный, 2 — заведомо слабый."""
+    plan = _HABIT_PLANS.get(str(habit or ""))
+    if plan is None:
+        return 1
+    prefer, plain_is_weak, _note = plan
+    functions = set(technique_key(candidate))
+    # Наложение кусков (seqovl) — отдельный приём, даже когда функция называется «дробление».
+    overlap = "seqovl=" in candidate.args
+    if plain_is_weak and functions and functions <= _PLAIN_SPLIT and not overlap:
+        return 2
+    if functions & prefer or (plain_is_weak and overlap):
+        return 0
+    return 1
+
+
+def _by_habit(candidates: Sequence[Candidate], habit: str) -> list[Candidate]:
+    """Группы по шансам, внутри каждой — приёмы по кругу."""
+    ordered: list[Candidate] = []
+    for rank in (0, 1, 2):
+        ordered += interleave_by_technique([item for item in candidates if habit_rank(item, habit) == rank])
+    return ordered
 
 
 def desync_functions(args: str) -> tuple[str, ...]:
@@ -74,6 +135,7 @@ def order_candidates(
     confirmed_ids: Sequence[str] = (),
     failed_at: Mapping[str, float] | None = None,
     now: float = 0.0,
+    habit: str = "",
 ) -> list[Candidate]:
     pool = [candidate for candidate in candidates if not is_pass_strategy(candidate)]
     by_id = {candidate.strategy_id: candidate for candidate in pool}
@@ -95,8 +157,8 @@ def order_candidates(
     recently_failed.sort(key=lambda item: item[0])
     return [
         *first,
-        *interleave_by_technique(fresh),
-        *interleave_by_technique([candidate for _time, candidate in recently_failed]),
+        *_by_habit(fresh, habit),
+        *_by_habit([candidate for _time, candidate in recently_failed], habit),
     ]
 
 

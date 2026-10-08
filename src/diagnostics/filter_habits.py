@@ -508,6 +508,8 @@ def summarize(splits, ech: tuple[str, str], *, tools: Iterable[str] = ()) -> dic
         headline = "на разных сайтах фильтр ведёт себя по-разному — смотрите по каждому отдельно"
     return {
         "headline": headline[:1].upper() + headline[1:],
+        # Общий вывод кодом — для подбора стратегий; пусто, когда вывода нет или пробы шли через обход.
+        "code": decided[0].code if (not tools and len(codes) == 1) else "",
         "advice": advice,
         "disturbed": tools,
         "limits": LIMITS,

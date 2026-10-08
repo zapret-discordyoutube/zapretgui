@@ -216,6 +216,34 @@ def blocked_unless(*working: str):
     return network
 
 
+class FilterHabitTests(unittest.TestCase):
+    """Вывод BlockCheck «Как работает фильтр» меняет очерёдность стратегий и назван в журнале."""
+
+    def _run(self, habit: str, **request):
+        env = FakeEnv(network=blocked_unless(), candidates=[cand("split", "multisplit"), cand("fake", "fake")])
+        env.load_history = lambda key: TargetHistory(habit=habit)
+        _report, events = run(env, **request)
+        started = [args_id(args) for args in events.started_args if args_id(args) not in (None, "pass")]
+        return list(dict.fromkeys(started)), events
+
+    def test_filter_that_reassembles_everything_tries_fakes_first(self) -> None:
+        order, events = self._run("none")
+
+        self.assertEqual(order, ["fake", "split"])
+        self.assertTrue(any("По последней проверке BlockCheck" in line for line in events.logs))
+
+    def test_without_habit_order_and_log_are_as_before(self) -> None:
+        order, events = self._run("")
+
+        self.assertEqual(order, ["split", "fake"])
+        self.assertFalse(any("BlockCheck" in line for line in events.logs))
+
+    def test_habit_is_about_tls_and_does_not_touch_voice_search(self) -> None:
+        _order, events = self._run("none", scan_protocol="stun_voice")
+
+        self.assertFalse(any("По последней проверке BlockCheck" in line for line in events.logs))
+
+
 class BaselineTests(unittest.TestCase):
     def test_open_without_bypass_asks_and_stops_when_declined(self) -> None:
         env = FakeEnv(network=lambda running, n: OK, candidates=[cand("a"), cand("b")])

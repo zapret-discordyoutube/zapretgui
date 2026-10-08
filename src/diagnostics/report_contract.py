@@ -41,6 +41,9 @@ CARD_FIELDS: tuple[str, ...] = (
     "environment",
     "zapret_line",
     "other_bypass_tools",
+    "preset",
+    # Карточка «С Zapret и без»: сравнение с прошлой проверкой в противоположном состоянии обхода.
+    "compare",
 )
 
 # Поля, которые читает панель итога и страница.

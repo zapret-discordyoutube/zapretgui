@@ -115,8 +115,17 @@ class BlockcheckFeature:
     def check_dns_servers(self, *args, **kwargs):
         return self._worker_commands().check_dns_servers(*args, **kwargs)
 
-    def remember_blockcheck_run(self, *args, **kwargs):
-        return self._worker_commands().remember_blockcheck_run(*args, **kwargs)
+    def remember_blockcheck_run(self, report, log_file):
+        return self._worker_commands().remember_blockcheck_run(report, log_file, preset=self._selected_preset_name())
+
+    def _selected_preset_name(self) -> str:
+        """Название выбранного пресета — чтобы сравнение «с Zapret и без» называло, что проверялось."""
+        try:
+            from settings.dpi.launch_method import get_current_launch_method
+
+            return str(self.presets_feature.get_selected_source_preset_display(get_current_launch_method(default=""))[0])
+        except Exception:
+            return ""
 
     def load_past_blockcheck_report(self, *args, **kwargs):
         return self._worker_commands().load_past_blockcheck_report(*args, **kwargs)

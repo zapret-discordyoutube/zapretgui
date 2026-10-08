@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import diagnostics.engine as engine
-from diagnostics import net_access, sections
+from diagnostics import net_access, reach, sections
 from diagnostics.tls_probe import (
     KIND_CERT,
     KIND_CONNECT,
@@ -280,7 +280,7 @@ class _Net:
             ),
             patch.object(net_access, "https_get", side_effect=_https_get),
             # Пауза перед повтором нужна настоящей сети; сценариям она только добавляет секунды.
-            patch.object(engine, "RETRY_PAUSE_S", 0.0),
+            patch.object(reach, "RETRY_PAUSE_S", 0.0),
             # Уточнение причины ходит в сеть само: в сценариях движка оно подменено.
             patch.object(engine.block_cause, "collect", side_effect=self._collect),
             patch.object(engine.quic_probe, "collect", side_effect=self._quic),
@@ -289,7 +289,7 @@ class _Net:
             patch.object(sections, "check_ipv6", side_effect=lambda _run: self.ipv6),
             # «Ваша сеть» и дата-центры Telegram ходят в сеть сами: в сценариях движка их нет.
             patch.object(sections, "check_network", side_effect=lambda _run, _tools: self.network),
-            patch.object(sections, "check_speed", side_effect=lambda _run, _emit: self.speed),
+            patch.object(sections, "check_speed", side_effect=lambda _run, _emit, *_sites: self.speed),
             patch.object(engine.telegram_check, "check_telegram", side_effect=lambda *_a, **_k: self.telegram),
             patch.object(sections, "check_system", side_effect=lambda _run, _services, _zapret=None: self.system_items),
             patch.object(net_access, "hosts_file_ipv4", return_value=()),
@@ -1027,7 +1027,7 @@ class EngineScenarioTests(unittest.TestCase):
             return _ok(ip)
 
         net = _Net(https=_https)
-        with patch.object(engine, "RETRY_PAUSE_S", 0.0):
+        with patch.object(reach, "RETRY_PAUSE_S", 0.0):
             result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
 
         discord = next(item for item in result["services"] if item["key"] == "discord")
@@ -1166,7 +1166,7 @@ class EngineMixedAnswerTests(unittest.TestCase):
         run = engine._Run(None, workers=1, deadline=0)
         self.addCleanup(run.close)
 
-        engine._check_reach(run, probe, read_limit=0)
+        reach.check_reach(run, probe, read_limit=0)
 
         self.assertEqual(judge_reach(probe.reach), ReachState.UNKNOWN)
 

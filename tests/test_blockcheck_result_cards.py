@@ -230,6 +230,76 @@ class CardsModelTests(unittest.TestCase):
         self.assertEqual(build_counters({}), [])
 
 
+class NewSectionsCardsTests(unittest.TestCase):
+    """Сравнение «с Zapret и без», замедление по имени и время по частям — на карточках."""
+
+    COMPARE = {
+        "level": "warn",
+        "headline": "Пресет «Default» чинит не всё: помог 1, не помог 1",
+        "preset": "Default",
+        "zapret_in": "current",
+        "other_time": "2026-10-08T12:00:00",
+        "helped": ["YouTube"],
+        "not_helped": ["Telegram"],
+        "fine_anyway": [],
+        "broken": [],
+        "notes": ["Это итог для выбранного пресета."],
+    }
+
+    @staticmethod
+    def _card(report: dict, key: str) -> Card:
+        return next(card for card in build_cards(report) if card.key == key)
+
+    def test_compare_card_names_groups_preset_and_the_other_run(self) -> None:
+        card = self._card({"compare": self.COMPARE}, "compare")
+        text = " ".join(f"{line.name} {line.text}" for section in card.sections for line in section.lines)
+
+        self.assertEqual((card.level, card.title), ("warn", "С Zapret и без"))
+        self.assertEqual([(line.state, line.text) for line in card.lines], [("ok", "YouTube"), ("fail", "Telegram")])
+        for expected in ("Default", "08.10 12:00", "без Zapret", "Это итог для выбранного пресета."):
+            self.assertIn(expected, text)
+        # Пустые группы не показываются.
+        self.assertFalse(any("перестали" in section.title for section in card.sections))
+
+    def test_no_comparison_no_card(self) -> None:
+        self.assertFalse([card for card in build_cards({"compare": None}) if card.key == "compare"])
+
+    def test_speed_card_shows_throttling_by_name(self) -> None:
+        speed = {
+            "level": "ok",
+            "headline": "Заметной разницы нет",
+            "items": [{"name": "OVH", "state": "ok", "text": "40 Мбит/с"}],
+            "names": {
+                "headline": "Замедляют по имени сайта: YouTube",
+                "server": "mirror.yandex.ru",
+                "control": "40 Мбит/с",
+                "items": [
+                    {"name": "YouTube", "host": "www.youtube.com", "state": "warn", "text": "0.2 Мбит/с — замедляют"},
+                    {"name": "GitHub", "host": "github.com", "state": "ok", "text": "38 Мбит/с"},
+                ],
+            },
+        }
+        card = self._card({"speed": speed}, "speed")
+        rows = [(line.state, line.name) for line in card.sections[0].lines]
+
+        self.assertEqual((card.level, card.status), ("warn", "Замедляют: YouTube"))
+        self.assertIn(("warn", "YouTube (www.youtube.com)"), rows)
+        self.assertIn(("ok", "GitHub (github.com)"), rows)
+        self.assertIn("mirror.yandex.ru", rows[0][1])
+
+        calm = dict(speed, names=dict(speed["names"], items=[speed["names"]["items"][1]]))
+        calm_card = self._card({"speed": calm}, "speed")
+        self.assertEqual((calm_card.level, calm_card.status), ("ok", "Разницы нет"))
+        self.assertTrue(any("GitHub" in line.name for section in calm_card.sections for line in section.lines))
+
+    def test_site_row_tells_where_the_time_went(self) -> None:
+        from diagnostics.report_text import stages_text
+
+        self.assertEqual(stages_text({"dns": 0.4, "reach": 6.2, "cause": 3.0, "roads": 1.0}), "соединение 6 с, причина 3 с, дороги 1 с")
+        self.assertEqual(stages_text({"dns": 0.2}), "")
+        self.assertEqual(stages_text(None), "")
+
+
 class CardsWidgetsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

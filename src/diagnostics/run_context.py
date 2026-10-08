@@ -83,6 +83,15 @@ class Probe:
     rechecked: str = ""
     # Сколько секунд заняла проверка этого адреса: по ней видно, на каких сайтах уходит время.
     seconds: float = 0.0
+    # То же по частям проверки (см. ``STAGE_TITLES``): адрес, соединение, причина, объём, дороги.
+    stages: dict[str, float] = field(default_factory=dict)
+    _marked_at: float = field(default_factory=time.monotonic)
+
+    def mark(self, stage: str) -> None:
+        """Закончилась часть проверки ``stage``: запоминает, сколько она шла."""
+        now = time.monotonic()
+        self.stages[stage] = round(self.stages.get(stage, 0.0) + now - self._marked_at, 1)
+        self._marked_at = now
 
     @property
     def browser_only(self) -> bool:

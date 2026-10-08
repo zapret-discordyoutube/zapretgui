@@ -57,21 +57,17 @@ from diagnostics import report_text
 from diagnostics.limits import (
     DISCOVERY_TIMEOUT,
     DNS_ATTEMPTS,
-    REACH_ADDRESSES,
     REGISTRY_WAIT_S,
     RECHECK_AT_ONCE,
     RECHECK_NEEDS_S,
     RECHECK_SITES,
-    RETRY_PAUSE_S,
     RUN_DEADLINE,
     RUN_DEADLINE_ALL,
     RUN_DEADLINE_FULL,
     SITES_AT_ONCE,
-    SOURCE_HOSTS,
-    SOURCE_REFERENCE,
-    SOURCE_SYSTEM,
     VIDEO_SERVERS,
 )
+from diagnostics.reach import check_reach as _check_reach, pause as _pause
 from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe as _Probe, Run as _Run
 from diagnostics.run_context import Live as _Live, Steps as _Steps, Stopped as _Stopped
 from diagnostics.services import (
@@ -87,11 +83,7 @@ from diagnostics.services import (
     site_service,
 )
 from diagnostics.tls_probe import (
-    CONNECT_TIMEOUT,
-    KIND_CONNECT,
     KIND_CANCELLED,
-    KIND_CERT,
-    ProbeResult,
 )
 from diagnostics.verdict import (
     FREEZE_MAX_BYTES,
@@ -109,7 +101,6 @@ from utils.dns_reference import REFERENCE_RESOLVERS
 from utils.dns_wire import TYPE_A, TYPE_AAAA
 from utils.windows_dns_query import (
     DNS_STATUS_NAME_ERROR,
-    ERROR_CANCELLED,
     DnsAnswer,
 )
 
@@ -194,140 +185,6 @@ def _discover_googlevideo(run: _Run) -> tuple[tuple[str, ...], str]:
         if result.kind == KIND_CANCELLED:
             break
     return (GOOGLEVIDEO_FALLBACK_HOST,), "страница YouTube не открылась, поэтому проверяем общий адрес видеосерверов"
-
-
-def _reach_order(probe: _Probe, *, local_ok: bool) -> tuple[list[str], str]:
-    """Адреса для проверки «открывается ли» и откуда они взяты."""
-    if probe.hosts_ips:
-        return list(probe.hosts_ips), SOURCE_HOSTS
-    reference = set(probe.reference_ips)
-    # Сначала адреса, которые подтвердил эталон: если DNS «через раз»
-    # подсовывает чужой адрес, открываемость сайта проверяется по настоящему.
-    system = sorted(probe.dns.ips, key=lambda ip: ip not in reference)
-    matches = bool(set(system) & reference)
-    if system and (local_ok or matches or not probe.reference_ips):
-        return system, SOURCE_SYSTEM
-    return list(probe.reference_ips), SOURCE_REFERENCE
-
-
-def _reach_candidates(probe: _Probe, order: list[str]) -> list[str]:
-    """Все известные адреса сайта: сначала те, что выбрал ``_reach_order``, затем остальные.
-
-    Запись в hosts или ответ DNS могут вести на неотвечающий адрес — тогда
-    сайт перепроверяется по остальным, как это сделал бы браузер.
-    """
-    seen: list[str] = []
-    for ip in (*order, *probe.dns.ips, *probe.reference_ips):
-        if ip and ip not in seen:
-            seen.append(ip)
-    if not seen:
-        return seen
-    # После первого адреса — сначала адреса из других сетей: соседние адреса
-    # одной сети обычно закрыты или открыты все разом, и четыре попытки в
-    # одну сеть ничего не перепроверили бы.
-    first, rest = seen[0], seen[1:]
-    by_network: dict[str, list[str]] = {}
-    for ip in rest:
-        by_network.setdefault(_network_of(ip), []).append(ip)
-    groups = sorted(by_network.items(), key=lambda item: item[0] == _network_of(first))
-    spread: list[str] = []
-    while any(items for _network, items in groups):
-        for _network, items in groups:
-            if items:
-                spread.append(items.pop(0))
-    return [first, *spread]
-
-
-def _network_of(ip: str) -> str:
-    """Сеть адреса для грубого сравнения: первые два числа IPv4."""
-    return ".".join(ip.split(".")[:2]) if "." in ip else ip.split(":")[0]
-
-
-def _pause(run: _Run, seconds: float) -> None:
-    """Пауза, которую снимает «Стоп» и общий лимит времени."""
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline and not run.dns_cancelled():
-        time.sleep(0.05)
-
-
-def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
-    local = probe.local_check
-    order, source = _reach_order(probe, local_ok=bool(local and local.ok))
-    probe.reach_source = source
-    if not order:
-        # Адреса нет потому, что проверку прервали (лимит времени или «Стоп»),
-        # — это «не успели», а не «не удалось узнать адрес».
-        if run.dns_cancelled() or probe.dns.status == ERROR_CANCELLED:
-            probe.reach = ProbeResult(ip="", kind=KIND_CANCELLED)
-        return
-
-    def _one(ip: str) -> ProbeResult:
-        return net_access.get(run, probe.host, ip, probe.target.path, read_limit=read_limit)
-
-    def _settled(items: list[ProbeResult]) -> bool:
-        return any(item.ok or item.kind == KIND_CANCELLED for item in items)
-
-    attempts: list[ProbeResult] = []
-    if local is not None and local.ip == order[0]:
-        attempts.append(local)
-    elif run.dns_cancelled():
-        # Проверку прервали до первого запроса: это «не успели», а не «не открывается».
-        probe.reach = ProbeResult(ip="", kind=KIND_CANCELLED)
-        return
-    else:
-        attempts.append(_one(order[0]))
-
-    candidates = _reach_candidates(probe, order)
-    others = [ip for ip in candidates if ip != attempts[0].ip][: REACH_ADDRESSES - 1]
-    # Чужой сертификат на адресе — повод попробовать другой адрес, но не тот же ещё раз.
-    if not _settled(attempts) and not run.dns_cancelled():
-        if others:
-            # Остальные адреса пробуются разом: ждать их по очереди — это десятки секунд.
-            futures = [run.submit(_one, ip) for ip in others]
-            attempts.extend(future.result() for future in futures)
-            if all(item.kind == KIND_CONNECT for item in attempts) and not run.dns_cancelled():
-                # Все адреса пробовались в одну секунду: короткий сбой сети задел бы их
-                # разом. Ещё одна попытка после паузы отделяет сбой от блокировки.
-                _pause(run, RETRY_PAUSE_S)
-                if not run.dns_cancelled():
-                    attempts.append(_one(order[0]))
-        elif attempts[0].kind != KIND_CERT:
-            _pause(run, RETRY_PAUSE_S)
-            if not run.dns_cancelled():
-                attempts.append(_one(order[0]))
-
-    probe.attempts = len(attempts)
-    probe.tried = tuple((item.ip, item.kind) for item in attempts if item.kind != KIND_CANCELLED)
-    probe.tried_silent = bool(probe.tried) and all(
-        item.kind == KIND_CONNECT and item.connect_fail == CONNECT_TIMEOUT
-        for item in attempts
-        if item.kind != KIND_CANCELLED
-    )
-    opened = next((item for item in attempts if item.ok), None)
-    probe.reach = opened or attempts[0]
-    if opened is None and run.dns_cancelled() and len(probe.tried) < 2:
-        # Время вышло раньше перепроверки: один сбой — это «не успели», а не «не открывается».
-        probe.reach = ProbeResult(ip=attempts[0].ip, kind=KIND_CANCELLED)
-        return
-    if opened is not None and opened.ip not in order:
-        # Открылся адрес не из того источника, с которого начинали.
-        probe.reach_source = SOURCE_SYSTEM if opened.ip in probe.dns.ips else SOURCE_REFERENCE
-        probe.hosts_stale = source == SOURCE_HOSTS
-
-    # Браузер сам уходит на IPv6, если IPv4 не отвечает: без этой попытки
-    # проверка показала бы ❌ там, где сайт у пользователя открывается.
-    last = probe.reach
-    if (
-        last is not None
-        and not last.ok
-        and last.kind not in (KIND_CANCELLED, KIND_CERT)
-        and probe.reference_ipv6
-        and not run.dns_cancelled()
-    ):
-        probe.ipv6_result = _one(probe.reference_ipv6[0])
-        if probe.ipv6_result.ok:
-            probe.reach = probe.ipv6_result
-            probe.hosts_stale = source == SOURCE_HOSTS
 
 
 def _merge_dns_answers(answers: list[DnsAnswer]) -> tuple[DnsAnswer, int]:
@@ -415,23 +272,27 @@ def _probe_host(
         nxdomain_count=probe.dns_nxdomain,
         attempts=DNS_ATTEMPTS,
     )
-
+    probe.mark("dns")
     if full:
         if doh6_future is not None:
             probe.reference_ipv6 = doh6_future.result()[1]
         _check_reach(run, probe, read_limit=read_limit)
         probe.reach_state = judge_reach(probe.reach)
+        probe.mark("reach")
         # Пакеты QUIC уходят сразу, а ждём их после уточнения причины: обе
         # проверки идут одновременно.
         quic_future = _start_quic(run, probe)
         protocols_future = _start_protocols(run, probe)
         _refine_cause(run, probe)
+        probe.mark("cause")
         if volume:
             _check_volume(run, probe)
+            probe.mark("volume")
         if quic_future is not None:
             probe.quic = quic_probe.judge(quic_future.result())
         if protocols_future is not None:
             probe.settle_protocols(protocol_probe.judge(protocols_future.result()))
+        probe.mark("roads")
     return probe
 
 
@@ -841,7 +702,8 @@ def run_blockcheck(
         habits = _attempt(emit, "Как работает фильтр", habits_call) if extra else None
         if full:
             step(STEP_FILTER)
-        speed = _attempt(emit, "Скорость", lambda: sections.check_speed(run, emit)) if full and not run.dns_cancelled() else None
+        speed_call = functools.partial(sections.check_speed, run, emit, collected, services)
+        speed = _attempt(emit, "Скорость", speed_call) if full and not run.dns_cancelled() else None
         live.put(filter=filter_place, habits=habits, speed=speed)
 
         problems, working, spoofed = problem_rules.collect_problems(
@@ -859,7 +721,7 @@ def run_blockcheck(
             other_tools=other_tools,
         )
         problems += problem_rules.burst_problems(burst)
-        problems += sections.dns_problems(dns_servers)
+        problems += sections.dns_problems(dns_servers) + sections.speed_problems(speed, zapret_running=zapret_running)
         problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
         registry_index = registry_wait(REGISTRY_WAIT_S)

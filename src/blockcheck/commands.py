@@ -143,25 +143,41 @@ def check_dns_servers(*, should_stop=None) -> dict:
     return {"level": level, "findings": findings, "text": server_check_plans.build_text_report(report)}
 
 
-def remember_blockcheck_run(report: dict, log_file: str | None) -> dict:
+def remember_blockcheck_run(report: dict, log_file: str | None, *, preset: str = "") -> dict:
     """Записывает прогон в историю и сохраняет его отчёт в файл ``log_file`` (``.json``).
 
+    ``preset`` — название выбранного пресета. В отчёт дописывается, с каким пресетом шла
+    проверка и что показало сравнение с прошлой проверкой в противоположном состоянии
+    Zapret (``report["compare"]``, см. ``diagnostics.compare``).
+
     Возвращает, что изменилось с прошлой такой же проверки:
-    ``{"changes": [...], "previous_time": "...", "json_file": "..."}``.
+    ``{"changes": [...], "previous_time": "...", "json_file": "...", "lines": [...]}``;
+    ``lines`` — строки, дописанные к тексту отчёта.
     """
-    from diagnostics import history
+    from diagnostics import compare, history
     from settings.store import add_check_history_run, get_check_history
 
-    entry = history.blockcheck_entry(report, log_file=str(log_file or ""))
-    previous = history.previous_run(get_check_history(), entry)
+    entry = history.blockcheck_entry(report, log_file=str(log_file or ""), preset=preset)
+    past = get_check_history()
+    previous = history.previous_run(past, entry)
+    changes = history.describe_changes(previous, entry)
+    previous_time = str(previous.get("time") or "") if previous else ""
+    report["preset"] = str(preset or "")
+    report["compare"] = compare.compare_runs(entry, compare.counterpart(past, entry))
+    lines = compare.lines(report["compare"], format_time=history.format_time)
+    if changes:
+        lines += ["", f"🕘 С прошлой проверки ({history.format_time(previous_time)}) {'; '.join(changes)}."]
+    # Текст отчёта лежит в том же файле: дописанное должно попасть и в него.
+    report["text"] = [*(report.get("text") or ()), *lines]
     runs = add_check_history_run(entry)
 
     json_file = save_blockcheck_report(report, os.path.splitext(str(log_file))[0] + ".json", entry=entry) if log_file else ""
     return {
-        "changes": history.describe_changes(previous, entry),
-        "previous_time": str(previous.get("time") or "") if previous else "",
+        "changes": changes,
+        "previous_time": previous_time,
         "json_file": json_file,
         "history": runs,
+        "lines": lines,
     }
 
 

@@ -33,7 +33,7 @@ from typing import Protocol
 
 from blockcheck.scan_models import StrategyProbeResult, StrategyScanReport
 from blockcheck.strategy_search import verdict as rules
-from blockcheck.strategy_search.ordering import Candidate, batch_for_mode, order_candidates
+from blockcheck.strategy_search.ordering import Candidate, batch_for_mode, habit_note, order_candidates
 from blockcheck.strategy_search.probe_profile import (
     PROTOCOL_STUN_VOICE,
     PROTOCOL_TCP_HTTPS,
@@ -339,12 +339,17 @@ class StrategySearch:
     def _select_batch(self, key: str) -> tuple[list[Candidate], int]:
         candidates = self._env.load_candidates(self._protocol)
         history = self._env.load_history(key)
+        # Привычки фильтра BlockCheck выясняет на TLS поверх TCP — к звонкам и играм они не относятся.
+        habit = str(getattr(history, "habit", "") or "") if self._protocol == PROTOCOL_TCP_HTTPS else ""
         ordered = order_candidates(
             candidates,
             confirmed_ids=getattr(history, "confirmed", ()) or (),
             failed_at={} if self._request.from_start else (getattr(history, "failed", {}) or {}),
             now=self._env.wall_time(),
+            habit=habit,
         )
+        if habit_note(habit):
+            self._events.log(f"По последней проверке BlockCheck: {habit_note(habit)}.")
         if not ordered:
             raise ScanFatal("Каталог стратегий пуст: переустановите программу.", STOP_OTHER)
         return batch_for_mode(ordered, self._request.mode), len(ordered)

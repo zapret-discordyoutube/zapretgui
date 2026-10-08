@@ -373,7 +373,22 @@
     "state": "ok",
     "text": "81 Мбит/с"
    }
-  ]
+  ],
+  "names": {
+   "level": "warn",
+   "headline": "Замедляют по имени сайта: YouTube",
+   "server": "mirror.yandex.ru",
+   "control": "40 Мбит/с",
+   "items": [
+    {
+     "name": "YouTube",
+     "host": "www.youtube.com",
+     "kbps": 25.0,
+     "state": "warn",
+     "text": "0.2 Мбит/с против 40 Мбит/с с тем же сервером под его собственным именем — соединения с этим именем замедляют"
+    }
+   ]
+  }
  },
  "ipv6": {
   "state": "unknown",
@@ -505,5 +520,26 @@
  "text": [
   "строка отчёта"
  ],
- "history": []
+ "history": [],
+ "preset": "Default v5",
+ "compare": {
+  "level": "warn",
+  "headline": "Пресет «Default v5» чинит не всё: помог 1, не помог 1",
+  "preset": "Default v5",
+  "zapret_in": "current",
+  "other_time": "2026-10-08T12:00:00",
+  "helped": [
+   "YouTube"
+  ],
+  "not_helped": [
+   "Telegram"
+  ],
+  "fine_anyway": [
+   "GitHub"
+  ],
+  "broken": [],
+  "notes": [
+   "Это итог для выбранного пресета, а не для Zapret вообще."
+  ]
+ }
 }

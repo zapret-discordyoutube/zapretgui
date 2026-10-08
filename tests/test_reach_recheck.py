@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from diagnostics import block_kind as bk
-from diagnostics import engine, net_access, report_text
+from diagnostics import engine, net_access, reach, report_text
 from diagnostics.tls_probe import KIND_CONNECT, KIND_OK, KIND_TIMEOUT, ProbeResult
 from diagnostics.verdict import ReachState, judge_reach
 from utils.windows_dns_query import DnsAnswer
@@ -45,8 +45,8 @@ class ReachRecheckTests(unittest.TestCase):
 
         run = engine._Run(None, workers=8, deadline=60)
         self.addCleanup(run.close)
-        with patch.object(net_access, "get", side_effect=_get), patch.object(engine, "RETRY_PAUSE_S", 0.0):
-            engine._check_reach(run, probe, read_limit=0)
+        with patch.object(net_access, "get", side_effect=_get), patch.object(reach, "RETRY_PAUSE_S", 0.0):
+            reach.check_reach(run, probe, read_limit=0)
         probe.reach_state = judge_reach(probe.reach)
         if quic_ok:
             probe.quic = engine.quic_probe.QuicVerdict(engine.quic_probe.QUIC_OK, "отвечает")
@@ -59,7 +59,7 @@ class ReachRecheckTests(unittest.TestCase):
         self.assertEqual(asked[0], HOSTS_IP)
         self.assertEqual(probe.reach_state, ReachState.OK)
         self.assertTrue(probe.hosts_stale)
-        self.assertNotEqual(probe.reach_source, engine.SOURCE_HOSTS)
+        self.assertNotEqual(probe.reach_source, reach.SOURCE_HOSTS)
         self.assertEqual(probe.kind, "")
         self.assertIn("запись в нём устарела", report_text.reach_text(probe))
 
@@ -88,7 +88,9 @@ class ReachRecheckTests(unittest.TestCase):
         self.assertEqual(set(asked), set(REAL))
         # Три адреса разом и ещё одна попытка на первом после паузы.
         self.assertEqual(len(asked), 4)
-        self.assertEqual(probe.tried, tuple((ip, KIND_CONNECT) for ip in asked))
+        # Запасные адреса уходят одновременно: их порядок в ``asked`` случаен.
+        self.assertEqual(sorted(probe.tried), sorted((ip, KIND_CONNECT) for ip in asked))
+        self.assertEqual((probe.tried[0][0], probe.tried[-1][0]), (REAL[0], REAL[0]))
         self.assertTrue(probe.address_confirmed)
         self.assertEqual(probe.kind, bk.KIND_IP)
         self.assertIn("не ответил ни один из 3 адресов", report_text.reach_text(probe))
@@ -158,7 +160,7 @@ class ReachRecheckTests(unittest.TestCase):
         many = tuple(f"10.0.0.{n}" for n in range(1, 10))
         _probe, asked = self._reach(_dead, system=many, reference=many)
 
-        self.assertEqual(len(set(asked)), engine.REACH_ADDRESSES)
+        self.assertEqual(len(set(asked)), reach.REACH_ADDRESSES)
 
     def test_other_networks_are_tried_before_neighbours(self) -> None:
         """У сайта пять адресов одной сети молчат, а адрес другой сети открывается."""
@@ -185,16 +187,47 @@ class ReachRecheckTests(unittest.TestCase):
             return _dead(ip)
 
         with patch.object(net_access, "get", side_effect=_get):
-            engine._check_reach(run, probe, read_limit=0)
+            reach.check_reach(run, probe, read_limit=0)
 
         self.assertEqual(judge_reach(probe.reach), ReachState.UNKNOWN)
         self.assertEqual(probe.kind, "")
+
+    def test_silent_first_address_does_not_hold_back_the_others(self) -> None:
+        # Первый адрес молчит весь свой срок. Остальные должны уйти, не дожидаясь его:
+        # иначе каждый закрытый сайт стоил бы проверке лишних секунд.
+        import threading
+        import time
+
+        first_done = threading.Event()
+        order: list[str] = []
+
+        def _answers(ip: str) -> ProbeResult:
+            if ip == REAL[0]:
+                time.sleep(0.4)
+                first_done.set()
+            else:
+                order.append("after" if first_done.is_set() else "before")
+            return _dead(ip)
+
+        with patch.object(reach, "HEAD_START_S", 0.05):
+            self._reach(_answers)
+
+        self.assertTrue(order)
+        self.assertEqual(set(order[: len(REAL) - 1]), {"before"})
+
+    def test_quick_first_address_is_the_only_one_asked(self) -> None:
+        _probe, asked = self._reach(_ok)
+
+        self.assertEqual(asked, [REAL[0]])
 
     def test_report_tells_which_addresses_were_tried(self) -> None:
         probe, asked = self._reach(_dead)
         report = report_text.target_report(probe)
 
-        self.assertEqual(report["tried"], [{"address": ip, "result": "connect"} for ip in asked])
+        # Запасные адреса пробуются одновременно, поэтому их порядок в ``asked`` случаен.
+        tried = [item["address"] for item in report["tried"]]
+        self.assertEqual((tried[0], tried[-1], sorted(tried)), (asked[0], asked[-1], sorted(asked)))
+        self.assertEqual({item["result"] for item in report["tried"]}, {"connect"})
         self.assertTrue(report["address_confirmed"])
         self.assertEqual(report["kind"], "ip")
 

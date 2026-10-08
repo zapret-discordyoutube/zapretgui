@@ -48,6 +48,8 @@ CHECK_HISTORY_TEXT_LIMIT = 400
 CHECK_HISTORY_PROBLEMS_LIMIT = 12
 CHECK_HISTORY_STATES_LIMIT = 80
 CHECK_HISTORY_LEVELS = frozenset({"ok", "warn", "fail", "unknown"})
+# Работал ли Zapret во время проверки; пусто — узнать не удалось.
+CHECK_HISTORY_ZAPRET = frozenset({"on", "off", ""})
 
 ORCHESTRA_ASKEYS = (
     "tls",

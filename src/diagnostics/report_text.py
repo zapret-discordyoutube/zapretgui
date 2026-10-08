@@ -26,6 +26,16 @@ QUIC_ICON = {
 
 
 # Короткие названия шагов для строки «сколько шёл каждый шаг».
+# Части проверки одного сайта — на что ушло его время.
+STAGE_TITLES = {"dns": "адрес", "reach": "соединение", "cause": "причина", "volume": "объём", "roads": "дороги"}
+
+
+def stages_text(stages: dict | None) -> str:
+    """«соединение 6 с, причина 3 с» — только части длиннее секунды, от долгих к коротким."""
+    parts = sorted(((float(value), name) for name, value in (stages or {}).items() if float(value) >= 1.0), reverse=True)
+    return ", ".join(f"{STAGE_TITLES.get(name, name)} {value:.0f} с" for value, name in parts)
+
+
 STEP_TITLES = {
     "sites": "сайты",
     "hostings": "хостинги",
@@ -199,6 +209,8 @@ def target_report(probe: Probe) -> dict:
         # Повторная проверка поодиночке: "opened" — открылся со второго раза, "same" — сбой повторился.
         "rechecked": probe.rechecked,
         "seconds": round(probe.seconds, 1),
+        # На что ушло время: части проверки по порядку (названия — в ``STAGE_TITLES``).
+        "stages": dict(probe.stages),
         "note": probe.discovery_note,
     }
 

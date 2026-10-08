@@ -172,6 +172,51 @@ class OrderingTests(unittest.TestCase):
         # Недавно не сработавшая — в самом конце.
         self.assertEqual(ids[-1], "fake2")
 
+    def _ids(self, habit: str, **extra) -> list[str]:
+        candidates = [
+            self.make("split1", "multisplit"),
+            self.make("split2", "multisplit"),
+            Candidate("overlap", "overlap", "--lua-desync=multisplit:pos=1:seqovl=5"),
+            self.make("fake1", "fake"),
+            self.make("disorder", "multidisorder"),
+            self.make("records", "tlsrec"),
+            self.make("other", "udplen"),
+        ]
+        return [candidate.strategy_id for candidate in order_candidates(candidates, habit=habit, **extra)]
+
+    def test_without_filter_habit_order_is_untouched(self) -> None:
+        self.assertEqual(self._ids(""), self._ids("непонятный код"))
+        self.assertEqual(self._ids("")[:2], ["split1", "fake1"])
+
+    def test_filter_that_reassembles_everything_puts_plain_split_last(self) -> None:
+        ids = self._ids("none")
+
+        # Подделки и наложение кусков — вперёд, простое дробление — в конец; ничего не выброшено.
+        self.assertEqual(set(ids[:2]), {"overlap", "fake1"})
+        self.assertEqual(ids[-2:], ["split1", "split2"])
+        self.assertEqual(len(ids), 7)
+
+    def test_filter_that_does_not_reassemble_packets_puts_split_first(self) -> None:
+        ids = self._ids("tcp")
+
+        self.assertEqual(set(ids[:4]), {"split1", "split2", "overlap", "disorder"})
+
+    def test_record_split_goes_first_when_only_records_pass(self) -> None:
+        ids = self._ids("records")
+
+        self.assertLess(ids.index("records"), ids.index("disorder"))
+        self.assertEqual(ids[-2:], ["split1", "split2"])
+
+    def test_confirmed_strategy_stays_first_whatever_the_habit(self) -> None:
+        self.assertEqual(self._ids("none", confirmed_ids=["split2"])[0], "split2")
+
+    def test_habit_note_exists_only_for_known_habits(self) -> None:
+        from blockcheck.strategy_search.ordering import habit_note
+
+        self.assertIn("целиком", habit_note("none"))
+        self.assertEqual(habit_note(""), "")
+        self.assertEqual(habit_note("not_by_name"), "")
+
     def test_batch_sizes(self) -> None:
         ordered = [self.make(f"s{i}", "fake") for i in range(100)]
         self.assertEqual(len(batch_for_mode(ordered, "quick")), 30)
@@ -225,6 +270,35 @@ class ProbeProfileTests(unittest.TestCase):
 
 
 class HistoryTests(unittest.TestCase):
+    def test_fresh_filter_habit_is_taken_from_check_history(self) -> None:
+        from datetime import datetime
+
+        from blockcheck.strategy_search import history
+
+        now = datetime(2026, 10, 8, 12, 0).timestamp()
+        runs = [
+            {"time": "2026-10-07T10:00:00", "habit": "tcp"},
+            {"time": "2026-10-08T10:00:00", "habit": "none"},
+            # Проверка с Zapret вывода о фильтре не даёт — она не отменяет прошлый вывод.
+            {"time": "2026-10-08T11:00:00", "habit": ""},
+        ]
+
+        self.assertEqual(history.recent_filter_habit(runs, now=now), "none")
+        self.assertEqual(history.recent_filter_habit(runs, now=now + FAILED_MEMORY_SECONDS), "")
+        self.assertEqual(history.recent_filter_habit([], now=now), "")
+        self.assertEqual(history.recent_filter_habit([{"time": "когда-то", "habit": "tcp"}], now=now), "")
+
+    def test_target_history_carries_the_habit(self) -> None:
+        from datetime import datetime
+
+        from blockcheck.strategy_search import history
+
+        section = {"strategy_history": {}, "check_history": [{"time": "2026-10-08T10:00:00", "habit": "timer"}]}
+        now = datetime(2026, 10, 8, 12, 0).timestamp()
+        with patch("settings.store.get_blockcheck_settings", return_value=section):
+            self.assertEqual(history.load_target_history("tcp_https|x.com", now=now).habit, "timer")
+            self.assertEqual(history.load_target_history("tcp_https|x.com").habit, "")
+
     def test_record_results_moves_confirmed_to_front_and_forgets_their_failures(self) -> None:
         from blockcheck.strategy_search import history
 

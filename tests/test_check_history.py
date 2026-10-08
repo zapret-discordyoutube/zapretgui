@@ -303,7 +303,12 @@ class WorkerTests(unittest.TestCase):
 
     def test_changes_are_added_to_report_and_printed(self) -> None:
         worker = self._worker(
-            lambda report, log: {"changes": ["перестали открываться: YouTube"], "previous_time": "2026-10-06T10:00:00", "json_file": "x.json"}
+            lambda report, log: {
+                "changes": ["перестали открываться: YouTube"],
+                "previous_time": "2026-10-06T10:00:00",
+                "json_file": "x.json",
+                "lines": ["🕘 С прошлой проверки (06.10 10:00) перестали открываться: YouTube."],
+            }
         )
         lines: list[str] = []
         worker.log_message.connect(lines.append)

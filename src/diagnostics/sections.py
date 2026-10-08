@@ -22,6 +22,7 @@ from diagnostics import (
     filter_place,
     ipv6_check,
     my_network,
+    name_speed,
     net_access,
     quic_probe,
     registry,
@@ -36,7 +37,7 @@ from diagnostics.limits import FILTER_MAX_TTL, FREEZE_READ_TIMEOUT
 from diagnostics.run_context import Probe, Run, Stopped
 from diagnostics.services import Service
 from diagnostics.tls_probe import KIND_RESET, ProbeResult
-from diagnostics.verdict import Level
+from diagnostics.verdict import Level, ReachState
 from utils.dns_wire import TYPE_AAAA
 from utils.ip_owner import lookup_ip_owner
 
@@ -544,8 +545,90 @@ def tcp_reset_seen(probe: Probe) -> bool:
     return probe.reach is not None and probe.reach.kind == KIND_RESET
 
 
-def check_speed(run: Run, emit: Emit) -> dict | None:
-    """Скорость зарубежных серверов против российских. Идёт последней, когда остальная нагрузка спала."""
+def _name_speed(run: Run, collected: dict[str, list[Probe]], services, emit: Emit) -> dict | None:
+    """Замедление по имени сайта — у сайтов, которые открылись. None — проверять нечего или контроль не вышел."""
+    labels: dict[str, str] = {}
+    # Имён проверяется немного: сначала главный адрес каждого сервиса, затем вторые адреса
+    # (у YouTube это видеосервер — замедляли именно его).
+    for place in (0, 1):
+        for key, probes in collected.items():
+            opened = [probe for probe in probes if probe.reach_state == ReachState.OK and not services[key].control]
+            for probe in sorted(opened, key=lambda item: not item.target.main)[place : place + 1]:
+                labels.setdefault(probe.host, services[key].label)
+    ip = net_access.known_address(run, name_speed.SERVER_HOST) if labels else ""
+    if not ip or run.dns_cancelled():
+        return None
+    facts = name_speed.collect(
+        list(labels), lambda name: name_speed.download(ip, name, cancel=run.probe_cancel), should_stop=run.dns_cancelled
+    )
+    control, verdicts = name_speed.judge(facts)
+    if control is None or not verdicts:
+        return None
+    slow = [labels[item.name] for item in verdicts if item.code == name_speed.SLOW]
+    headline = (
+        f"Замедляют по имени сайта: {', '.join(slow)}"
+        if slow
+        else "Замедления по имени сайта не видно: с именами сайтов скорость та же, что с обычным"
+    )
+    emit(f"ℹ️ Замедление по имени: контроль {name_speed.SERVER_HOST} — {name_speed.speed_text(control)}")
+    for item in verdicts:
+        icon = {name_speed.SLOW: "⚠️", name_speed.FINE: "✅"}.get(item.code, "❔")
+        emit(f"{icon} {labels[item.name]} ({item.name}): {item.text}")
+    emit(f"{'⚠️' if slow else '✅'} {headline}")
+    states = {name_speed.SLOW: "warn", name_speed.FINE: "ok"}
+    return {
+        "level": "warn" if slow else "ok",
+        "headline": headline,
+        "server": name_speed.SERVER_HOST,
+        "control": name_speed.speed_text(control),
+        "items": [
+            {
+                "name": labels[item.name],
+                "host": item.name,
+                "kbps": None if item.kbps is None else round(item.kbps, 1),
+                "state": states.get(item.code, "unknown"),
+                "text": item.text,
+            }
+            for item in verdicts
+        ],
+    }
+
+
+def speed_problems(speed: dict | None, *, zapret_running: bool | None) -> list[dict]:
+    """Проблемы «сайт открывается, но его замедляют по имени». Пусто — замедления нет."""
+    found = []
+    for item in ((speed or {}).get("names") or {}).get("items") or ():
+        if item.get("state") != "warn":
+            continue
+        advice = (
+            "Замедление по имени обходится так же, как блокировка по имени: фильтр не должен увидеть имя сайта. "
+            + (
+                "Сейчас Zapret запущен, но для этого сайта выбранный пресет замедление не снимает — "
+                "попробуйте другой пресет или «Подбор стратегии»."
+                if zapret_running
+                else "Запустите Zapret; если не поможет — подберите стратегию для этого сайта."
+            )
+        )
+        found.append(
+            problem_rules.problem(
+                Level.WARN,
+                f"{item.get('name')} открывается, но медленно: {item.get('text')}",
+                (advice,),
+                action="start_zapret" if zapret_running is False else "strategy",
+                target=str(item.get("host") or ""),
+                kind=block_kind.KIND_SNI,
+                title=str(item.get("name") or ""),
+            )
+        )
+    return found
+
+
+def check_speed(run: Run, emit: Emit, collected=None, services=None) -> dict | None:
+    """Скорость зарубежных серверов против российских и замедление по имени сайта.
+
+    Идёт последней, когда остальная нагрузка спала. ``collected`` и ``services`` —
+    проверенные сайты: у открывшихся ищется замедление по имени.
+    """
 
     def download(server: speed_check.SpeedServer) -> tuple[int, float] | None:
         ip = net_access.known_address(run, server.host)
@@ -577,9 +660,11 @@ def check_speed(run: Run, emit: Emit) -> dict | None:
         emit(f"{'ℹ️' if item.kbps is not None else '❔'} {item.server.name} ({place}): {speed_check.speed_text(item.kbps)}")
     emit(f"{report_text.LEVEL_ICON[report.level]} {report.headline}")
     slow = report.level == Level.WARN
+    names = _name_speed(run, collected, services, emit) if collected and services else None
     return {
         "level": report.level.value,
         "headline": report.headline,
+        "names": names,
         "items": [
             {
                 "name": item.server.name,

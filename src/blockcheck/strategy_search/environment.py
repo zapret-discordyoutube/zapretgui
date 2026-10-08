@@ -84,7 +84,7 @@ class RealEnvironment:
     def load_history(self, key: str):
         from blockcheck.strategy_search.history import load_target_history
 
-        return load_target_history(key)
+        return load_target_history(key, now=time.time())
 
     def record_history(self, key: str, *, confirmed: list[str], failed: list[str]) -> None:
         from blockcheck.strategy_search.history import record_results

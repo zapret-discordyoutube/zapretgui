@@ -29,9 +29,36 @@ def history_key(scan_protocol: str, target: str, udp_games_scope: str = "all") -
 class TargetHistory:
     confirmed: list[str] = field(default_factory=list)
     failed: dict[str, float] = field(default_factory=dict)
+    # Как ведёт себя фильтр по последней проверке BlockCheck (код из ``diagnostics.filter_habits``);
+    # пусто — проверки не было, она устарела или вывода в ней нет.
+    habit: str = ""
 
 
-def load_target_history(key: str) -> TargetHistory:
+def recent_filter_habit(runs, *, now: float) -> str:
+    """Вывод «Как работает фильтр» из истории проверок, если он свежий.
+
+    ``runs`` — записи ``blockcheck.check_history`` от старых к новым. Берётся
+    последняя запись с выводом: он пишется только когда проверка шла без Zapret
+    и VPN, так что описывает сам фильтр провайдера.
+    """
+    from datetime import datetime
+
+    from blockcheck.strategy_search.ordering import FAILED_MEMORY_SECONDS
+
+    for run in reversed(list(runs or ())):
+        habit = str(run.get("habit") or "")
+        if not habit:
+            continue
+        try:
+            age = now - datetime.fromisoformat(str(run.get("time") or "")).timestamp()
+        except ValueError:
+            return ""
+        return habit if age < FAILED_MEMORY_SECONDS else ""
+    return ""
+
+
+def load_target_history(key: str, *, now: float = 0.0) -> TargetHistory:
+    """``now`` — текущее время: с ним в историю попадает и свежий вывод о фильтре."""
     from settings import store as settings_store
 
     if not key:
@@ -44,6 +71,7 @@ def load_target_history(key: str) -> TargetHistory:
     return TargetHistory(
         confirmed=[str(item) for item in entry.get("confirmed") or [] if str(item)],
         failed={str(k): float(v) for k, v in (entry.get("failed") or {}).items() if str(k)},
+        habit=recent_filter_habit(section.get("check_history"), now=now) if now else "",
     )
 
 

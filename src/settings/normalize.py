@@ -771,6 +771,11 @@ def normalize_check_history(data: object) -> list[dict[str, Any]]:
                 "problems": problems,
                 "states": states,
                 "log_file": as_clean_str(run.get("log_file"))[:520],
+                # Условия проверки: работал ли Zapret и с каким пресетом, были ли VPN, как ведёт себя фильтр.
+                "zapret": as_str_in(run.get("zapret"), schema.CHECK_HISTORY_ZAPRET, ""),
+                "preset": _history_text(run.get("preset")),
+                "tools": run.get("tools") is True,
+                "habit": as_clean_str(run.get("habit"))[:40],
             }
         )
     return runs[-schema.CHECK_HISTORY_LIMIT :]

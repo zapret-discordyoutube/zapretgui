@@ -134,11 +134,9 @@ class BlockcheckWorker(QObject):
         if report["json_file"]:
             self.run_log_started.emit(report["json_file"])
         report["history"] = [dict(run) for run in note.get("history") or () if isinstance(run, dict)]
-        if changes:
-            from diagnostics.history import format_time
-
-            self._emit("")
-            self._emit(f"🕘 С прошлой проверки ({format_time(report['previous_time'])}) {'; '.join(changes)}.")
+        # Сравнение «с Zapret и без» и строка об изменениях уже лежат в файле; здесь — только на экран.
+        for line in note.get("lines") or ():
+            self.log_message.emit(str(line))
 
     def stop(self):
         self._cancelled = True

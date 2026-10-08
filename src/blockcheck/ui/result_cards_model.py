@@ -15,7 +15,7 @@ IPv6, DNS, место фильтра, компьютер). У карточки �
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from diagnostics.block_kind import KIND_OTHER, KINDS, kind_info
 
@@ -375,7 +375,10 @@ def _site_card(service: dict) -> Card:
         if "registry" in item:
             rows.append(Line(INFO, "Реестр РКН", _registry_text(item)))
         if item.get("seconds"):
-            rows.append(Line(INFO, "Проверка заняла", f"{float(item['seconds']):.0f} с"))
+            from diagnostics.report_text import stages_text
+
+            parts = stages_text(item.get("stages"))
+            rows.append(Line(INFO, "Проверка заняла", f"{float(item['seconds']):.0f} с" + (f" ({parts})" if parts else "")))
         if item.get("quic_text"):
             rows.append(
                 Line(WARN if item.get("quic") == "blocked_by_name" else INFO, "QUIC (UDP 443)", str(item["quic_text"]))
@@ -588,7 +591,42 @@ def _telegram_card(telegram: dict) -> Card:
 _SPEED_STATUS = {OK: "Разницы нет", WARN: "Зарубежные медленнее", UNKNOWN: "Не удалось сравнить"}
 
 
+def _name_speed_sections(names: dict) -> tuple[Section, ...]:
+    """Замедление по имени сайта: скорость одного сервера с его именем и с именами проверенных сайтов."""
+    rows = tuple(
+        Line(_state(item.get("state")), f"{item.get('name', '')} ({item.get('host', '')})", str(item.get("text") or ""))
+        for item in names.get("items") or ()
+    )
+    if not rows:
+        return ()
+    control = Line(INFO, f"Контроль: {names.get('server', '')} под своим именем", str(names.get("control") or ""))
+    return (
+        Section(str(names.get("headline") or "Замедление по имени сайта"), (control, *rows)),
+        Section(
+            "Как проверяется замедление по имени",
+            (
+                Line(
+                    INFO,
+                    "С одного и того же постороннего сервера качается один файл: сначала под его собственным именем, "
+                    "затем под именем каждого открывшегося сайта. Сервер и дорога те же, отличается только имя, которое "
+                    "видит фильтр. Если с именем сайта скорость в разы ниже — замедляют по имени. Медленный замер "
+                    "перепроверяется, контроль в конце повторяется.",
+                ),
+            ),
+        ),
+    )
+
+
 def _speed_card(speed: dict) -> Card:
+    names = speed.get("names") or {}
+    slow_names = [str(item.get("name") or "") for item in names.get("items") or () if item.get("state") == "warn"]
+    if slow_names:
+        return replace(
+            _speed_card({**speed, "names": None}),
+            level=WARN,
+            status=f"Замедляют: {', '.join(slow_names)}",
+            sections=(*_name_speed_sections(names), *_speed_card({**speed, "names": None}).sections),
+        )
     level = _state(speed.get("level"))
     lines = tuple(
         Line(
@@ -607,6 +645,7 @@ def _speed_card(speed: dict) -> Card:
         lines=lines,
         sections=(
             Section(str(speed.get("headline") or "Скорость загрузки"), lines),
+            *_name_speed_sections(names),
             Section(
                 "Что это за проверка",
                 (
@@ -963,10 +1002,51 @@ def build_cards(report: dict) -> list[Card]:
     system = list(report.get("system") or ())
     if system:
         cards.append(_system_card(system))
+    if report.get("compare"):
+        cards.append(_compare_card(report["compare"]))
     run = _run_card(report)
     if run is not None:
         cards.append(run)
     return cards
+
+
+_COMPARE_STATES = {"helped": OK, "not_helped": FAIL, "broken": WARN, "fine_anyway": INFO}
+_COMPARE_STATUS = {OK: "Обход справляется", WARN: "Помогает не всем", FAIL: "Пресет не помог"}
+
+
+def _compare_card(compare: dict) -> Card:
+    """«С Zapret и без»: что дала пара проверок — эта и прошлая в противоположном состоянии обхода."""
+    from diagnostics.compare import GROUP_TITLES
+    from diagnostics.history import format_time
+
+    level = _state(compare.get("level"))
+    groups = [(key, [str(name) for name in compare.get(key) or ()]) for key in _COMPARE_STATES]
+    summary = tuple(
+        Line(_COMPARE_STATES[key], GROUP_TITLES[key], ", ".join(names)) for key, names in groups if names
+    )
+    other = "без Zapret" if compare.get("zapret_in") == "current" else "с Zapret"
+    facts = [Line(INFO, f"Прошлая проверка {other}", format_time(str(compare.get("other_time") or "")))]
+    if compare.get("preset"):
+        facts.append(Line(INFO, "Пресет", str(compare["preset"])))
+    sections = [Section(str(compare.get("headline") or "С Zapret и без"), summary)]
+    sections += [
+        Section(GROUP_TITLES[key], tuple(Line(_COMPARE_STATES[key], name) for name in names), tiles=True)
+        for key, names in groups
+        if names
+    ]
+    sections.append(Section("Что сравнивали", tuple(facts)))
+    notes = tuple(Line(INFO, str(note)) for note in compare.get("notes") or ())
+    if notes:
+        sections.append(Section("Как это читать", notes))
+    return Card(
+        key="compare",
+        icon="fa5s.balance-scale",
+        title="С Zapret и без",
+        level=level,
+        status=_COMPARE_STATUS.get(level, "Сравнение"),
+        lines=summary,
+        sections=tuple(sections),
+    )
 
 
 def _registry_lines(summary: dict) -> tuple[Line, ...]:
@@ -998,6 +1078,8 @@ def _run_card(report: dict) -> Card | None:
     conditions = [Line(INFO, str(line)) for line in report.get("environment") or () if str(line).strip()]
     if report.get("zapret_line"):
         conditions.append(Line(INFO, str(report["zapret_line"])))
+    if report.get("preset"):
+        conditions.append(Line(INFO, "Выбранный пресет", str(report["preset"])))
     tools = [str(name) for name in report.get("other_bypass_tools") or ()]
     if tools:
         conditions.append(Line(WARN, "Другие программы обхода и VPN", ", ".join(tools)))

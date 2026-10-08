@@ -40,8 +40,13 @@ def _overall_level(report: dict) -> str:
     return "ok"
 
 
-def blockcheck_entry(report: dict, *, log_file: str = "", when: datetime | None = None) -> dict:
-    """Короткая запись о прогоне BlockCheck для истории."""
+def blockcheck_entry(report: dict, *, log_file: str = "", when: datetime | None = None, preset: str = "") -> dict:
+    """Короткая запись о прогоне BlockCheck для истории.
+
+    ``preset`` — название выбранного пресета: по нему сравнение «с Zapret и без» называет, что именно проверялось.
+    """
+    from diagnostics.compare import zapret_mark
+
     when = when or datetime.now()
     problems = [str(problem.get("text") or "") for problem in report.get("problems") or ()]
     states = {
@@ -63,6 +68,12 @@ def blockcheck_entry(report: dict, *, log_file: str = "", when: datetime | None 
         "problems": problems,
         "states": {name: state for name, state in states.items() if name},
         "log_file": str(log_file or ""),
+        # При каких условиях шла проверка — для сравнения «с Zapret и без».
+        "zapret": zapret_mark(report.get("zapret_running")),
+        "preset": str(preset or ""),
+        "tools": bool(report.get("other_bypass_tools")),
+        # Как ведёт себя фильтр (код из ``filter_habits``) — подсказка подбору стратегий.
+        "habit": str((report.get("habits") or {}).get("code") or ""),
     }
 
 
