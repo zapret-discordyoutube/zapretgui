@@ -18,7 +18,6 @@ from profile.ui.simple_icons_bundle import SIMPLE_ICON_SVGS
 
 # Сервер со страницы «Настройка DNS» -> его DNS-профиль в «Редакторе hosts».
 _SAME_SERVER_IN_HOSTS = {
-    "Xbox DNS": "xbox_dns",
     "Comss DNS": "comss_dns",
     "AstraCat": "astracat",
     "GeoHide": "geohide",

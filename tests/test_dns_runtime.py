@@ -159,7 +159,7 @@ class DnsRuntimeTests(unittest.TestCase):
         self.assertIsNone(runtime.consume_warmed_state())
 
     def test_migration_replaces_only_outdated_static_addresses(self) -> None:
-        fake = _FakeWinApi()
+        fake = _FakeWinApi(doh=True)
         adapters = (
             DnsAdapter(ETH, "Ethernet", "", "ethernet", True, True, static_ipv4=("176.99.11.77", "80.78.247.254"), static_ipv6=("2a00:ab00:1233:26::50",)),
             DnsAdapter(WIFI, "Wi-Fi", "", "wifi", True, False, static_ipv4=("1.1.1.1",)),
@@ -168,13 +168,29 @@ class DnsRuntimeTests(unittest.TestCase):
         with patch.object(runtime, "adapters_with_static_dns", return_value=adapters):
             changes = self._run(fake, migrate_outdated_dns_addresses)
 
+        # Xbox DNS закрыл сервисы ИИ: его адреса переходят на DNS-AI, чужой 1.1.1.1 не трогают.
         self.assertEqual(
-            fake.writes,
-            # Адреса IPv6 действующего сервера в заменах нет: их не трогают.
-            [(ETH, ("111.88.96.54", "111.88.96.55"), False, None)],
+            [write[:3] for write in fake.writes],
+            [
+                (ETH, ("192.144.59.14", "186.246.49.127"), False),
+                (ETH, ("2a0d:8480:0:67c::14",), True),
+            ],
         )
-        self.assertEqual(len(changes), 1)
+        # DNS-AI принимает только шифрованные запросы: адреса пишутся вместе с его шаблоном DoH.
+        for write in fake.writes:
+            self.assertEqual(write[3]["192.144.59.14"], "https://dns.dns-ai.ru/dns-query")
+        self.assertEqual(len(changes), 2)
         self.assertEqual(fake.flushes, 1)
+
+    def test_migration_to_encrypted_only_server_is_skipped_without_doh(self) -> None:
+        # Без DoH система не сможет спросить DNS-AI: адаптер остался бы без DNS.
+        fake = _FakeWinApi(doh=False)
+        adapters = (DnsAdapter(ETH, "Ethernet", "", "ethernet", True, True, static_ipv4=("111.88.96.54", "111.88.96.55")),)
+
+        with patch.object(runtime, "adapters_with_static_dns", return_value=adapters):
+            changes = self._run(fake, migrate_outdated_dns_addresses)
+
+        self.assertEqual((fake.writes, changes, fake.flushes), ([], [], 0))
 
 
 class DnsProviderCatalogTests(unittest.TestCase):
@@ -193,12 +209,14 @@ class DnsProviderCatalogTests(unittest.TestCase):
     def test_hosts_dns_services_are_available_as_dns_servers(self) -> None:
         ai = DNS_PROVIDERS["Для ИИ"]
 
-        self.assertEqual(ai["Xbox DNS"]["ipv4"], ["111.88.96.54", "111.88.96.55"])
         self.assertEqual(ai["AstraCat"]["ipv4"], ["135.106.217.200", "135.106.197.22"])
         self.assertEqual(ai["GeoHide"]["ipv4"], ["193.233.112.67", "193.233.112.68"])
         # Серверы, которые перестали отвечать, из списка убраны.
         self.assertNotIn("dns.malw.link", ai)
         self.assertNotIn("Xbox DNS (old)", ai)
+        # Xbox DNS закрыл сервисы ИИ и отвечает на них пустым адресом.
+        self.assertNotIn("Xbox DNS", ai)
+        self.assertNotIn("Xbox DNS v2", ai)
 
 
 if __name__ == "__main__":

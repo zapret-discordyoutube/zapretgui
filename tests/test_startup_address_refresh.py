@@ -26,22 +26,25 @@ class DnsAddressMigrationPlanTests(unittest.TestCase):
     def test_old_xbox_addresses_are_replaced_in_place(self) -> None:
         from dns.address_migration import plan_dns_server_migration
 
-        # «Xbox DNS (old)» молчит: его адреса меняются на действующий Xbox DNS.
-        self.assertEqual(
-            plan_dns_server_migration(["176.99.11.77", "80.78.247.254"], self.replacements),
+        # Xbox DNS закрыл сервисы ИИ: все его адреса меняются на DNS-AI.
+        for old in (
+            ["176.99.11.77", "80.78.247.254"],
+            ["111.88.96.50", "111.88.96.51"],
             ["111.88.96.54", "111.88.96.55"],
-        )
-        self.assertEqual(
-            plan_dns_server_migration(["111.88.96.50", "111.88.96.51"], self.replacements),
-            ["111.88.96.54", "111.88.96.55"],
-        )
+            ["87.228.47.200", "87.228.47.201"],
+        ):
+            with self.subTest(old=old):
+                self.assertEqual(
+                    plan_dns_server_migration(old, self.replacements),
+                    ["192.144.59.14", "186.246.49.127"],
+                )
 
     def test_foreign_addresses_and_order_are_kept(self) -> None:
         from dns.address_migration import plan_dns_server_migration
 
         self.assertEqual(
             plan_dns_server_migration(["1.1.1.1", "176.99.11.77", "8.8.8.8"], self.replacements),
-            ["1.1.1.1", "111.88.96.54", "8.8.8.8"],
+            ["1.1.1.1", "192.144.59.14", "8.8.8.8"],
         )
 
     def test_nothing_to_change_returns_none(self) -> None:
@@ -49,14 +52,14 @@ class DnsAddressMigrationPlanTests(unittest.TestCase):
 
         self.assertIsNone(plan_dns_server_migration([], self.replacements))
         self.assertIsNone(plan_dns_server_migration(["1.1.1.1", "8.8.8.8"], self.replacements))
-        self.assertIsNone(plan_dns_server_migration(["111.88.96.54", "111.88.96.55"], self.replacements))
+        self.assertIsNone(plan_dns_server_migration(["192.144.59.14", "186.246.49.127"], self.replacements))
 
     def test_duplicate_after_replacement_is_removed(self) -> None:
         from dns.address_migration import plan_dns_server_migration
 
         self.assertEqual(
             plan_dns_server_migration(["111.88.96.50", "111.88.96.54"], self.replacements),
-            ["111.88.96.54"],
+            ["192.144.59.14"],
         )
 
     def test_ipv6_is_matched_in_any_spelling(self) -> None:

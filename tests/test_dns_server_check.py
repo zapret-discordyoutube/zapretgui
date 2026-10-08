@@ -115,11 +115,11 @@ class TargetTests(unittest.TestCase):
         # Gcore шифрует по своему имени на обоих адресах.
         gcore = by_address["2.56.220.2"]
         self.assertEqual((gcore.dot_host, gcore.doh_host, gcore.doh_path), ("gcoredns.com", "gcoredns.com", "/dns-query"))
-        # У Xbox DNS порт 853 принимает только второй адрес: DoT у сервера не проверяется.
-        xbox = by_address["111.88.96.54"]
-        self.assertEqual((xbox.dot_host, xbox.doh_host), ("", "xbox-dns.ru"))
-        # У этого сервера ни DoT, ни DoH не отвечают: проверять их нельзя.
-        self.assertEqual((by_address["87.228.47.200"].dot_host, by_address["87.228.47.200"].doh_host), ("", ""))
+        # У StormyCloud DoT владелец не объявляет: у сервера он не проверяется.
+        stormy = by_address["23.128.248.2"]
+        self.assertEqual((stormy.dot_host, stormy.doh_host), ("", "dns.stormycloud.org"))
+        # У сервера без шифрования ни DoT, ни DoH не проверяются.
+        self.assertEqual((by_address["84.200.69.80"].dot_host, by_address["84.200.69.80"].doh_host), ("", ""))
 
     def test_doh_port_and_path_come_from_the_template(self) -> None:
         providers = {"Свои": {"Пример": {"ipv4": ["192.0.2.1"], "doh": "https://dns.example.com:444/q"}}}

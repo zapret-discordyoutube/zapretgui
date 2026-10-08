@@ -98,18 +98,23 @@ class DnsProvidersCatalogTests(unittest.TestCase):
         with patch.object(dns_providers, "DNS_PROVIDERS", broken):
             self.assertIn("DNS-AI: сервер только с шифрованием должен иметь адрес DoH", catalog_problems())
 
-    def test_dead_servers_are_gone_and_old_xbox_addresses_lead_to_the_live_one(self) -> None:
+    def test_dead_servers_are_gone_and_xbox_addresses_lead_to_dns_ai(self) -> None:
         names = {name for _group, name, _data in iter_providers()}
 
         self.assertNotIn("dns.malw.link", names)
-        self.assertNotIn("Xbox DNS (old)", names)
-        for dead in ("176.99.11.77", "80.78.247.254", "95.216.204.218", "80.253.249.40"):
+        for gone in ("Xbox DNS", "Xbox DNS v2", "Xbox DNS (old)"):
+            self.assertNotIn(gone, names)
+        for dead in ("176.99.11.77", "80.78.247.254", "95.216.204.218", "80.253.249.40", "111.88.96.54", "87.228.47.200"):
             self.assertIsNone(find_provider_by_address(dead), dead)
+        for current in ("111.88.96.54", "111.88.96.55", "87.228.47.200", "87.228.47.201", "2a00:ab00:1233:26::50"):
+            self.assertIn(current, dns_providers.OUTDATED_DNS_ADDRESS_REPLACEMENTS)
         # Замены ведут только на адреса, которые есть в списке, и не на мёртвые.
         for old, new in dns_providers.OUTDATED_DNS_ADDRESS_REPLACEMENTS.items():
             with self.subTest(old=old):
                 self.assertIsNone(find_provider_by_address(old))
-                self.assertEqual(find_provider_by_address(new)[1], "Xbox DNS")
+                self.assertEqual(find_provider_by_address(new)[1], "DNS-AI")
+                # Адрес IPv4 меняется на IPv4, IPv6 — на IPv6: они лежат в разных списках адаптера.
+                self.assertEqual(":" in old, ":" in new)
         self.assertNotIn("87.228.47.200", doh_templates())
 
     def test_dns_sb_is_not_among_popular_servers(self) -> None:

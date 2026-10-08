@@ -5,6 +5,11 @@
 адреса, старые перестают работать. При запуске программа находит на
 адаптерах только адреса из OUTDATED_DNS_ADDRESS_REPLACEMENTS и меняет их на
 новые. Автоматически полученные (DHCP) и любые другие адреса не трогаются.
+
+Если провайдер закрылся, замена ведёт на другой сервер того же назначения.
+Сервер только с шифрованием (обычный DNS у него закрыт) годится в замену лишь
+там, где Windows умеет DoH: на остальных такие замены пропускаются, и старые
+адреса остаются как были (usable_replacements).
 """
 
 from __future__ import annotations
@@ -54,6 +59,23 @@ def plan_dns_server_migration(
     return result if replaced_any else None
 
 
+def usable_replacements(replacements: Mapping[str, str], *, doh_supported: bool) -> dict[str, str]:
+    """Замены, которые можно делать на этой Windows.
+
+    Без DoH убирает замены на серверы только с шифрованием: спросить такой
+    сервер система не сможет, и адаптер остался бы без рабочего DNS.
+    """
+    from dns.dns_providers import find_provider_by_address, is_encrypted_only
+
+    usable: dict[str, str] = {}
+    for old, new in dict(replacements or {}).items():
+        found = find_provider_by_address(str(new))
+        if not doh_supported and found is not None and is_encrypted_only(found[2]):
+            continue
+        usable[old] = new
+    return usable
+
+
 def migrate_outdated_dns_addresses(replacements: Mapping[str, str] | None = None) -> list[str]:
     """Меняет старые адреса провайдеров на адаптерах страницы DNS.
 
@@ -68,6 +90,7 @@ def migrate_outdated_dns_addresses(replacements: Mapping[str, str] | None = None
         replacements = OUTDATED_DNS_ADDRESS_REPLACEMENTS
 
     templates = runtime.write_doh_templates()
+    replacements = usable_replacements(replacements, doh_supported=templates is not None)
     changes: list[str] = []
     for adapter in runtime.adapters_with_static_dns():
         for ipv6, current in ((False, adapter.static_ipv4), (True, adapter.static_ipv6)):
@@ -88,4 +111,4 @@ def migrate_outdated_dns_addresses(replacements: Mapping[str, str] | None = None
     return changes
 
 
-__all__ = ["migrate_outdated_dns_addresses", "plan_dns_server_migration"]
+__all__ = ["migrate_outdated_dns_addresses", "plan_dns_server_migration", "usable_replacements"]
