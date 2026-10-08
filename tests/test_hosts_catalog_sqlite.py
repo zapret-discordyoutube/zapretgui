@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.08.6")
+        self.assertEqual(catalog.catalog_version, "2026.10.08.7")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -131,7 +131,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 786)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 2435)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 4953)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -207,26 +207,44 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles("Spotify"))
         self.assertNotIn("xbox_dns", self.proxy_domains.get_service_available_dns_profiles("Spotify"))
 
-    def test_sni_proxy_profiles_cover_only_their_services(self) -> None:
+    def test_sni_proxy_profiles_cover_every_name_of_their_services(self) -> None:
+        """AstraCat и GeoHide стоят у сервисов, которые их посредник открывает из России.
+
+        Профиль предлагается, только когда покрывает каждое имя сервиса, поэтому
+        у имён, которые посредник не пропускает, записан настоящий адрес.
+        """
         connection = sqlite3.connect(PRIVATE_DATABASE)
         try:
-            for profile_id, proxy_ip, covered in (
-                ("astracat", "217.60.179.6", [("dns.chatgpt_and_sora_openai",)]),
-                ("geohide", "159.194.200.33", [("dns.chatgpt_and_sora_openai",), ("dns.spotify",)]),
-            ):
-                services = connection.execute(
-                    "SELECT DISTINCT d.service_id FROM dns_answers a"
-                    " JOIN domains d USING(domain_id) WHERE a.profile_id = ? ORDER BY 1",
-                    (profile_id,),
-                ).fetchall()
-                self.assertEqual(services, covered, profile_id)
+            for profile_id, proxy_ip, minimum in (("astracat", "217.60.179.6", 20), ("geohide", "159.194.200.33", 40)):
+                services = [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT DISTINCT d.service_id FROM dns_answers a"
+                        " JOIN domains d USING(domain_id) WHERE a.profile_id = ?",
+                        (profile_id,),
+                    )
+                ]
+                self.assertIn("dns.chatgpt_and_sora_openai", services, profile_id)
+                self.assertGreaterEqual(len(services), minimum, profile_id)
                 uncovered = connection.execute(
-                    "SELECT COUNT(*) FROM domains d WHERE d.service_id = 'dns.chatgpt_and_sora_openai'"
+                    "SELECT COUNT(*) FROM domains d WHERE d.service_id IN"
+                    " (SELECT DISTINCT d2.service_id FROM dns_answers a2 JOIN domains d2 USING(domain_id)"
+                    "  WHERE a2.profile_id = ?)"
                     " AND NOT EXISTS (SELECT 1 FROM dns_answers a"
                     " WHERE a.domain_id = d.domain_id AND a.profile_id = ?)",
-                    (profile_id,),
+                    (profile_id, profile_id),
                 ).fetchone()[0]
                 self.assertEqual(uncovered, 0, profile_id)
+                # У каждого сервиса профиля хотя бы одно имя идёт через посредника:
+                # профиль из одних настоящих адресов ничего бы не открывал.
+                relays = ("217.60.179.6", "159.194.200.33", "193.233.112.67", "193.233.112.68", "193.233.112.88")
+                without_relay = connection.execute(
+                    "SELECT d.service_id FROM dns_answers a JOIN domains d USING(domain_id)"
+                    " WHERE a.profile_id = ? GROUP BY d.service_id"
+                    f" HAVING SUM(a.ip_address IN ({','.join('?' * len(relays))})) = 0",
+                    (profile_id, *relays),
+                ).fetchall()
+                self.assertEqual(without_relay, [], profile_id)
                 chatgpt_ip = connection.execute(
                     "SELECT a.ip_address FROM dns_answers a JOIN domains d USING(domain_id)"
                     " WHERE d.hostname = 'chatgpt.com' AND a.profile_id = ?"
@@ -235,8 +253,23 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                 ).fetchall()
                 # В hosts работает первая строка имени; у GeoHide за ней идут запасные узлы.
                 self.assertEqual(chatgpt_ip[0], (proxy_ip,), profile_id)
+            # Имена, которые в России режутся по имени сайта: посредник их не открывает
+            # (проверено из сетей Ростелекома и МТС 2026-10-08), профилей у них нет.
+            for service_id in ("dns.patreon", "dns.twitch", "dns.canva", "dns.dell"):
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM dns_answers a JOIN domains d USING(domain_id)"
+                        " WHERE d.service_id = ? AND a.profile_id IN ('astracat', 'geohide')",
+                        (service_id,),
+                    ).fetchone()[0],
+                    0,
+                    service_id,
+                )
         finally:
             connection.close()
+        for service in ("Gemini AI", "Claude", "Notion", "DeepL"):
+            self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles(service), service)
+        self.assertIn("astracat", self.proxy_domains.get_service_available_dns_profiles("Spotify"))
 
     def test_dns_ai_profile_covers_only_services_its_node_opens(self) -> None:
         """DNS-AI ведёт через свой узел 27 имён; узел для Google из России не открывался."""
