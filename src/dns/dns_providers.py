@@ -244,11 +244,12 @@ DNS_PROVIDERS = {
             "dnssec": True,
         },
         # Шаблон — с официального dnsdoh.art: DoH на обычном порту 443. Прежний
-        # порт 444 молчит (проверено 2026-10-08).
+        # порт 444 молчит (проверено 2026-10-08). Рекламные имена сервер отдаёт
+        # пустым адресом (doubleclick.net → 0.0.0.0), и отключить это нельзя.
         "dnsdoh.art": {
             "ipv4": ["194.180.189.33"],
             "ipv6": [],
-            "desc": "Максимальная приватность",
+            "desc": "Без рекламы и записи",
             "icon": "fa5s.lock",
             "color": "#9c27b0",
             "doh": "https://dnsdoh.art/dns-query",
@@ -274,12 +275,16 @@ DNS_PROVIDERS = {
             "dot": "unfiltered.joindns4.eu",
             "dnssec": True,
         },
+        # Имя для шифрования — из официальной справки docs.gcore.com; по нему
+        # отвечают оба адреса и по DoH, и по DoT (проверено 2026-10-08).
         "Gcore": {
             "ipv4": ["95.85.95.85", "2.56.220.2"],
             "ipv6": ["2a03:90c0:999d::1", "2a03:90c0:9992::1"],
             "desc": "Быстрый, без записи",
             "icon": "simple:gcore:GC",
             "color": "#ff4c00",
+            "doh": "https://gcoredns.com/dns-query",
+            "dot": "gcoredns.com",
         },
         "DNS.Watch": {
             "ipv4": ["84.200.69.80", "84.200.70.40"],
@@ -396,10 +401,12 @@ DNS_PROVIDERS = {
             "color": "#2EA043",
             "dnssec": True,
         },
+        # Кроме подмены адресов сайтов ИИ, рекламные имена отдаёт пустым адресом
+        # (doubleclick.net → 0.0.0.0, проверено 2026-10-08).
         "Comss DNS": {
             "ipv4": ["83.220.169.155", "212.109.195.93"],
             "ipv6": [],
-            "desc": "ChatGPT, Gemini, Claude",
+            "desc": "Нейросети, без рекламы",
             "icon": "fa5s.shield-alt",
             "color": "#2F80ED",
             "doh": "https://dns.comss.one/dns-query",

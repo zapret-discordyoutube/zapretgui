@@ -112,6 +112,9 @@ class TargetTests(unittest.TestCase):
         self.assertEqual((google.dot_host, google.doh_host, google.doh_port, google.doh_path), ("dns.google", "dns.google", 443, "/dns-query"))
         # DoH у dnsdoh.art — на обычном порту: прежний 444 молчит.
         self.assertEqual(by_address["194.180.189.33"].doh_port, 443)
+        # Gcore шифрует по своему имени на обоих адресах.
+        gcore = by_address["2.56.220.2"]
+        self.assertEqual((gcore.dot_host, gcore.doh_host, gcore.doh_path), ("gcoredns.com", "gcoredns.com", "/dns-query"))
         # У Xbox DNS порт 853 принимает только второй адрес: DoT у сервера не проверяется.
         xbox = by_address["111.88.96.54"]
         self.assertEqual((xbox.dot_host, xbox.doh_host), ("", "xbox-dns.ru"))
