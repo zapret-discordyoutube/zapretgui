@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.08.7")
+        self.assertEqual(catalog.catalog_version, "2026.10.08.8")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -112,7 +112,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(catalog.service_icons["ChatGPT & Sora (OpenAI)"], ("own:openai:AI", "#10a37f"))
         self.assertEqual(catalog.service_icons["Grok"], ("own:grok:GR", None))
         self.assertEqual(len(catalog.content_sha256), 64)
-        self.assertEqual(len(catalog.service_order), 73)
+        self.assertEqual(len(catalog.service_order), 86)
         self.assertEqual(len(catalog.dns_profiles), 6)
         for removed in ("xbox_dns_old", "malw_dns", "malw_dns_v2"):
             self.assertNotIn(removed, catalog.dns_profiles)
@@ -130,8 +130,8 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 786)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 4953)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 850)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 4351)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -183,6 +183,58 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             )
         finally:
             connection.close()
+
+    def test_every_offered_profile_leads_through_a_relay(self) -> None:
+        """Профиль из одних обычных адресов ничего не открывает — таких в каталоге нет.
+
+        У 33 сервисов Comss DNS отдавал обычные адреса (проверено с Windows и из
+        домашних сетей России 2026-10-08): эти профили убраны. Сервисы, у которых
+        после этого не осталось рабочего профиля, выключены, а не удалены.
+        """
+        relays = {
+            "comss_dns": ("103.137.248.145", "89.150.59.128"),
+            "geohide": ("159.194.200.33", "193.233.112.67", "193.233.112.68", "193.233.112.88"),
+            "astracat": ("217.60.179.6",),
+        }
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            for profile_id in ("geohide", "astracat"):
+                marks = ",".join("?" * len(relays[profile_id]))
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT d.service_id FROM dns_answers a JOIN domains d USING(domain_id)"
+                        f" WHERE a.profile_id = ? GROUP BY d.service_id HAVING SUM(a.ip_address IN ({marks})) = 0",
+                        (profile_id, *relays[profile_id]),
+                    ).fetchall(),
+                    [],
+                    profile_id,
+                )
+            for service_id in ("dns.spotify", "dns.deezer", "dns.badoo", "dns.amd", "dns.web_archive"):
+                self.assertIsNone(
+                    connection.execute(
+                        "SELECT 1 FROM dns_answers a JOIN domains d USING(domain_id)"
+                        " WHERE d.service_id = ? AND a.profile_id = 'comss_dns'",
+                        (service_id,),
+                    ).fetchone(),
+                    service_id,
+                )
+            disabled = [row[0] for row in connection.execute("SELECT name FROM services WHERE enabled = 0 ORDER BY name")]
+            self.assertEqual(disabled, ["Dell", "FMHY", "Patreon", "TikTok", "Tuta"])
+            # У включённого сервиса с DNS-профилями есть хотя бы один профиль.
+            self.assertEqual(
+                connection.execute(
+                    "SELECT s.name FROM services s WHERE s.kind = 'dns' AND s.enabled = 1 AND NOT EXISTS"
+                    " (SELECT 1 FROM dns_answers a JOIN domains d USING(domain_id) WHERE d.service_id = s.service_id)"
+                ).fetchall(),
+                [],
+            )
+        finally:
+            connection.close()
+        index = self.proxy_domains.get_services_profile_index()
+        self.assertNotIn("Tuta", index["services"])
+        for added in ("Cursor", "Groq", "MongoDB", "Brave", "Arduino"):
+            self.assertIn(added, index["services"], added)
+            self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles(added), added)
 
     def test_geohide_opens_spotify_through_its_relays(self) -> None:
         """Имена Spotify с гео-ограничением идут через посредников GeoHide, раздача — напрямую."""
