@@ -111,6 +111,20 @@ class DotGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class Mark:
+    """Одна «дорога» к сайту на его карточке: TLS 1.2, TLS 1.3, как Chrome, HTTP, QUIC, DNS.
+
+    У каждого сайта они стоят в одном порядке и на одних местах — так видно с
+    одного взгляда, что именно режется, а не приходится читать россыпь меток.
+    """
+
+    label: str
+    word: str
+    state: str
+    icon: str
+
+
+@dataclass(frozen=True, slots=True)
 class Card:
     key: str
     icon: str
@@ -123,6 +137,10 @@ class Card:
     lines: tuple[Line, ...] = ()
     # Короткие метки под строками: (текст, состояние).
     chips: tuple[tuple[str, str], ...] = ()
+    # Дороги к сайту на постоянных местах. Когда они есть, на карточке вместо всех меток
+    # показывают их и ``tags`` — метки о том, чего в дорогах нет (реестр РКН, обрыв на 16 КБ).
+    marks: tuple[Mark, ...] = ()
+    tags: tuple[tuple[str, str], ...] = ()
     dots: tuple[DotGroup, ...] = ()
     sections: tuple[Section, ...] = ()
     # Карточка сайта или отдельной проверки: у них разные ряды в сетке.
@@ -258,6 +276,17 @@ def _registry_text(item: dict) -> str:
     return "не значится — блокировать могут и без записи в реестре"
 
 
+_MARK_ICONS = {"TLS 1.2": "fa5s.lock", "TLS 1.3": "fa5s.lock", "Как Chrome": "fa5b.chrome", "HTTP": "fa5s.unlock-alt"}
+
+
+# В ячейке сетки места на одно-два слова.
+_MARK_WORDS = {"нет соединения": "нет связи"}
+
+
+def _mark_icon(title: str) -> str:
+    return _MARK_ICONS.get(title, "fa5s.plug")
+
+
 def _site_card(service: dict) -> Card:
     key = str(service.get("key") or "")
     targets = list(service.get("targets") or ())
@@ -270,27 +299,43 @@ def _site_card(service: dict) -> Card:
         for item in targets
     )
     chips: list[tuple[str, str]] = []
+    marks: list[Mark] = []
+    tags: list[tuple[str, str]] = []
     # Три дороги к главному адресу сайта: TLS 1.2, TLS 1.3 и HTTP.
     main = next((item for item in targets if item.get("main")), targets[0] if targets else {})
     for proto in main.get("protocols") or ():
-        chips.append((f"{proto.get('title', '')}: {proto.get('word', '')}", _PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN)))
+        title, word = str(proto.get("title") or ""), str(proto.get("word") or "")
+        state = _PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN)
+        chips.append((f"{title}: {word}", state))
+        marks.append(Mark(title.removeprefix("Как "), _MARK_WORDS.get(word, word), state, _mark_icon(title)))
     for word in dict.fromkeys(_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _CAUSE_WORDS):
         chips.append((word, FAIL))
     quic = {str(item.get("quic") or "") for item in targets}
     if "blocked_by_name" in quic:
         chips.append(("QUIC закрыт", WARN))
+        marks.append(Mark("QUIC", "закрыт", WARN, "fa5s.bolt"))
     elif "ok" in quic:
         chips.append(("QUIC работает", OK))
+        marks.append(Mark("QUIC", "работает", OK, "fa5s.bolt"))
+    elif marks:
+        marks.append(Mark("QUIC", "—", UNKNOWN, "fa5s.bolt"))
     if any(item.get("volume") == "cut" for item in targets):
-        chips.append(("обрыв на 16 КБ", WARN))
+        tags.append(("обрыв на 16 КБ", WARN))
+    dns_states = {str(item.get("dns_state") or "") for item in targets}
+    if service.get("dns_note") or "spoofed" in dns_states:
+        marks.append(Mark("DNS", "подменён", WARN, "fa5s.exchange-alt"))
+    elif marks:
+        clean = bool(dns_states) and not dns_states & {"", "unknown"}
+        marks.append(Mark("DNS", "честный" if clean else "—", OK if clean else UNKNOWN, "fa5s.exchange-alt"))
     if service.get("dns_note"):
         chips.append(("DNS подменён", WARN))
     if any(item.get("hosts_stale") for item in targets):
-        chips.append(("запись в hosts устарела", WARN))
+        tags.append(("запись в hosts устарела", WARN))
     if any((item.get("registry") or {}).get("listed") for item in targets):
-        chips.append(("в реестре РКН", INFO))
+        tags.append(("в реестре РКН", INFO))
     if service.get("control"):
-        chips.append(("контрольный", INFO))
+        tags.append(("контрольный", INFO))
+    chips.extend(tags)
 
     detail: list[Section] = []
     for item in targets:
@@ -352,6 +397,9 @@ def _site_card(service: dict) -> Card:
         kind=kind,
         lines=lines,
         chips=tuple(chips),
+        # Дороги показывают, только когда главный адрес проверяли по протоколам отдельно.
+        marks=tuple(marks) if main.get("protocols") else (),
+        tags=tuple(tags),
         sections=tuple(detail),
         site=True,
     )

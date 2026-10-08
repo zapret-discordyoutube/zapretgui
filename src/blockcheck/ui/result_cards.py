@@ -356,6 +356,8 @@ class ResultCard(QWidget):
     CHIP_PAD = 7
     CHIP_GAP_X = 6
     CHIP_GAP_Y = 4
+    MARK_ROW = 20
+    MARK_COLUMNS = 2
 
     def __init__(self, card: Card, parent=None) -> None:
         super().__init__(parent)
@@ -379,6 +381,10 @@ class ResultCard(QWidget):
         self._lines = tuple(card.lines[:PREVIEW_LINES])
         hidden = len(card.lines) - len(self._lines)
         self._more = f"и ещё {hidden} — нажмите, чтобы увидеть всё" if hidden > 0 else ""
+        # У сайта дороги (TLS, HTTP, QUIC, DNS) стоят сеткой на постоянных местах; метками —
+        # только то, чего в дорогах нет. У остальных карточек меток столько, сколько есть.
+        self._marks = tuple(card.marks)
+        self._chips = tuple(card.tags if card.marks else card.chips)
 
         self.dots: HostingDots | None = None
         if card.dots:
@@ -419,16 +425,17 @@ class ResultCard(QWidget):
         rects: list[QRectF] = []
         left, right = self.PAD_X, width - self.PAD_X
         x, y = float(left), float(top)
-        for text, _state in self.card.chips:
-            chip = min(self._text_metrics.horizontalAdvance(text) + self.CHIP_PAD * 2, right - left)
+        for text, _state in self._chips:
+            # Запас в пару точек: без него текст метки сокращался многоточием на ровном месте.
+            chip = min(self._text_metrics.horizontalAdvance(text) + self.CHIP_PAD * 2 + 4, right - left)
             if x > left and x + chip > right:
                 x, y = float(left), y + self.CHIP + self.CHIP_GAP_Y
             rects.append(QRectF(x, y, chip, self.CHIP))
             x += chip + self.CHIP_GAP_X
         return rects
 
-    def _places(self, width: int) -> tuple[float, float, float, list[QRectF], int]:
-        """Где что стоит при такой ширине: верх строк, надписи «и ещё», точек, места меток и высота карточки."""
+    def _places(self, width: int) -> tuple[float, float, float, list[QRectF], int, float]:
+        """Где что стоит при такой ширине: верх строк, надписи «и ещё», точек, места меток, высота карточки и верх сетки дорог."""
         y = float(self.PAD_Y + self.HEADER)
         lines_top = y + self.HEADER_GAP if self._lines else y
         if self._lines:
@@ -439,10 +446,21 @@ class ResultCard(QWidget):
         dots_top = y + self.LINE_GAP
         if self.dots is not None:
             y = dots_top + self.dots.heightForWidth(max(1, width - self.PAD_X * 2))
-        chips = self._chip_rects(width, y + self.LINE_GAP + 2) if self.card.chips else []
+        marks_top = y + self.LINE_GAP + 4
+        if self._marks:
+            y = marks_top + -(-len(self._marks) // self.MARK_COLUMNS) * self.MARK_ROW
+        chips = self._chip_rects(width, y + self.LINE_GAP + 2) if self._chips else []
         if chips:
             y = chips[-1].bottom()
-        return lines_top, more_top, dots_top, chips, int(y + self.PAD_Y)
+        return lines_top, more_top, dots_top, chips, int(y + self.PAD_Y), marks_top
+
+    def mark_rect(self, index: int) -> QRectF:
+        """Место дороги номер ``index``: у всех карточек одной ширины оно одно и то же."""
+        inner = self.width() - self.PAD_X * 2
+        cell = inner / self.MARK_COLUMNS
+        row, column = divmod(index, self.MARK_COLUMNS)
+        top = self._places(self.width())[5] + row * self.MARK_ROW
+        return QRectF(self.PAD_X + column * cell, top, cell - 8, self.MARK_ROW)
 
     def height_for(self, width: int) -> int:
         return self._places(width)[4]
@@ -520,7 +538,7 @@ class ResultCard(QWidget):
         painter.setPen(self._color)
         painter.drawText(QRectF(titles_left + 13, top + 20, max(8, titles_width - 13), 17), left_flag, status)
 
-        lines_top, more_top, _dots_top, chips, _height = self._places(self.width())
+        lines_top, more_top, _dots_top, chips, _height, _marks_top = self._places(self.width())
         inner = max(8, right - left - 14)
         for order, line in enumerate(self._lines):
             row_top = lines_top + order * (self.LINE + self.LINE_GAP)
@@ -549,8 +567,28 @@ class ResultCard(QWidget):
         if self._more:
             painter.setPen(muted)
             painter.drawText(QRectF(left, more_top, right - left, self.MORE), left_flag, self._more)
+        for index, mark in enumerate(self._marks):
+            rect = self.mark_rect(index)
+            color = QColor(state_color(mark.state))
+            try:
+                icon = get_cached_qta_pixmap(mark.icon, color=color.name(), size=12)
+                painter.drawPixmap(int(rect.left()), int(rect.top() + (self.MARK_ROW - 12) / 2), 12, 12, icon)
+            except Exception:
+                pass
+            # Название дороги — приглушённо, чем кончилось — в цвете состояния.
+            label_width = min(rect.width() - 18, metrics.horizontalAdvance(mark.label) + 2)
+            painter.setPen(muted)
+            painter.drawText(QRectF(rect.left() + 18, rect.top(), label_width, self.MARK_ROW), left_flag, mark.label)
+            rest = rect.width() - 18 - label_width - 6
+            if rest > 12:
+                painter.setPen(color if mark.state in ("fail", "warn") else text)
+                painter.drawText(
+                    QRectF(rect.left() + 18 + label_width + 6, rect.top(), rest, self.MARK_ROW),
+                    left_flag,
+                    metrics.elidedText(mark.word, Qt.TextElideMode.ElideRight, int(rest)),
+                )
         back = QColor(0, 0, 0, 13) if light else QColor(255, 255, 255, 15)
-        for (label, state), rect in zip(self.card.chips, chips):
+        for (label, state), rect in zip(self._chips, chips):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(back)
             painter.drawRoundedRect(rect, 4, 4)
@@ -589,8 +627,8 @@ class ResultCard(QWidget):
 class CardsGrid(QWidget):
     """Сетка карточек: колонок столько, сколько помещается в ширину.
 
-    Карточка ставится в самую короткую колонку, широкая (``wide``) занимает
-    весь ряд. Высота сетки считается здесь же: вложенная прокрутка страницы
+    Карточки идут ровными рядами: в ряду все одной высоты, по самой высокой;
+    широкая (``wide``) занимает весь ряд. Высота сетки считается здесь же: вложенная прокрутка страницы
     сама её не узнала бы.
     """
 
@@ -642,18 +680,33 @@ class CardsGrid(QWidget):
             return
         columns = self.columns_for(width)
         column_width = (width - GRID_GAP * (columns - 1)) // columns
-        heights = [0] * columns
+        # Карточки идут рядами, и в ряду все одной высоты — по самой высокой. Раньше каждая
+        # вставала в самый короткий столбец: края рядов получались рваными.
+        top = 0
+        row: list[tuple[ResultCard, int]] = []
+
+        def flush() -> None:
+            nonlocal top
+            if not row:
+                return
+            height = max(need for _widget, need in row)
+            for column, (item, _need) in enumerate(row):
+                item.setGeometry(QRect(column * (column_width + GRID_GAP), top, column_width, height))
+            top += height + GRID_GAP
+            row.clear()
+
         for widget in self._cards:
             if widget.card.wide:
-                top = max(heights)
+                flush()
                 height = self._card_height(widget, width)
                 widget.setGeometry(QRect(0, top, width, height))
-                heights = [top + height + GRID_GAP] * columns
+                top += height + GRID_GAP
                 continue
-            column = heights.index(min(heights))
-            height = self._card_height(widget, column_width)
-            widget.setGeometry(QRect(column * (column_width + GRID_GAP), heights[column], column_width, height))
-            heights[column] += height + GRID_GAP
+            row.append((widget, self._card_height(widget, column_width)))
+            if len(row) == columns:
+                flush()
+        flush()
+        heights = [top]
         total = max(0, max(heights) - GRID_GAP)
         if total != self.height():
             self.setFixedHeight(total)

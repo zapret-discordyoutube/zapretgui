@@ -18,7 +18,7 @@ from blockcheck.ui.result_cards import (
     ResultDetailView,
     card_plain_text,
 )
-from blockcheck.ui.result_cards_model import FILTER_MARK, PREVIEW_LINES, build_cards, build_counters
+from blockcheck.ui.result_cards_model import FILTER_MARK, PREVIEW_LINES, Card, Line, build_cards, build_counters
 from diagnostics.freeze_check import FreezeState, check_freeze, every_freeze_target
 from diagnostics.tls_probe import ProbeResult
 
@@ -256,6 +256,65 @@ class CardsWidgetsTests(unittest.TestCase):
 
         grid.resize(300, 10)
         self.assertEqual({widget.x() for widget in grid.cards()}, {0})
+
+    def test_cards_stand_in_even_rows_of_equal_height(self) -> None:
+        grid = CardsGrid(250)
+        self.addCleanup(grid.deleteLater)
+        grid.resize(800, 10)
+        grid.show()
+        tall = tuple(Line("ok", f"строка {n}", "да") for n in range(4))
+        cards = [Card(f"site:{n}", "fa5s.globe", f"Сайт {n}", "ok", "Открывается", lines=tall if n % 2 else tall[:1]) for n in range(5)]
+        grid.show_cards(cards, animate=False)
+        widgets = grid.cards()
+        self.app.processEvents()
+
+        # Три столбца: первые три карточки — один ряд, оставшиеся две — второй.
+        self.assertEqual([widget.y() for widget in widgets[:3]], [0, 0, 0])
+        self.assertEqual(len({widget.y() for widget in widgets[3:]}), 1)
+        # В ряду все одной высоты — по самой высокой, хотя строк на карточках разное число.
+        self.assertEqual(len({widget.height() for widget in widgets[:3]}), 1)
+        self.assertEqual(widgets[0].height(), widgets[1].height_for(widgets[1].width()))
+        self.assertEqual(widgets[3].y(), widgets[0].height() + 10)
+        self.assertEqual(grid.height(), widgets[4].geometry().bottom() + 1)
+
+    def test_site_card_shows_its_roads_in_fixed_places_instead_of_a_pile_of_chips(self) -> None:
+        def proto(title: str, state: str, word: str) -> dict:
+            return {"key": title, "title": title, "state": state, "word": word, "text": word}
+
+        def site(key: str, quic: str, **extra) -> dict:
+            protocols = [proto("TLS 1.2", "fail", "сброс"), proto("TLS 1.3", "fail", "нет соединения"), proto("Как Chrome", "ok", "проходит"), proto("HTTP", "info", "переход")]
+            main = _target(f"www.{key}.com", ok=False, main=True, protocols=protocols, quic=quic, dns_state="ok", cause="by_name", registry={"listed": True})
+            return _service(key, key.title(), "fail", [main], **extra)
+
+        report = {"services": [site("instagram", "ok"), site("linkedin", "blocked_by_name", dns_note="подмена")]}
+        first, second = [card for card in build_cards(report) if card.site]
+        # Дороги у каждого сайта — в одном порядке: по ним глаз сравнивает сайты между собой.
+        self.assertEqual([mark.label for mark in first.marks], ["TLS 1.2", "TLS 1.3", "Chrome", "HTTP", "QUIC", "DNS"])
+        self.assertEqual([mark.label for mark in second.marks], [mark.label for mark in first.marks])
+        self.assertEqual([(mark.word, mark.state) for mark in first.marks], [("сброс", "fail"), ("нет связи", "fail"), ("проходит", "ok"), ("переход", "info"), ("работает", "ok"), ("честный", "ok")])
+        self.assertEqual([(mark.word, mark.state) for mark in second.marks[4:]], [("закрыт", "warn"), ("подменён", "warn")])
+        # Метками остаётся только то, чего в дорогах нет; полный набор меток — для отчёта и подсказки.
+        self.assertEqual(first.tags, (("в реестре РКН", "info"),))
+        self.assertIn(("TLS 1.2: сброс", "fail"), first.chips)
+        self.assertIn(("блокировка по имени", "fail"), first.chips)
+        # Сайт без проверки по протоколам остаётся с метками, как раньше.
+        [plain] = [card for card in build_cards({"services": [_service("x", "X", "fail", [_target("x.com", ok=False)])]}) if card.site]
+        self.assertEqual(plain.marks, ())
+
+        grid = CardsGrid(250)
+        self.addCleanup(grid.deleteLater)
+        grid.resize(640, 10)
+        grid.show()
+        grid.show_cards([first, second], animate=False)
+        one, two = grid.cards()
+        self.app.processEvents()
+        # Одна и та же дорога стоит на одном месте у обеих карточек.
+        for index in range(6):
+            self.assertEqual((one.mark_rect(index).top(), one.mark_rect(index).left()), (two.mark_rect(index).top(), two.mark_rect(index).left()))
+        self.assertEqual(one.mark_rect(0).top(), one.mark_rect(1).top())
+        self.assertLess(one.mark_rect(1).top(), one.mark_rect(2).top())
+        self.assertEqual(one.height(), two.height())
+        one.grab()
 
     def test_card_shows_few_lines_and_says_how_many_are_hidden(self) -> None:
         view = ResultCardsView()
