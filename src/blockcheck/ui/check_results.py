@@ -66,6 +66,7 @@ _ACTION_TEXT = {
     "start_zapret": "Запустить Zapret",
     "dns": "Настройка DNS",
     "hosts": "Редактор hosts",
+    "telegram_proxy": "Telegram Proxy",
 }
 _ACTION_DESCRIPTION = {
     "strategy": "Открывает подбор стратегии",
@@ -73,6 +74,7 @@ _ACTION_DESCRIPTION = {
     "start_zapret": "Открывает страницу управления Zapret",
     "dns": "Открывает раздел «Настройка DNS», где включается DNS с шифрованием",
     "hosts": "Открывает «Редактор hosts», где сервису включается DNS-профиль",
+    "telegram_proxy": "Открывает «Telegram Proxy»: Telegram закрыт по адресу, и обход Zapret ему обычно не помогает",
 }
 
 
@@ -271,7 +273,22 @@ _ACTION_ICONS = {
     "start_zapret": "fa5s.play",
     "dns": "fa5s.network-wired",
     "hosts": "fa5s.edit",
+    "telegram_proxy": "fa5b.telegram-plane",
 }
+
+
+def with_default_action(problem: dict) -> dict:
+    """Проблема с действием, когда проверка его не назвала, а в программе готовое средство есть.
+
+    Telegram закрывают по адресу: стратегии Zapret тут обычно бессильны, зато в
+    программе есть свой прокси для Telegram — совет превращается в кнопку.
+    """
+    if problem.get("action"):
+        return problem
+    text = f"{problem.get('title') or ''} {problem.get('text') or ''}".lower()
+    if "telegram" in text and str(problem.get("kind") or "") in ("ip", "other", "noconnect"):
+        return {**problem, "action": "telegram_proxy"}
+    return problem
 
 
 def is_site_problem(problem: dict) -> bool:
@@ -564,6 +581,17 @@ _COMPARE_GROUPS = (
 )
 
 
+def bypass_warning(tools) -> str:
+    """Фраза о том, что проверка шла вместе с VPN или другим обходом. Пусто — их не было."""
+    names = [str(name) for name in tools or () if str(name).strip()]
+    if not names:
+        return ""
+    return (
+        f"Внимание: во время проверки работали {', '.join(names)}. Итог показывает сеть вместе с ними, "
+        "а не то, что делает провайдер. Чтобы увидеть настоящую картину, остановите их и повторите проверку."
+    )
+
+
 class CompareBand(QWidget):
     """Полоса «С Zapret и без» под шапкой итога: вывод одной фразой и счётчики по группам.
 
@@ -578,6 +606,7 @@ class CompareBand(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._compare: dict = {}
+        self._unreliable = False
         self._hover = False
         self.setFixedHeight(self.HEIGHT)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
@@ -590,6 +619,16 @@ class CompareBand(QWidget):
 
     def compare(self) -> dict:
         return dict(self._compare)
+
+    def set_unreliable(self, unreliable: bool) -> None:
+        """Во время проверки работал VPN или другой обход: разницу мог дать он, а не Zapret."""
+        self._unreliable = bool(unreliable)
+        self.update()
+
+    def headline(self) -> str:
+        """Фраза вывода; с оговоркой впереди, когда сравнению нельзя верить."""
+        text = str(self._compare.get("headline") or "")
+        return f"Неточно — работал VPN или другой обход. {text}" if self._unreliable and text else text
 
     def title(self) -> str:
         """Заголовок полосы. В нём назван пресет: сравнение — итог его одного, а не Zapret вообще."""
@@ -687,8 +726,8 @@ class CompareBand(QWidget):
             title_metrics.elidedText(self.title(), Qt.TextElideMode.ElideRight, int(room)),
         )
         painter.setFont(self._text_font)
-        painter.setPen(tone if level in ("fail", "warn") else muted)
-        headline = metrics.elidedText(str(self._compare.get("headline") or ""), Qt.TextElideMode.ElideRight, int(room))
+        painter.setPen(QColor(state_color("warn")) if self._unreliable else (tone if level in ("fail", "warn") else muted))
+        headline = metrics.elidedText(self.headline(), Qt.TextElideMode.ElideRight, int(room))
         painter.drawText(QRectF(44, 27, room, 17), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), headline)
         painter.end()
 
@@ -1095,6 +1134,12 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
         self.env_label.setWordWrap(True)
         titles.addWidget(self.env_label)
         # Что изменилось с прошлой такой же проверки.
+        # Проверка шла при включённом VPN или другой программе обхода: главное предупреждение итога.
+        # Стоит сразу под фразой итога и в цвете предупреждения — мелкой строкой внизу его не замечали.
+        self.bypass_label = CaptionLabel("", self)
+        self.bypass_label.setWordWrap(True)
+        self.bypass_label.setVisible(False)
+        titles.addWidget(self.bypass_label)
         self.changes_label = mute(CaptionLabel("", self))
         self.changes_label.setWordWrap(True)
         self.changes_label.setVisible(False)
@@ -1171,6 +1216,17 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
         super().resizeEvent(event)
         self._sync_min_height()
 
+    def _show_bypass(self, report: dict | None) -> None:
+        """Предупреждение: во время проверки работали VPN или другие программы обхода (кроме самого Zapret)."""
+        tools = [str(name) for name in (report or {}).get("other_bypass_tools") or () if str(name).strip()]
+        text = bypass_warning(tools)
+        self.bypass_label.setText(text)
+        self.bypass_label.setVisible(bool(text))
+        if text:
+            color = QColor(tone_color("warning") or "#d99a4e")
+            self.bypass_label.setTextColor(color, color)
+        self.compare_band.set_unreliable(bool(tools))
+
     def _show_changes(self, report: dict | None) -> None:
         changes = [str(item) for item in (report or {}).get("changes") or ()]
         text = ""
@@ -1184,6 +1240,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
 
     def _clear_problems(self) -> None:
         self._show_changes(None)
+        self._show_bypass(None)
         self.overview.clear()
         self.overview.setVisible(False)
         self.compare_band.show_compare(None)
@@ -1249,6 +1306,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
                 else item
                 for item in problems
             ]
+        problems = [with_default_action(item) for item in problems]
         blocking = [item for item in problems if item.get("level") in ("fail", "warn")]
         if not problems:
             level, title, mood, fun = "ok", "Всё открывается", MOOD_HAPPY, "bc_ok"
@@ -1260,6 +1318,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
             mood = MOOD_ALARM if level == "fail" else MOOD_SAD
             fun = "bc_problems"
         self._show_changes(report)
+        self._show_bypass(report)
         # Строка открывает полный отчёт, только если под итогом есть такая карточка;
         # с карточки сайта берётся и значок, когда своего логотипа у сайта нет.
         cards = {card.key: card for card in build_cards(report)}

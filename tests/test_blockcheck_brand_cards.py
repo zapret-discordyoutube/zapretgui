@@ -225,7 +225,8 @@ class OpenReportTests(unittest.TestCase):
         QTest.keyClick(telegram, Qt.Key.Key_Return)
         self.assertEqual(opened, ["site:x", "site:telegram"])
         # Кнопка-значок делает своё дело и говорит о нём в подсказке; отчёт при этом не открывается.
-        self.assertIsNone(telegram.action_button)
+        # У Telegram, закрытого по адресу, — кнопка «Telegram Proxy»: готовое средство в программе.
+        self.assertEqual(telegram.action_button.toolTip(), "Telegram Proxy")
         self.assertEqual(x.action_button.toolTip(), "Подобрать стратегию для x.com")
         x.action_button.click()
         self.assertEqual((acted, len(opened)), ([("strategy", "x.com")], 2))
@@ -760,3 +761,45 @@ class LightAndFittingTests(unittest.TestCase):
         # Новая проверка без пары для сравнения полосу убирает.
         panel.set_pending()
         self.assertTrue(band.isHidden())
+
+    def test_check_with_a_vpn_running_is_called_out_at_the_top_and_on_the_comparison(self) -> None:
+        from blockcheck.ui.check_results import bypass_warning
+
+        self.assertEqual(bypass_warning([]), "")
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=lambda _key: None)
+        self.addCleanup(panel.deleteLater)
+        compare = {"level": "warn", "headline": "С Zapret перестали открываться: Signal", "preset": "Default", "broken": ["Signal"]}
+        panel.show_report({"problems": [], "compare": compare})
+        # Без VPN предупреждения нет, сравнение показано как есть.
+        self.assertTrue(panel.bypass_label.isHidden())
+        self.assertEqual(panel.compare_band.headline(), compare["headline"])
+
+        panel.show_report({"problems": [], "compare": compare, "other_bypass_tools": ["sing-box", "Cloudflare WARP"]})
+        # Предупреждение стоит в шапке итога и называет программы; сравнение помечено как неточное.
+        self.assertFalse(panel.bypass_label.isHidden())
+        self.assertIn("sing-box, Cloudflare WARP", panel.bypass_label.text())
+        self.assertIn("остановите их и повторите", panel.bypass_label.text())
+        self.assertTrue(panel.compare_band.headline().startswith("Неточно — работал VPN"))
+        self.assertIn(compare["headline"], panel.compare_band.headline())
+        panel.compare_band.grab()
+        # Новая проверка предупреждение снимает.
+        panel.set_pending()
+        self.assertTrue(panel.bypass_label.isHidden())
+
+    def test_telegram_problem_gets_the_telegram_proxy_button(self) -> None:
+        from blockcheck.ui.check_results import with_default_action
+
+        acted = []
+        panel = BlockcheckSummaryPanel(on_action=lambda *args: acted.append(args), on_open=lambda _key: None)
+        self.addCleanup(panel.deleteLater)
+        centers = {"level": "fail", "kind": "other", "action": "", "text": "Дата-центры Telegram не принимают соединения: ни один из 5", "advice": []}
+        panel.show_report({"problems": [centers]})
+        [group] = panel.problem_groups()
+        # Совет «нужен прокси» стал кнопкой: в программе он есть.
+        self.assertEqual(group.shared_action_button.text(), "Telegram Proxy")
+        group.shared_action_button.click()
+        self.assertEqual(acted, [("telegram_proxy", "")])
+        # Действие, которое назвала сама проверка, не трогаем; чужим проблемам прокси не предлагаем.
+        self.assertEqual(with_default_action({"kind": "ip", "title": "Telegram", "action": "strategy"})["action"], "strategy")
+        self.assertEqual(with_default_action({"kind": "ip", "title": "Facebook", "action": ""})["action"], "")
+        self.assertEqual(with_default_action({"kind": "sni", "title": "Telegram", "action": ""})["action"], "")

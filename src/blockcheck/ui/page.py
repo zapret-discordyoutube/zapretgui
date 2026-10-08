@@ -1219,6 +1219,12 @@ class BlockcheckPage(BasePage):
 
             show_page(self.window(), PageName.HOSTS)
             return
+        if action == "telegram_proxy":
+            from app.page_names import PageName
+            from ui.window_adapter import show_page
+
+            show_page(self.window(), PageName.TELEGRAM_PROXY)
+            return
         if action not in ("strategy", "strategy_voice"):
             return
         self.switch_to_tab(self.TAB_STRATEGY_SCAN)

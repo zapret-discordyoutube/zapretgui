@@ -768,7 +768,14 @@ def _filter_card(place: dict) -> Card:
         "disturbed": "Мешает программа обхода",
         "none": "Блокировок по имени нет",
     }.get(state, "Не найдено")
-    preview = [Line(level, _capital(text))]
+    # Одного места нет, но по отдельным способам блокировки оно найдено: это и есть главный итог.
+    located = [item for item in place.get("mechanisms") or () if item.get("hop")]
+    if not found and located:
+        hops = sorted({int(item["hop"]) for item in located})
+        level = WARN
+        status = f"По способам: {'узел' if len(hops) == 1 else 'узлы'} {', '.join(map(str, hops))}"
+    preview = [Line(WARN, str(item.get("title") or ""), _capital(str(item.get("text") or ""))) for item in located] if not found else []
+    preview.append(Line(level, _capital(text)))
     if place.get("ttl_advice"):
         preview.append(Line(INFO, "Для стратегий", str(place["ttl_advice"])))
     sites = list(place.get("sites") or ())
@@ -777,7 +784,7 @@ def _filter_card(place: dict) -> Card:
     elif place.get("host"):
         preview.append(Line(INFO, "Дорога показана до", str(place["host"])))
 
-    sections = [Section("Вывод", tuple(preview[:2]))]
+    sections = [Section("Вывод", tuple(line for line in preview if not line.text or line.name == "Для стратегий")[:2])]
     mechanisms = [
         Line(WARN if item.get("hop") else UNKNOWN, str(item.get("title") or ""), _capital(str(item.get("text") or "")))
         for item in place.get("mechanisms") or ()

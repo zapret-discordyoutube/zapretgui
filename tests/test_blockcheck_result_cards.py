@@ -291,6 +291,23 @@ class NewSectionsCardsTests(unittest.TestCase):
         rows = {line.name: line.text for line in next(s for s in swapped.sections if s.title == "Обход помог").lines[0].page.sections[0].lines}
         self.assertEqual((rows["Без Zapret (эта проверка)"], rows["С Zapret (проверка 08.10 12:00)"]), ("не открывается", "открывается"))
 
+    def test_filter_card_leads_with_the_places_found_for_each_mechanism(self) -> None:
+        place = {
+            "state": "disagree", "found": False, "hop": None, "text": "По разным сайтам фильтр оказался на разных узлах.",
+            "mechanisms": [
+                {"key": "quic", "title": "QUIC по имени сайта", "hop": 2, "text": "между узлами 1 и 2"},
+                {"key": "tcp", "title": "TLS по имени сайта", "hop": None, "text": "место не найдено"},
+                {"key": "dns", "title": "Перехват обычных DNS-запросов", "hop": 9, "text": "между узлами 8 и 9"},
+            ],
+        }
+        card = self._card({"filter": place}, "filter")
+        # Одного места нет, но по способам оно найдено: это и стоит в слове итога и первыми строками.
+        self.assertEqual((card.status, card.level), ("По способам: узлы 2, 9", "warn"))
+        self.assertEqual([line.name for line in card.lines[:2]], ["QUIC по имени сайта", "Перехват обычных DNS-запросов"])
+        # Ничего не нашли вовсе — остаётся прежнее слово.
+        nothing = self._card({"filter": {**place, "mechanisms": []}}, "filter")
+        self.assertEqual(nothing.status, "Узлы не совпали")
+
     def test_no_comparison_no_card(self) -> None:
         self.assertFalse([card for card in build_cards({"compare": None}) if card.key == "compare"])
 
