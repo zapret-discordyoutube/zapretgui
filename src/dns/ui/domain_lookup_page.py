@@ -188,6 +188,8 @@ class DomainLookupPage(BasePage):
     report_requested = pyqtSignal(object)
     # Нажали карточку итога: её подробности страницей открывает страница-хозяин вкладки.
     card_opened = pyqtSignal(object)
+    # Нажали прошлую проверку: (название, итог одной фразой, её карточки, полный текст) — страницей у хозяина вкладки.
+    past_opened = pyqtSignal(str, str, object, str)
 
     def __init__(self, parent=None, *, dns_feature, embedded: bool = False):
         super().__init__(
@@ -496,14 +498,15 @@ class DomainLookupPage(BasePage):
 
         # Прошлая проверка — теми же карточками, что и свежая: её отчёт лежит в файле целиком.
         restore = getattr(self._dns, "load_past_domain_lookup_report", None)
-        past = restore(str(run.get("log_file") or "")) if callable(restore) and not self._running else None
+        past = restore(str(run.get("log_file") or "")) if callable(restore) else None
         if isinstance(past, DomainLookupReport):
-            self._show_report(past)
-            when = format_time(str(run.get("time") or ""))
-            self.status_lines.set_lines(
-                (plans.InfoLine(f"Показана прошлая проверка: {run.get('title', '')} · {when}", plans.TONE_ACCENT),)
+            # Отдельной страницей с путём наверху: свежий результат на вкладке остаётся нетронутым.
+            self.past_opened.emit(
+                f"{run.get('title', '')} · {format_time(str(run.get('time') or ''))}",
+                plans.build_status(past).text,
+                lookup_cards.build_lookup_cards(past, getattr(self, "_card_titles", None)),
+                plans.build_text_report(past),
             )
-            self.report_button.setEnabled(True)
             return
         loader = getattr(self._dns, "load_past_domain_lookup", None)
         text = str(loader(str(run.get("log_file") or "")) if callable(loader) else "")

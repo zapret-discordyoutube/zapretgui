@@ -433,11 +433,39 @@ class PastCheckTextTests(unittest.TestCase):
             page.set_history([run, {**run, "log_file": ""}])
 
             # Плитки идут свежими сверху: вторая — запись с файлом.
+            past: list = []
+            page.past_opened.connect(lambda *args: past.append(args))
             page._open_past(1)
-            self.assertEqual(page.result_cards(), fresh.result_cards())
-            self.assertTrue(page.result_cards())
-            self.assertIn("Показана прошлая проверка: example.com", page.status_lines.accessibleName())
+            # Прошлая проверка уходит отдельной страницей: те же карточки, что у свежей, и текст для кнопки «Отчёт».
+            [(title, headline, cards, text)] = past
+            self.assertEqual(cards, fresh.result_cards())
+            self.assertTrue(cards)
+            self.assertTrue(title.startswith("example.com · "))
+            self.assertIn("Проверка: example.com", text)
+            self.assertTrue(headline)
+            # Свежий результат самой вкладки при этом не трогается.
+            self.assertEqual(page.result_cards(), [])
             self.assertEqual(opened, [])
+
+            from blockcheck.ui.past_cards_view import PastCardsView
+
+            view = PastCardsView()
+            self.addCleanup(view.deleteLater)
+            got: list = []
+            view.text_opened.connect(lambda name, body: got.append((name, body)))
+            view.card_opened.connect(got.append)
+            view.resize(1000, 500)
+            view.show()
+            view.show_run(title, headline, cards, text, root_title="Проверка домена")
+            self.assertEqual((view.title_label.text(), view.headline_label.text()), (title, headline))
+            self.assertEqual([widget.card for widget in view.cards.cards()], cards)
+            self.assertEqual(view.breadcrumb.count(), 2)
+            view.report_button.click()
+            view.cards.cards()[0].opened.emit(cards[0])
+            self.assertEqual(got, [(f"Отчёт: {title}", text), cards[0]])
+            # Без текста кнопка «Отчёт» выключена.
+            view.show_run(title, headline, cards, "")
+            self.assertFalse(view.report_button.isEnabled())
 
             # У старой записи отчёта в файле нет: остаётся страница с текстом.
             page._open_past(0)

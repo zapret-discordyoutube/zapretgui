@@ -175,6 +175,10 @@ class BlockcheckPage(BasePage):
         self._server_detail_view = None
         # Прошлая проверка из блока «Прошлые проверки», на всю страницу.
         self._past_check_view = None
+        # Прошлая проверка других вкладок («Проверка домена»): страница с её карточками.
+        self._past_cards_view = None
+        # Страница прошлой проверки, из которой открыт отчёт карточки: «назад» ведёт в неё.
+        self._detail_past_view = None
         # Отчёт карточки открыт из прошлой проверки — и где в ней стояла прокрутка.
         self._detail_from_past = False
         self._past_return_scroll = 0
@@ -580,6 +584,7 @@ class BlockcheckPage(BasePage):
             )
             self._domain_lookup_tab_page.report_requested.connect(self._open_log_report)
             self._domain_lookup_tab_page.card_opened.connect(self._open_card_detail)
+            self._domain_lookup_tab_page.past_opened.connect(self._open_past_cards)
             self._push_tab_histories()
             self._domain_lookup_tab_page.setVisible(False)
             self.add_widget(self._domain_lookup_tab_page)
@@ -712,7 +717,7 @@ class BlockcheckPage(BasePage):
         self._over_tabs_screen = None
         self.navigation_screen_changed.emit()
         # Вкладку могут сменить и снаружи, пока поверх открыты подробности или отчёт.
-        for view in (self._detail_view, self._server_detail_view, self._log_report_view, self._past_check_view):
+        for view in (self._detail_view, self._server_detail_view, self._log_report_view, self._past_check_view, self._past_cards_view):
             if view is not None and not view.isHidden():
                 view.setVisible(False)
                 self._tabs_pivot.setVisible(True)
@@ -915,8 +920,11 @@ class BlockcheckPage(BasePage):
             self._detail_view.setVisible(False)
             self.add_widget(self._detail_view)
         # Отчёт открыт из прошлой проверки: «назад» ведёт в неё же, к тому же месту.
-        past = self._past_check_view
-        self._detail_from_past = past is not None and not past.isHidden()
+        past = next(
+            (view for view in (self._past_check_view, self._past_cards_view) if view is not None and not view.isHidden()), None
+        )
+        self._detail_past_view = past
+        self._detail_from_past = past is not None
         if self._detail_from_past:
             self._past_return_scroll = self.verticalScrollBar().value()
         self._show_over_tabs(self._detail_view, remember_scroll=not self._detail_from_past)
@@ -948,10 +956,10 @@ class BlockcheckPage(BasePage):
     def _close_card_detail(self) -> None:
         if self._detail_view is None or self._detail_view.isHidden():
             return
-        if self._detail_from_past and self._past_check_view is not None:
+        if self._detail_from_past and self._detail_past_view is not None:
             self._detail_from_past = False
-            self._show_over_tabs(self._past_check_view, remember_scroll=False)
-            self._past_check_view.setFocus()
+            self._show_over_tabs(self._detail_past_view, remember_scroll=False)
+            self._detail_past_view.setFocus()
             QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(self._past_return_scroll))
             return
         self._close_card_detail_to_tab()
@@ -983,6 +991,7 @@ class BlockcheckPage(BasePage):
             self._server_detail_view,
             self._log_report_view,
             self._past_check_view,
+            self._past_cards_view,
         ):
             if page is not None and page is not view:
                 page.setVisible(False)
@@ -992,7 +1001,7 @@ class BlockcheckPage(BasePage):
         self._scroll_to_top()
 
     def _close_over_tabs(self) -> None:
-        views = (self._server_detail_view, self._log_report_view, self._past_check_view)
+        views = (self._server_detail_view, self._log_report_view, self._past_check_view, self._past_cards_view)
         if all(view is None or view.isHidden() for view in views):
             return
         self._switch_tab(self._active_tab_index)
@@ -1100,6 +1109,23 @@ class BlockcheckPage(BasePage):
         if isinstance(lines, (list, tuple)) and lines:
             return "\n".join(str(line) for line in lines)
         return "\n".join(self._report_lines)
+
+    def _open_past_cards(self, title: str, headline: str, cards, text: str) -> None:
+        """Прошлая проверка вкладки («Проверка домена»): страница с её карточками, назад — по строке пути."""
+        if self._past_cards_view is None:
+            from blockcheck.ui.past_cards_view import PastCardsView
+
+            self._past_cards_view = PastCardsView(self.content)
+            self._past_cards_view.closed.connect(self._close_over_tabs)
+            self._past_cards_view.card_opened.connect(self._open_card_detail)
+            self._past_cards_view.text_opened.connect(self._open_section_text)
+            self._past_cards_view.setVisible(False)
+            self.add_widget(self._past_cards_view)
+        tab_item = self._tabs_pivot.items.get(self.TAB_ORDER[self._active_tab_index])
+        root = tab_item.text() if tab_item is not None and tab_item.text() else "BlockCheck"
+        self._show_over_tabs(self._past_cards_view)
+        self._past_cards_view.show_run(title, headline, list(cards), text, root_title=root)
+        self._past_cards_view.setFocus()
 
     def _ensure_past_check_view(self):
         if self._past_check_view is None:
