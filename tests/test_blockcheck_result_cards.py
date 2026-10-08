@@ -447,6 +447,27 @@ class NewSectionsCardsTests(unittest.TestCase):
         [legacy] = [item for item in build_cards({"services": [old]}) if item.site]
         self.assertEqual(legacy.status, "Мешает запись в hosts")
 
+    def test_crowd_card_shows_the_report_words_and_says_the_check_caused_the_stop(self) -> None:
+        crowd = {
+            "state": "freeze", "level": "warn", "host": "www.instagram.com", "address": "163.70.151.174", "label": "Instagram",
+            "text": "Instagram замирает от нескольких соединений сразу.",
+            "advice": "Остановку вызвала сама проверка: так фильтр наказывает за пачку соединений.",
+            "before": "ok", "crowd": ["ok", "timeout"], "after": "timeout", "control": "ok", "recovered_s": 42.0, "waited_s": 60.0,
+        }
+        card = self._card({"crowd": crowd}, "crowd")
+        self.assertEqual((card.title, card.level), ("Несколько соединений сразу", "warn"))
+        # Вывод и оговорка «остановку вызвала сама проверка» — прямо на карточке, словами отчёта.
+        self.assertEqual([line.name for line in card.lines], [crowd["text"], crowd["advice"]])
+        facts = {line.name: line.text for line in card.sections[-1].lines}
+        self.assertEqual((facts["Сайт"], facts["Адрес сервера"], facts["Сайт вернулся через"]), ("Instagram · www.instagram.com", "163.70.151.174", "42.0 с"))
+        # Коды исходов соединений экран в слова не переводит: строки появятся, когда их даст отчёт.
+        self.assertNotIn("timeout", " ".join(f"{line.name} {line.text}" for section in card.sections for line in section.lines))
+        with_rows = self._card({"crowd": {**crowd, "status": "Замирает", "rows": [{"title": "Соединение 2 из пачки", "text": "без ответа", "state": "fail"}]}}, "crowd")
+        self.assertEqual(with_rows.status, "Замирает")
+        self.assertIn(("Соединение 2 из пачки", "без ответа", "fail"), [(line.name, line.text, line.state) for line in with_rows.sections[-1].lines])
+        # Проба не делалась — карточки нет.
+        self.assertFalse([item for item in build_cards({"crowd": None}) if item.key == "crowd"])
+
     def test_no_comparison_no_card(self) -> None:
         self.assertFalse([card for card in build_cards({"compare": None}) if card.key == "compare"])
 

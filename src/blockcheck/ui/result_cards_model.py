@@ -792,6 +792,48 @@ def _ipv6_card(ipv6: dict) -> Card:
     )
 
 
+def _crowd_card(crowd: dict) -> Card:
+    """«Несколько соединений сразу»: замирает ли сайт, когда к нему открывают пачку соединений.
+
+    Слова берутся из отчёта как есть. Важная для человека оговорка — что при
+    «замер» остановку сайта вызвала сама проверка — приходит в ``advice`` и
+    стоит на карточке второй строкой, а не прячется в подробностях.
+    """
+    level = _state(crowd.get("level"))
+    text = str(crowd.get("text") or "")
+    advice = str(crowd.get("advice") or "")
+    lines = [Line(level, text)] + ([Line(INFO, advice)] if advice else [])
+    facts = [Line(INFO, "Сайт", " · ".join(part for part in (str(crowd.get("label") or ""), str(crowd.get("host") or "")) if part))]
+    if crowd.get("address"):
+        facts.append(Line(INFO, "Адрес сервера", str(crowd["address"])))
+    # Исходы отдельных соединений — готовыми строками отчёта, когда он их даёт: коды исходов экран в слова не переводит.
+    facts += [
+        Line(_shown_state(row.get("state")), str(row.get("title") or ""), str(row.get("text") or ""))
+        for row in crowd.get("rows") or ()
+    ]
+    if crowd.get("recovered_s") is not None:
+        facts.append(Line(INFO, "Сайт вернулся через", f"{crowd['recovered_s']} с"))
+    if crowd.get("waited_s"):
+        facts.append(Line(INFO, "Ждали после пачки", f"{crowd['waited_s']} с"))
+    sections = [Section("Вывод", (Line(level, text),))]
+    if advice:
+        sections.append(Section(_CROWD_ADVICE_TITLE, (Line(INFO, advice),)))
+    sections.append(Section("Что проверяли", tuple(facts)))
+    return Card(
+        key="crowd",
+        icon="fa5s.layer-group",
+        title="Несколько соединений сразу",
+        level=level,
+        # Слово итога — из отчёта; пока его нет, им служит сама фраза вывода.
+        status=str(crowd.get("status") or text),
+        lines=tuple(lines),
+        sections=tuple(sections),
+    )
+
+
+_CROWD_ADVICE_TITLE = "Что это значит и что делать"
+
+
 def _dns_card(report: dict) -> Card | None:
     reference = list(report.get("reference") or ())
     spoofed = [str(item) for item in report.get("spoofed_hosts") or ()]
@@ -1117,6 +1159,8 @@ def build_cards(report: dict) -> list[Card]:
     system = list(report.get("system") or ())
     if system:
         cards.append(_system_card(system))
+    if report.get("crowd"):
+        cards.append(_crowd_card(report["crowd"]))
     if report.get("compare"):
         cards.append(_compare_card(report["compare"], report.get("services") or ()))
     run = _run_card(report)
