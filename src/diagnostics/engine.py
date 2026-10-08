@@ -137,7 +137,7 @@ STEP_SYSTEM = "system"
 STEP_DNS_SERVERS = "dns_servers"
 STEP_FILTER = "filter"
 # Разделы отчёта, которые заполняются по ходу проверки.
-_REPORT_SECTIONS = ("services", "voice", "freeze", "telegram", "network", "speed", "ipv6", "dns_servers", "filter", "habits")
+_REPORT_SECTIONS = ("services", "voice", "freeze", "telegram", "network", "speed", "ipv6", "dns_servers", "filter", "habits", "crowd")
 PROGRESS_STEPS = (STEP_SITES, STEP_HOSTINGS, STEP_VOICE, STEP_IPV6, STEP_SYSTEM, STEP_DNS_SERVERS, STEP_FILTER)
 # Сколько потоков нужно одной цели в худшем случае: сама цель, три запроса к
 # DNS системы, два эталона (A и AAAA) по запросу на каждый эталонный сервер и
@@ -731,7 +731,10 @@ def run_blockcheck(
             step(STEP_FILTER)
         speed_call = functools.partial(sections.check_speed, run, emit, collected, services)
         speed = _attempt(emit, "Скорость", speed_call) if full and not run.dns_cancelled() else None
-        live.put(filter=filter_place, habits=habits, speed=speed)
+        # Последней — проба, которая сама может остановить сайт на пару минут.
+        crowd_call = functools.partial(sections.check_crowd, run, collected, services, emit, tools=local)
+        crowd = _attempt(emit, "Несколько соединений сразу", crowd_call) if full and not run.dns_cancelled() else None
+        live.put(filter=filter_place, habits=habits, speed=speed, crowd=crowd)
 
         problems, working, spoofed = problem_rules.collect_problems(
             services,
@@ -749,6 +752,7 @@ def run_blockcheck(
         )
         problems += problem_rules.burst_problems(burst)
         problems += sections.dns_problems(dns_servers) + sections.speed_problems(speed, zapret_running=zapret_running)
+        problems += sections.crowd_problems(crowd, zapret_running=zapret_running)
         problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
         registry_index = registry_wait(REGISTRY_WAIT_S)

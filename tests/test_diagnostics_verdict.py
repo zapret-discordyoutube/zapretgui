@@ -228,6 +228,8 @@ class _Net:
         self.network: dict = {"external_ip": "", "provider": "", "lines": []}
         self.telegram: tuple = ()
         self.speed: dict | None = None
+        self.crowd: dict | None = None
+        self.crowd_tools: list | None = None
         # TLS 1.2 / TLS 1.3 / HTTP по отдельности: по умолчанию проверку будто сняли.
         self.protocol_facts = None
         self.registry = engine.registry.Index()
@@ -295,6 +297,8 @@ class _Net:
             # «Ваша сеть» и дата-центры Telegram ходят в сеть сами: в сценариях движка их нет.
             patch.object(sections, "check_network", side_effect=lambda _run, _tools: self.network),
             patch.object(sections, "check_speed", side_effect=lambda _run, _emit, *_sites: self.speed),
+            # Пачка одновременных соединений — настоящие приветствия в сеть.
+            patch.object(sections, "check_crowd", side_effect=self._crowd),
             patch.object(engine.telegram_check, "check_telegram", side_effect=lambda *_a, **_k: self.telegram),
             patch.object(sections, "check_system", side_effect=lambda _run, _services, _zapret=None: self.system_items),
             patch.object(net_access, "hosts_file_ipv4", side_effect=lambda _host: self.hosts),
@@ -316,6 +320,10 @@ class _Net:
             patch("diagnostics.voice_check.check_voice", return_value=self.voice),
             patch("diagnostics.freeze_check.check_freeze", return_value=self.freeze),
         )
+
+    def _crowd(self, _run, _collected, _services, _emit, *, tools=()):
+        self.crowd_tools = list(tools)
+        return self.crowd
 
     def _cert(self, host, ip, **_kwargs):
         self.cert_asked.append((host, ip))

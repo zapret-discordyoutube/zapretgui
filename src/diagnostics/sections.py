@@ -657,6 +657,118 @@ def speed_problems(speed: dict | None, *, zapret_running: bool | None) -> list[d
     return found
 
 
+# Сколько секунд общего срока проверки оставить после ожидания замороженного сайта — на итог и запись отчёта.
+CROWD_RESERVE_S = 10.0
+
+
+def check_crowd(run: Run, collected: dict[str, list[Probe]], services, emit: Emit, *, tools=()) -> dict | None:
+    """Замирает ли сайт от нескольких соединений сразу (см. ``diagnostics.crowd_probe``).
+
+    Идёт самой последней: проба сама может остановить сайт на пару минут. При
+    работающем обходе (``tools``) не делается — мерили бы обход, а не линию.
+    """
+    from diagnostics import browser_hello, crowd_probe, protocol_probe
+
+    if tools:
+        return None
+    # Сайт, который открылся и у которого приветствие «как Chrome» проходит: иначе сравнивать не с чем.
+    site = next(
+        (
+            probe
+            for key, probes in collected.items()
+            if not services[key].control
+            for probe in probes
+            if probe.target.main
+            and probe.reach_state == ReachState.OK
+            and probe.reach is not None
+            and ":" not in probe.reach.ip
+            and not probe.unstable
+            and any(line.key == protocol_probe.PROTO_BROWSER and line.state == protocol_probe.STATE_OK for line in probe.protocols)
+        ),
+        None,
+    )
+    control = next(
+        (
+            probe
+            for key, probes in collected.items()
+            if services[key].control
+            for probe in probes
+            if probe.reach_state == ReachState.OK and probe.reach is not None and ":" not in probe.reach.ip
+        ),
+        None,
+    )
+    if site is None or control is None or run.dns_cancelled():
+        return None
+
+    def _hello(ip: str, host: str) -> str:
+        return browser_hello.send_hello(ip, host, cancel=run.probe_cancel).kind
+
+    def _together(calls) -> list[str]:
+        return [future.result() for future in [run.submit(call) for call in calls]]
+
+    def _wait(seconds: float) -> bool:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if run.dns_cancelled():
+                return False
+            time.sleep(0.1)
+        return True
+
+    facts = crowd_probe.collect(
+        site.host,
+        site.reach.ip,
+        hello=_hello,
+        together=_together,
+        control=lambda: _hello(control.reach.ip, control.host),
+        wait=_wait,
+        clock=time.monotonic,
+        max_wait=max(0.0, run.deadline - time.monotonic() - CROWD_RESERVE_S),
+    )
+    verdict = crowd_probe.judge(facts)
+    if verdict is None:
+        return None
+    emit("")
+    emit("━━━━━━━━ Несколько соединений сразу ━━━━━━━━")
+    icons = {crowd_probe.CROWD_NONE: "✅", crowd_probe.CROWD_FREEZE: "⚠️", crowd_probe.CROWD_STUCK: "⚠️"}
+    emit(f"{icons.get(verdict.code, '❔')} {report_text.sentence(verdict.text)}")
+    if verdict.advice:
+        emit(f"   👉 {verdict.advice}")
+    levels = {crowd_probe.CROWD_NONE: "ok", crowd_probe.CROWD_FREEZE: "warn", crowd_probe.CROWD_STUCK: "warn"}
+    return {
+        "state": verdict.code,
+        "level": levels.get(verdict.code, "unknown"),
+        "host": facts.host,
+        "address": facts.ip,
+        "label": next(services[key].label for key, probes in collected.items() if site in probes),
+        "text": report_text.sentence(verdict.text),
+        "advice": verdict.advice,
+        # Факты как есть: исход одиночного соединения до пачки, каждого из пачки и одиночного после.
+        "before": facts.before,
+        "crowd": list(facts.crowd),
+        "after": facts.after,
+        "control": facts.control,
+        "recovered_s": None if facts.recovered_s is None else round(facts.recovered_s, 1),
+        "waited_s": round(facts.waited_s, 1),
+    }
+
+
+def crowd_problems(crowd: dict | None, *, zapret_running: bool | None) -> list[dict]:
+    """Проблема «сайт замирает от нескольких соединений сразу». Пусто — такого нет."""
+    if not crowd or crowd.get("level") != "warn":
+        return []
+    return [
+        problem_rules.problem(
+            Level.WARN,
+            str(crowd.get("text") or ""),
+            (str(crowd.get("advice") or ""),),
+            action="start_zapret" if zapret_running is False else "strategy",
+            target=str(crowd.get("host") or ""),
+            kind=block_kind.KIND_SNI,
+            title=str(crowd.get("label") or ""),
+        )
+    ]
+
+
 def check_speed(run: Run, emit: Emit, collected=None, services=None) -> dict | None:
     """Скорость зарубежных серверов против российских и замедление по имени сайта.
 
