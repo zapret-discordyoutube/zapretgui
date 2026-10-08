@@ -441,14 +441,17 @@ class BlockKindsOnScreenTests(unittest.TestCase):
         self.assertEqual(sni.title_label.text(), "Блокировка по имени (SNI)")
         self.assertIn("SNI", sni.about_label.text())
         # Одинаковый у обоих сайтов совет показан один раз — в заголовке группы.
-        self.assertEqual([label.text() for label in sni.shared_labels], ["→ Подберите другую стратегию"])
+        self.assertEqual(sni.shared_advice_lines, ["→ Подберите другую стратегию"])
+        # Пояснение и общий совет не стоят абзацами над карточками — они в подсказке заголовка.
+        self.assertTrue(sni.about_label.isHidden())
+        self.assertIn("→ Подберите другую стратегию", sni.title_label.toolTip())
         # Сайты — карточки одной сетки: в карточке название, объяснение — в подсказке.
         self.assertEqual([card.title for card in sni.rows], ["X", "LinkedIn"])
         self.assertEqual(sni.flow.cards(), sni.rows)
         self.assertIn("С именем x.com соединение обрывается.", sni.rows[0].hint_text)
         self.assertEqual(sni.rows[0].action_button.toolTip(), "Подобрать стратегию для x.com")
         # В группе из одного сайта совет не выносится в заголовок: он в подсказке карточки.
-        self.assertEqual(groups[0].shared_labels, [])
+        self.assertEqual(groups[0].shared_advice_lines, [])
         self.assertIn("→ Попробуйте другой DNS", groups[0].rows[0].hint_text)
         # Все строки по-прежнему доступны списком: группы, затем «Открываются».
         self.assertEqual(len(panel.problem_rows()), 6)

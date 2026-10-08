@@ -346,6 +346,12 @@ class GroupActionsTests(unittest.TestCase):
         servers = next(section for section in page.sections if section.title == "Серверы")
         self.assertEqual([(line.name, line.text) for line in servers.lines], [("Akamai", "US.AKM-01"), ("Contabo", "DE.CNT-01, DE.CNT-02")])
         self.assertEqual(page.sections[-1].lines[0].name, "Подберите стратегию")
+        # Серверы — плитками с логотипами, значок страницы — по виду проблемы, хвост фразы — итогом в шапке.
+        self.assertTrue(servers.tiles)
+        self.assertEqual(page.icon, "fa5s.cut")
+        tail = problem_detail_card({**cut, "text": cut["text"] + ": 13 из 31 проверенных серверов"})
+        self.assertEqual(tail.status, "13 из 31 проверенных серверов")
+        self.assertNotIn("Что это значит", [section.title for section in tail.sections])
 
     def test_tile_scrolls_the_page_to_its_group(self) -> None:
         area = QScrollArea()

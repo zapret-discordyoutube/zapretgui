@@ -670,10 +670,56 @@ class LightAndFittingTests(unittest.TestCase):
         self.assertGreater(big.mapTo(panel, big.rect().topLeft()).y(), small.y())
         # Пояснение вида блокировки в столбце — в подсказке заголовка, а не абзацем.
         first = small.blocks()[0]
-        self.assertTrue(first.about_label.isHidden())
-        self.assertEqual(first.title_label.toolTip(), first.about_label.text())
-        self.assertFalse(big.about_label.isHidden())
+        # Пояснение вида блокировки и общий совет — в подсказке заголовка у любой группы, а не абзацами.
+        for group in (first, big):
+            self.assertTrue(group.about_label.isHidden())
+            self.assertIn(group.about_label.text(), group.title_label.toolTip())
+            self.assertEqual(group.info_icon.toolTip(), group.title_label.toolTip())
         # Адрес на карточке сайта — без «www.».
         self.assertEqual(first.rows[0].note, "telegram.org")
         # Порядок строк для остального кода — по важности групп, как раньше.
         self.assertEqual(len(panel.problem_rows()), 8)
+
+    def test_site_card_shows_how_the_site_was_checked(self) -> None:
+        from blockcheck.ui.check_results import MarksStrip
+        from blockcheck.ui.result_cards_model import Mark
+
+        def proto(title: str, state: str, word: str) -> dict:
+            return {"key": title, "title": title, "state": state, "word": word, "text": word}
+
+        def service(key: str, label: str, quic: str) -> dict:
+            protocols = [proto("TLS 1.2", "fail", "сброс"), proto("TLS 1.3", "fail", "сброс"), proto("Как Chrome", "ok", "проходит"), proto("HTTP", "info", "переход")]
+            target = {"host": f"{key}.com", "purpose": "сайт", "main": True, "ok": False, "state": "dpi", "short": "сброс", "text": "сброс", "protocols": protocols, "quic": quic, "dns_state": "ok", "cause": "by_name"}
+            return {"key": key, "label": label, "level": "fail", "kind": "sni", "targets": [target]}
+
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=lambda _key: None)
+        self.addCleanup(panel.deleteLater)
+        panel.show_report(
+            {
+                "services": [service("x", "X (Twitter)", "ok"), service("linkedin", "LinkedIn", "blocked_by_name")],
+                "problems": [
+                    _problem("X не открывается", kind="sni", title="X (Twitter)", target="x.com"),
+                    _problem("LinkedIn не открывается", kind="sni", title="LinkedIn", target="linkedin.com"),
+                ],
+            }
+        )
+        panel.resize(900, 500)
+        panel.show()
+        self.app.processEvents()
+        x, linkedin = panel.problem_rows()
+        # На карточке — шесть дорог в одном порядке у всех сайтов; цвет говорит, что не прошло.
+        self.assertIsInstance(x.marks_strip, MarksStrip)
+        self.assertEqual([mark.label for mark in x.marks_strip.marks()], ["TLS 1.2", "TLS 1.3", "Chrome", "HTTP", "QUIC", "DNS"])
+        self.assertEqual([mark.state for mark in x.marks_strip.marks()][4], "ok")
+        # Группа одна, а сайты режут по-разному: у LinkedIn закрыт ещё и QUIC.
+        self.assertEqual([mark.state for mark in linkedin.marks_strip.marks()][4], "warn")
+        self.assertEqual(len(x.marks_strip.cells(x.marks_strip.width())), 6)
+        self.assertEqual((x.height(), linkedin.height()), (x.HEIGHT_WITH_MARKS, x.HEIGHT_WITH_MARKS))
+        # Причина в строке под названием — словами, без повтора протоколов из полоски.
+        self.assertEqual(x.note, "x.com · блокировка по имени")
+        self.assertIn("TLS 1.2: сброс", x.hint_text)
+        x.marks_strip.grab()
+        # Узкая полоска показывает столько дорог, сколько помещается целиком.
+        strip = MarksStrip((Mark("TLS 1.2", "сброс", "fail", "fa5s.lock"), Mark("QUIC", "закрыт", "warn", "fa5s.bolt")))
+        self.addCleanup(strip.deleteLater)
+        self.assertEqual((len(strip.cells(40)), len(strip.cells(400))), (1, 2))

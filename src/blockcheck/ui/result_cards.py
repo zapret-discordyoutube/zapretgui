@@ -1485,7 +1485,9 @@ def server_card(line: Line, section: Section) -> Card:
 _STATE_WORDS = {"ok": "В порядке", "warn": "Работает не полностью", "fail": "Мешает работе"}
 
 
-def finding_detail_card(text: str, state: str, parts: FindingParts | None = None) -> Card:
+def finding_detail_card(
+    text: str, state: str, parts: FindingParts | None = None, *, icon: str = "fa5s.network-wired", status: str = ""
+) -> Card:
     """Отчёт по одной находке: что найдено, какие серверы названы и что это значит.
 
     ``parts`` — находка готовыми частями: тогда названы все серверы. Без них
@@ -1498,19 +1500,20 @@ def finding_detail_card(text: str, state: str, parts: FindingParts | None = None
         servers, more, rest = split_server_list(detail)
     sections = [Section("Что найдено", (Line(state, str(text)),))]
     if servers:
+        # Серверы — плитками с логотипами сервисов: их узнают по значку, а не читают столбцом.
         lines = [Line("info", name, ", ".join(addresses) or "адрес не назван") for name, addresses in servers]
         if more:
             lines.append(Line("info", f"и ещё {more}", "полный список — в отчёте «DNS-серверы», кнопка «Подробный текст»"))
-        sections.append(Section("Серверы", tuple(lines)))
+        sections.append(Section("Серверы", tuple(lines), tiles=True, tile_icon="fa5s.server"))
     if rest:
         sections.append(Section("Что это значит", (Line("info", rest),)))
     level = state if state in ("ok", "warn", "fail") else "unknown"
     return Card(
         key=f"finding:{title}",
-        icon="fa5s.network-wired",
+        icon=icon,
         title=title,
         level=level,
-        status=_STATE_WORDS.get(state, "К сведению"),
+        status=status or _STATE_WORDS.get(state, "К сведению"),
         sections=tuple(sections),
     )
 

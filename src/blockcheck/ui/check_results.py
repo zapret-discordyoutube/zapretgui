@@ -21,12 +21,13 @@ from dataclasses import dataclass, replace
 from PyQt6.QtCore import QEvent, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter
 from PyQt6.QtWidgets import QAbstractScrollArea, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from qfluentwidgets.common.font import getFont
 from qfluentwidgets import BodyLabel, CaptionLabel, FlowLayout, PushButton, TransparentPushButton, TransparentToolButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
 from blockcheck.ui.finding_parts import CardsFlow, FindingCard, ServerChip, split_server_list, theme_color
 from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
-from blockcheck.ui.result_cards import finding_detail_card
+from blockcheck.ui.result_cards import finding_detail_card, state_color
 from blockcheck.ui.result_cards_model import Card, FindingParts, Line, Section, build_cards, read_finding_parts
 from blockcheck.ui.brand_icons import BrandIcon, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
@@ -38,6 +39,7 @@ from ui.widgets.fun import FunTicker, Mascot, burst_confetti
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 from ui.widgets.columns_flow import ColumnsFlow
 from ui.widgets.hover_hint import HoverHint
+from ui.widgets.reveal import Reveal
 from ui.widgets.stagger_float_in import float_in
 from ui.widgets.tone_group import ToneDot, ToneGroup, dot_on_first_line, mute
 
@@ -311,6 +313,75 @@ def site_explanation(problem: dict) -> tuple[str, ...]:
 
 # Уже этого адрес и причина на карточке сайта не помещаются.
 SITE_CARD_MIN_WIDTH = 240
+# С полоской дорог шесть значков с подписями должны помещаться целиком.
+SITE_CARD_MARKS_WIDTH = 300
+
+
+# Короткие подписи дорог для узкой карточки сайта в итоге.
+_MARK_SHORT = {"TLS 1.2": "1.2", "TLS 1.3": "1.3"}
+
+
+class MarksStrip(QWidget):
+    """Как проверяли сайт, одной строкой значков: TLS 1.2, TLS 1.3, Chrome, HTTP, QUIC, DNS.
+
+    Группа говорит, чем сайты похожи, а полоска — чем этот сайт отличается: у
+    одного режется только TLS, у другого ещё и QUIC, у третьего подменён DNS.
+    Значки стоят в одном порядке у всех сайтов; цвет — чем кончилась проба.
+    """
+
+    HEIGHT = 18
+    ICON = 11
+    GAP = 9
+
+    def __init__(self, marks, parent=None) -> None:
+        super().__init__(parent)
+        self._marks = tuple(marks)
+        self.setFixedHeight(self.HEIGHT)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._font = getFont(11)
+        self._metrics = QFontMetrics(self._font)
+        self.reveal = Reveal(self)
+        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+        set_state_text(self, "; ".join(f"{mark.label}: {mark.word}" for mark in self._marks))
+
+    def marks(self) -> tuple:
+        return self._marks
+
+    def cells(self, width: int) -> list[tuple[float, float]]:
+        """Места дорог (левый край, ширина) — сколько целиком помещается в ширину."""
+        cells: list[tuple[float, float]] = []
+        x = 0.0
+        for mark in self._marks:
+            need = self.ICON + 3 + self._metrics.horizontalAdvance(_MARK_SHORT.get(mark.label, mark.label))
+            if x + need > width:
+                break
+            cells.append((x, need))
+            x += need + self.GAP
+        return cells
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
+        painter.setFont(self._font)
+        cells = self.cells(self.width())
+        muted = theme_color("fg_muted", QColor("#9aa0aa"))
+        for order, ((left, width), mark) in enumerate(zip(cells, self._marks)):
+            painter.setOpacity(self.reveal.part(order, len(cells)))
+            color = QColor(state_color(mark.state))
+            try:
+                icon = get_cached_qta_pixmap(mark.icon, color=color.name(), size=self.ICON)
+                painter.drawPixmap(int(left), (self.HEIGHT - self.ICON) // 2, self.ICON, self.ICON, icon)
+            except Exception:
+                pass
+            # Подпись в цвете состояния только у того, что не прошло: остальное приглушено.
+            painter.setPen(color if mark.state in ("fail", "warn") else muted)
+            painter.drawText(
+                QRectF(left + self.ICON + 3, 0, width, self.HEIGHT),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                _MARK_SHORT.get(mark.label, mark.label),
+            )
+        painter.end()
 
 
 class _SiteCard(QWidget):
@@ -321,6 +392,8 @@ class _SiteCard(QWidget):
     """
 
     HEIGHT = 48
+    # С полоской «как проверяли» карточка выше.
+    HEIGHT_WITH_MARKS = 72
 
     def __init__(
         self,
@@ -330,6 +403,7 @@ class _SiteCard(QWidget):
         *,
         card_key: str = "",
         on_open: OpenHandler | None = None,
+        tall: bool = False,
     ) -> None:
         super().__init__(parent)
         self.problems = [problem]
@@ -338,14 +412,24 @@ class _SiteCard(QWidget):
         self._on_open = on_open
         self.card_key = card_key if on_open is not None else ""
         self._hover = False
-        self.setFixedHeight(self.HEIGHT)
+        marks = tuple(problem.get("marks") or ())
+        # В группе карточки одной высоты: ``tall`` — у соседей есть полоска дорог.
+        self.setFixedHeight(self.HEIGHT_WITH_MARKS if marks or tall else self.HEIGHT)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         if self.card_key:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(11, 0, 6, 0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(11, 0, 6, 8 if marks or tall else 0)
+        outer.setSpacing(0)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
+        outer.addLayout(layout, 1)
+        self.marks_strip: MarksStrip | None = None
+        if marks:
+            self.marks_strip = MarksStrip(marks, self)
+            outer.addWidget(self.marks_strip)
 
         icon_name, icon_color = problem_brand(problem) or (_SITE_ICON, "")
         self.icon = BrandIcon(icon_name, icon_color, self, size=20)
@@ -387,7 +471,8 @@ class _SiteCard(QWidget):
             set_control_accessibility(self.action_button, name=what, description=f"{_ACTION_DESCRIPTION.get(action, '')}.")
             layout.addWidget(self.action_button, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        hint = [self.title, *([self.note] if self.note else []), *caption]
+        roads = " · ".join(f"{mark.label}: {mark.word}" for mark in marks)
+        hint = [self.title, *([self.note] if self.note else []), *([roads] if roads else []), *caption]
         self.hint_text = "\n".join(hint)
         set_tooltip(self, self.hint_text + ("\nНажмите, чтобы открыть полный отчёт" if self.card_key else ""))
         state = str(problem.get("text") or self.title)
@@ -468,6 +553,10 @@ def problem_finding_card(problem: dict, parent=None) -> FindingCard:
     )
 
 
+# Значок страницы находки — по виду проблемы.
+_KIND_ICONS = {"cut16": "fa5s.cut", "quic": "fa5s.bolt", "voice": "fa5s.phone-alt", "dns": "fa5s.network-wired", "ip": "fa5s.ban", "sni": "fa5s.lock"}
+
+
 def problem_detail_card(problem: dict) -> Card:
     """Страница одной находки: что найдено, какие серверы названы, что это значит и что делать."""
     parts = read_finding_parts(problem.get("parts"))
@@ -476,8 +565,17 @@ def problem_detail_card(problem: dict) -> Card:
         # Серверы пришли метками (хостинги с обрывом): на странице они те же, что на карточке.
         title, _servers, _more, rest, _detail = problem_parts(problem)
         pairs = tuple((str(name), str(address)) for name, addresses in chips for address in (addresses or [""]))
-        parts = FindingParts(title, pairs, rest)
-    card = finding_detail_card(str(problem.get("text") or ""), str(problem.get("level") or ""), parts)
+        # Хвост фразы («13 из 31 проверенных серверов») — итог одной строкой под названием, а не раздел.
+        parts, status = FindingParts(title, pairs, ""), rest.rstrip(".")
+    else:
+        status = ""
+    card = finding_detail_card(
+        str(problem.get("text") or ""),
+        str(problem.get("level") or ""),
+        parts,
+        icon=_KIND_ICONS.get(str(problem.get("kind") or ""), "fa5s.network-wired"),
+        status=status,
+    )
     advice = tuple(Line("info", item) for item in _own_advice(problem))
     return replace(card, sections=(*card.sections, Section("Что делать", advice))) if advice else card
 
@@ -705,16 +803,31 @@ class _ProblemGroup(ToneGroup):
         )
         self._kind = kind
         hidden = () if plain else tuple(shared_advice(problems))
-        self.shared_labels = [self.add_note(f"→ {advice}") for advice in hidden]
+        # Пояснение вида блокировки и общий совет — в подсказке заголовка: абзацы над карточками
+        # читались как стена текста, а главное — что с каждым сайтом — видно на самих карточках.
+        self.shared_advice_lines = [f"→ {advice}" for advice in hidden]
+        self.about_text = "\n".join(part for part in (info.about or _OTHER_ABOUT, *self.shared_advice_lines) if part)
+        if self.about_label is not None:
+            self.about_label.setVisible(False)
+        if self.title_label is not None and self.about_text:
+            self.info_icon = BrandIcon("fa5s.info-circle", "", self, size=12)
+            set_tooltip(self.info_icon, self.about_text)
+            set_tooltip(self.title_label, self.about_text)
+            self.add_title_widget(self.info_icon)
         sites = [problem for problem in problems if is_site_problem(problem)]
         others = [problem for problem in problems if not is_site_problem(problem)]
 
         self.rows: list[_SiteCard | FindingCard | _ProblemRow] = []
         self.flow: CardsFlow | None = None
         if sites:
-            self.flow = CardsFlow(self, min_width=SITE_CARD_MIN_WIDTH)
+            tall = any(problem.get("marks") for problem in sites)
+            self.flow = CardsFlow(
+                self,
+                min_width=SITE_CARD_MARKS_WIDTH if tall else SITE_CARD_MIN_WIDTH,
+                card_height=_SiteCard.HEIGHT_WITH_MARKS if tall else _SiteCard.HEIGHT,
+            )
             for problem in sites:
-                card = _SiteCard(problem, on_action, self.flow, card_key=key_for(problem), on_open=on_open)
+                card = _SiteCard(problem, on_action, self.flow, card_key=key_for(problem), on_open=on_open, tall=tall)
                 self.flow.add(card)
                 self.rows.append(card)
             self.add_widget(self.flow)
@@ -1012,7 +1125,11 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
                 "card_icon": cards[key].icon,
                 "site_label": cards[key].title,
                 # Причина в два-три слова — та же метка, что на карточке сайта под итогом.
-                "cause_word": next((text for text, state in cards[key].chips if state == "fail"), ""),
+                # Сами протоколы («TLS 1.2: сброс») показывает полоска дорог — в причину не берём.
+                "cause_word": next(
+                    (text for text, state in cards[key].chips if state == "fail" and not (cards[key].marks and ": " in text)), ""
+                ),
+                "marks": cards[key].marks,
             }
             if key.startswith("site:") and key in cards
             else item
@@ -1046,11 +1163,6 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
                 if group in small:
                     if self.small_groups not in rows:
                         rows.append(self.small_groups)
-                    # В столбце пояснение вида блокировки — в подсказке заголовка: абзацы разной
-                    # длины ставили бы карточки соседних групп на разной высоте.
-                    if group.about_label is not None and group.title_label is not None:
-                        set_tooltip(group.title_label, group.about_label.text())
-                        group.about_label.setVisible(False)
                     self.small_groups.add(group)
                 else:
                     rows.append(group)

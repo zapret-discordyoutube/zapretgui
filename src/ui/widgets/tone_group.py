@@ -170,6 +170,13 @@ class ToneGroup(QWidget):
     def add_widget(self, widget: QWidget) -> None:
         self._body.addWidget(widget)
 
+    def add_title_widget(self, widget: QWidget) -> bool:
+        """Ставит маленький виджет сразу за названием группы (значок-пояснение). ``False`` — заголовка нет."""
+        if self._header is None or self.title_label is None:
+            return False
+        self._header.insertWidget(self._header.indexOf(self.title_label) + 1, widget, 0, Qt.AlignmentFlag.AlignVCenter)
+        return True
+
     def add_header_widget(self, widget: QWidget) -> bool:
         """Ставит виджет в правый край заголовка: общее для всей группы действие. ``False`` — заголовка нет."""
         if self._header is None:
