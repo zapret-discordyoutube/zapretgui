@@ -308,6 +308,20 @@ class NewSectionsCardsTests(unittest.TestCase):
         nothing = self._card({"filter": {**place, "mechanisms": []}}, "filter")
         self.assertEqual(nothing.status, "Узлы не совпали")
 
+    def test_site_status_names_a_cause_that_is_not_the_provider(self) -> None:
+        def card(**extra):
+            [built] = [item for item in build_cards({"services": [_service("chatgpt", "ChatGPT", "warn", [_target("chatgpt.com", main=True, **extra)])]}) if item.site]
+            return built
+
+        # Запись в hosts ведёт на нерабочий адрес: сайт жив, мешает сама запись.
+        self.assertEqual(card(hosts_stale=True).status, "Мешает запись в hosts")
+        # Вместо сайта отвечает кто-то другой — названо кто.
+        self.assertEqual(card(cert={"code": "antivirus", "text": "x"}).status, "Сертификат подменяет антивирус")
+        self.assertEqual(card(cert={"code": "что-то новое", "text": "x"}).status, "Чужой сертификат")
+        # Чужой сертификат важнее записи в hosts; без обеих причин слово итога прежнее.
+        self.assertEqual(card(hosts_stale=True, cert={"code": "other_site"}).status, "Отвечает другой сайт")
+        self.assertNotIn("hosts", card().status)
+
     def test_no_comparison_no_card(self) -> None:
         self.assertFalse([card for card in build_cards({"compare": None}) if card.key == "compare"])
 

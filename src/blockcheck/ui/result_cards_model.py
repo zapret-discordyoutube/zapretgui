@@ -295,12 +295,37 @@ def _mark_icon(title: str) -> str:
     return _MARK_ICONS.get(title, "fa5s.plug")
 
 
+# Кто ответил вместо сайта — словом итога на карточке (код из отчёта: targets[].cert.code).
+_CERT_STATUS = {
+    "antivirus": "Сертификат подменяет антивирус",
+    "debug_proxy": "Сертификат подменяет прокси-отладчик",
+    "state_ca": "Сертификат государственного центра",
+    "hosts": "Адрес из hosts ведёт не туда",
+    "other_site": "Отвечает другой сайт",
+    "self_signed": "Самоподписанный сертификат",
+    "unknown_issuer": "Сертификат от неизвестного центра",
+}
+
+
+def _own_cause_status(targets) -> str:
+    """Слово итога, когда сайту мешает не фильтр провайдера: чужой сертификат или запись в hosts. Пусто — не тот случай."""
+    for item in targets:
+        code = str((item.get("cert") or {}).get("code") or "")
+        if code:
+            return _CERT_STATUS.get(code, "Чужой сертификат")
+    if any(item.get("hosts_stale") for item in targets):
+        return "Мешает запись в hosts"
+    return ""
+
+
 def _site_card(service: dict) -> Card:
     key = str(service.get("key") or "")
     targets = list(service.get("targets") or ())
     level = site_level(service)
     kind = site_kind(service, level)
     status = _capital(kind_info(kind).short) if kind else _SITE_STATUS[level]
+    # Когда причина не у провайдера, общее «Есть проблемы» ничего не говорит: называем её прямо.
+    status = _own_cause_status(targets) or status
 
     lines = tuple(
         Line(_target_state(item), str(item.get("purpose") or item.get("host") or ""), str(item.get("short") or ""))
