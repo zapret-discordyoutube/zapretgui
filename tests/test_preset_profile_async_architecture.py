@@ -2148,16 +2148,28 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("load_ui_language", base_source)
         self.assertNotIn("load_ui_language", navigation_source)
 
-    def test_appearance_page_builds_all_sections_in_initial_pass(self) -> None:
+    def test_appearance_page_builds_lower_sections_as_a_block(self) -> None:
+        # Решение владельца от 2026-10-08: то, чего не видно, не строить сразу.
+        # Разделы ниже первого экрана — блок ядра ui.block_build: в высоком
+        # окне он собирается при показе страницы, иначе — когда долистали или
+        # в паузе. Своих таймеров на это страница не заводит.
         build_source = inspect.getsource(AppearancePage._build_ui)
+        block_source = inspect.getsource(AppearancePage._build_lower_sections_block)
         activated_source = inspect.getsource(AppearancePage.on_page_activated)
         schedule_source = inspect.getsource(AppearancePage._schedule_lower_sections_build)
         ensure_source = inspect.getsource(AppearancePage._ensure_lower_sections_built)
 
-        self.assertIn("_ensure_lower_sections_built(require_visible=False)", build_source)
+        self.assertIn("self.add_lazy_block(", build_source)
+        self.assertIn("LOWER_SECTIONS_BLOCK", build_source)
+        self.assertIn("self._build_lower_sections_block,", build_source)
+        self.assertNotIn("_ensure_lower_sections_built(", build_source)
+        self.assertIn("_ensure_lower_sections_built(require_visible=False)", block_source)
         self.assertIn("build_holiday_sections", ensure_source)
         self.assertIn("build_opacity_section", ensure_source)
         self.assertIn("build_performance_section", ensure_source)
+        # Повторная попытка после показа — только если блок уже просили собрать,
+        # а настроек тогда не было; иначе показ строил бы невидимое.
+        self.assertIn("if self._lower_sections_wanted:", activated_source)
         self.assertIn("_schedule_lower_sections_build", activated_source)
         self.assertIn("QTimer.singleShot", schedule_source)
         self.assertIn("require_visible", ensure_source)

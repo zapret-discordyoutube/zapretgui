@@ -18,8 +18,8 @@
 Запоминаются только файлы из ресурсов Qt (путь ``:/...``): они не меняются,
 пока программа работает. Файлы с диска идут старым путём — их могут заменить.
 
-Заодно учёт стилей виджетов обходится без подписки на удаление каждого
-виджета (см. ``_install_lean_registration``).
+Заодно учёт стилей виджетов обходится без подписок и перехватчиков событий
+на каждом виджете (см. ``_install_lean_registration``).
 """
 
 from __future__ import annotations
@@ -90,32 +90,43 @@ def install_qfluent_style_cache() -> None:
 
 
 def _install_lean_registration(fluent_style) -> None:
-    """Учёт стилей виджетов без подписки на удаление каждого виджета.
+    """Учёт стилей виджетов без подписок и перехватчиков на каждом виджете.
 
-    Библиотека для каждого виджета со стилем подключала сигнал ``destroyed``,
-    чтобы убрать его из своего списка. Список и так держит виджеты слабыми
-    ссылками и сам забывает ушедшие, а мёртвые записи библиотека выбрасывает
-    при смене темы (``updateStyleSheet`` ловит RuntimeError). Подключение же
-    сигнала отпускает общий замок Python: рядом с занятым фоновым потоком это
-    было самым дорогим местом сборки страницы (замер: 69 таких подключений из
-    323 на главной странице, по интервалу переключения на каждое).
+    Библиотека для каждого виджета со стилем делала три вещи, и все три
+    стоили дорого на каждом виджете и на каждом его событии:
 
-    Тело повторяет StyleSheetManager.register из qfluentwidgets 1.11.2 без
-    строки с подпиской; при обновлении библиотеки сверить с исходником.
+    * подключала сигнал ``destroyed``, чтобы убрать виджет из своего списка.
+      Список и так держит виджеты слабыми ссылками и сам забывает ушедшие, а
+      мёртвые записи библиотека выбрасывает при смене темы
+      (``updateStyleSheet`` ловит RuntimeError). Подключение сигнала отпускает
+      общий замок Python: рядом с занятым фоновым потоком это было самым
+      дорогим местом сборки страницы (замер: 69 таких подключений из 323 на
+      главной странице, по интервалу переключения на каждое);
+    * ставила перехватчик событий, который ждал смены «своего стиля» виджета
+      (``setCustomStyleSheet``), чтобы применить его;
+    * ставила второй перехватчик — для «ленивой» смены темы: стиль скрытого
+      виджета обновлялся при его первой перерисовке.
+
+    Два перехватчика — это два вызова функции на Python на КАЖДОЕ событие
+    виджета: перерисовку, движение мыши, смену размера. Замер: сборка страниц
+    с ними на 20–30 % дольше, открытие — на 10–15 %.
+
+    Здесь «свой стиль» применяется прямо там, где его задают, а смена темы
+    всегда обновляет стили сразу (ленивой сменой программа не пользуется).
+
+    Тело ``_register`` повторяет StyleSheetManager.register из qfluentwidgets
+    1.11.2 без подписки и перехватчиков; при обновлении библиотеки сверить с
+    исходником.
     """
     compose = fluent_style.StyleSheetCompose
     custom = fluent_style.CustomStyleSheet
     file_sheet = fluent_style.StyleSheetFile
-    custom_watcher = fluent_style.CustomStyleSheetWatcher
-    dirty_watcher = fluent_style.DirtyStyleSheetWatcher
 
     def _register(self, source, widget, reset=True):
         if isinstance(source, str):
             source = file_sheet(source)
 
         if widget not in self.widgets:
-            widget.installEventFilter(custom_watcher(widget))
-            widget.installEventFilter(dirty_watcher(widget))
             self.widgets[widget] = compose([source, custom(widget)])
 
         if not reset:
@@ -124,6 +135,34 @@ def _install_lean_registration(fluent_style) -> None:
             self.widgets[widget] = compose([source, custom(widget)])
 
     fluent_style.StyleSheetManager.register = _register
+
+    def _set_custom_qss(sheet, key: str, qss: str):
+        widget = sheet.widget
+        if widget:
+            changed = (widget.property(key) or "") != (qss or "")
+            widget.setProperty(key, qss)
+            if changed:
+                # То же, что делал перехватчик по событию смены свойства.
+                fluent_style.addStyleSheet(widget, custom(widget))
+        return sheet
+
+    def _set_light_style_sheet(self, qss: str):
+        return _set_custom_qss(self, custom.LIGHT_QSS_KEY, qss)
+
+    def _set_dark_style_sheet(self, qss: str):
+        return _set_custom_qss(self, custom.DARK_QSS_KEY, qss)
+
+    custom.setLightStyleSheet = _set_light_style_sheet
+    custom.setDarkStyleSheet = _set_dark_style_sheet
+
+    original_update = fluent_style.updateStyleSheet
+
+    def _update_style_sheet(lazy=False):
+        # Ленивое обновление опиралось на перехватчик перерисовки, которого
+        # больше нет: стили обновляются сразу.
+        original_update(False)
+
+    fluent_style.updateStyleSheet = _update_style_sheet
 
 
 __all__ = ["clear_qfluent_style_cache", "install_qfluent_style_cache"]

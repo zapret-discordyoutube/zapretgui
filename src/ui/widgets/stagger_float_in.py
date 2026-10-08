@@ -119,7 +119,6 @@ class _Overlay(QWidget):
         self.setObjectName("floatInOverlay")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setGeometry(container.rect())
         self.raise_()
         self.show()

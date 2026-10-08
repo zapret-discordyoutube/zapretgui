@@ -46,7 +46,14 @@ class AppearancePageConstructionTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def _build_page(self, state: AppUiState, *, preset: str = "amoled", effects: bool = True):
+    def _build_page(
+        self,
+        state: AppUiState,
+        *,
+        preset: str = "amoled",
+        effects: bool = True,
+        build_lower_sections: bool = True,
+    ):
         from ui.pages.appearance_page import AppearancePage
 
         plan = replace(
@@ -74,6 +81,10 @@ class AppearancePageConstructionTests(unittest.TestCase):
         )
         self.addCleanup(page.deleteLater)
         self.addCleanup(page.cleanup)
+        if build_lower_sections:
+            # Разделы ниже первого экрана собираются позже страницы (блок
+            # ui.block_build); этим тестам нужна страница целиком.
+            page.ensure_all_blocks()
         return page, store, save, callbacks
 
     def _premium_saves(self, save: Mock) -> list[str]:
@@ -127,6 +138,62 @@ class AppearancePageConstructionTests(unittest.TestCase):
         self.assertFalse(page._garland_checkbox.isChecked())
         self.assertEqual(self._premium_saves(save), [])
         callbacks["on_background_preset_changed"].assert_not_called()
+
+    def test_lower_sections_are_a_block_built_later_than_the_page(self) -> None:
+        from ui.pages.appearance_page import LOWER_SECTIONS_BLOCK, LOWER_SECTIONS_HEIGHT
+
+        page, _store, _save, _callbacks = self._build_page(
+            AppUiState(subscription_known=False),
+            build_lower_sections=False,
+        )
+        # Первый экран готов сразу.
+        self.assertIsNotNone(page._display_mode_card)
+        self.assertIsNotNone(page._bg_radio_amoled)
+        # Нижние разделы ещё не собраны, но место под них занято.
+        for name in ("_garland_checkbox", "_snowflakes_checkbox", "_opacity_row", "_accent_group", "_performance_group"):
+            self.assertIsNone(getattr(page, name), name)
+        block = page.lazy_block(LOWER_SECTIONS_BLOCK)
+        self.assertFalse(block.is_built())
+        self.assertEqual(block.minimumHeight(), LOWER_SECTIONS_HEIGHT)
+
+        # Экскурсии нужен раздел из блока — она достраивает его сама.
+        self.assertIsNotNone(page.onboarding_target("theme"))
+        self.assertFalse(block.is_built(), "цель первого экрана блок не достраивает")
+        self.assertIsNotNone(page.onboarding_target("performance"))
+        self.assertTrue(block.is_built())
+        self.assertIsNotNone(page._garland_checkbox)
+        real = block.sizeHint().height()
+        self.assertLess(abs(real - LOWER_SECTIONS_HEIGHT), 120, f"настоящая высота блока {real}")
+
+    def test_block_built_after_the_subscription_answer_shows_the_current_state(self) -> None:
+        # Ответ о подписке пришёл, пока нижние разделы ещё не собраны: когда
+        # блок соберётся, он должен показать уже новое состояние.
+        page, store, save, callbacks = self._build_page(
+            AppUiState(subscription_known=False),
+            build_lower_sections=False,
+        )
+        store.set_subscription(False)
+        self.assertIsNone(page._garland_checkbox)
+
+        page.ensure_all_blocks()
+        self.assertFalse(page._garland_checkbox.isEnabled())
+        self.assertFalse(page._garland_checkbox.isChecked())
+        self.assertFalse(page._snowflakes_checkbox.isChecked())
+        self.assertEqual(self._premium_saves(save), [])
+        callbacks["on_garland_changed"].assert_not_called()
+
+    def test_block_built_later_reads_settings_changed_meanwhile(self) -> None:
+        # Прозрачность меняют и из меню в трее: блок, собранный позже, берёт
+        # текущие настройки, а не те, что были при создании страницы.
+        page, store, _save, _callbacks = self._build_page(
+            AppUiState(subscription_known=True, subscription_is_premium=True),
+            build_lower_sections=False,
+        )
+        fresh = replace(appearance_settings.load_page_initial_state(), animations_enabled=False)
+        appearance_settings.store_warmed_page_initial_state(fresh)
+
+        page.ensure_all_blocks()
+        self.assertFalse(page._animations_switch.isChecked())
 
 
 if __name__ == "__main__":

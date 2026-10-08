@@ -86,10 +86,7 @@ def set_control_accessibility(
     set_accessible_name(widget, name)
     if description is not None:
         set_accessible_description(widget, description)
-    remove_line_edit_buttons_from_tab_order(widget)
-    remove_scrollbar_arrow_buttons_from_tab_order(widget)
-    remove_switch_indicators_from_tab_order(widget)
-    _sync_spinbox_children_accessibility(widget, name=name, description=description)
+    _tidy_service_children(widget, name=name, description=description)
     _remember_keyboard_toggle_accessibility(widget, name=name)
     _enable_keyboard_click_for_button(widget)
     _ensure_keyboard_activation_description(widget)
@@ -102,10 +99,7 @@ def set_state_text(widget, text: object) -> None:
     if not value:
         return
     set_accessible_name(widget, value)
-    remove_line_edit_buttons_from_tab_order(widget)
-    remove_scrollbar_arrow_buttons_from_tab_order(widget)
-    remove_switch_indicators_from_tab_order(widget)
-    _sync_spinbox_children_accessibility(widget, name=value, description=None)
+    _tidy_service_children(widget, name=value, description=None)
     try:
         if _clean_text(widget.property("screenReaderStateText")) == value:
             return
@@ -115,6 +109,39 @@ def set_state_text(widget, text: object) -> None:
         widget.setProperty("screenReaderStateText", value)
     except Exception:
         pass
+
+
+def _tidy_service_children(widget, *, name: object | None, description: object | None) -> None:
+    """Убирает служебные дочерние кнопки из Tab-порядка и подписывает поле счётчика.
+
+    То же, что четыре помощника ниже по отдельности, но за один обход детей
+    виджета. Имя и состояние задают каждому элементу страницы, и четыре
+    обхода на каждый вызов давали сотни запросов дерева на одну страницу
+    (замер: 335 на главной).
+    """
+    if widget is None:
+        return
+    value = _clean_text(name)
+    for child in _iter_widget_children(widget):
+        try:
+            object_name = str(child.objectName() or "")
+        except Exception:
+            object_name = ""
+        child_type = type(child).__name__
+        if value and object_name == "qt_spinbox_lineedit":
+            set_accessible_name(child, value)
+            if description is not None:
+                set_accessible_description(child, description)
+            continue
+        if (
+            object_name == "lineEditButton"
+            or child_type in ("ArrowButton", "Indicator")
+            or (value and child_type == "SpinButton")
+        ):
+            try:
+                child.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            except Exception:
+                pass
 
 
 def _sync_spinbox_children_accessibility(

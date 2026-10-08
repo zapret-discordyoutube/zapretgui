@@ -112,7 +112,6 @@ class LazyBlock(QWidget):
         # по очереди — так же, как если бы они лежали прямо на странице.
         self.__dict__[FLOAT_IN_GROUP_ATTR] = True
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(int(spacing))

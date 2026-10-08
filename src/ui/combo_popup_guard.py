@@ -1,27 +1,29 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QObject, QEvent
+from PyQt6.QtCore import QObject, Qt
 from PyQt6.QtWidgets import QApplication, QComboBox
 
 
 class GlobalComboPopupCloser(QObject):
-    """Closes open ComboBox popups when app loses focus."""
+    """Закрывает открытые выпадающие списки, когда программа теряет активность.
+
+    Слушает один сигнал приложения. Раньше это был перехватчик событий на
+    всё приложение: ради одного события «программа стала неактивной» через
+    функцию на Python проходило каждое событие каждого объекта — тысячи на
+    одно открытие страницы.
+    """
 
     def __init__(self, app: QApplication):
         super().__init__(app)
         self._app = app
         self._cleanup_in_progress = False
-        app.installEventFilter(self)
+        app.applicationStateChanged.connect(self._on_application_state_changed)
 
-    def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
+    def _on_application_state_changed(self, state) -> None:
         if self._cleanup_in_progress:
-            return False
-        try:
-            if event is not None and event.type() == QEvent.Type.ApplicationDeactivate:
-                self.close_all_popups()
-        except Exception:
-            pass
-        return False
+            return
+        if state != Qt.ApplicationState.ApplicationActive:
+            self.close_all_popups()
 
     def close_all_popups(self) -> None:
         try:
@@ -54,7 +56,7 @@ class GlobalComboPopupCloser(QObject):
         if app is None:
             return
         try:
-            app.removeEventFilter(self)
+            app.applicationStateChanged.disconnect(self._on_application_state_changed)
         except Exception:
             pass
         try:

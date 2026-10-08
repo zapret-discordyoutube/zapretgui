@@ -61,6 +61,11 @@ from qfluentwidgets import (
 
 
 TINTED_INTENSITY_MAX = appearance_settings.schema.MAX_TINTED_INTENSITY
+# Блок разделов ниже первого экрана: новогоднее оформление, прозрачность,
+# акцентный цвет, производительность. Собирается позже страницы.
+LOWER_SECTIONS_BLOCK = "lower_sections"
+# Примерная высота блока: столько места он занимает, пока не собран.
+LOWER_SECTIONS_HEIGHT = 957
 
 
 def set_theme_color_if_changed(color: QColor) -> bool:
@@ -234,6 +239,8 @@ class AppearancePage(BasePage):
         self._initial_state_plan = None
         self._lower_sections_built = False
         self._lower_sections_build_scheduled = False
+        # Блок нижних разделов уже просили собрать (долистали или пауза).
+        self._lower_sections_wanted = False
         self._ui_sync_depth = 0
         self._background_refresh_queued = False
         self._cleanup_in_progress = False
@@ -492,12 +499,24 @@ class AppearancePage(BasePage):
         # Load saved display mode and bg preset
         section_started_at = time.perf_counter()
         self._apply_initial_display_state(initial_state)
-        self._ensure_lower_sections_built(require_visible=False)
+        # Новогоднее оформление, прозрачность, акцентный цвет и
+        # производительность лежат ниже первого экрана: место под них занято
+        # сразу, а сами разделы собираются, когда до них долистали, или в
+        # паузе (см. ui.block_build). В высоком окне, где они видны сразу,
+        # блок собирается при показе страницы, без задержки.
+        self.add_lazy_block(
+            LOWER_SECTIONS_BLOCK,
+            self._build_lower_sections_block,
+            estimated_height=LOWER_SECTIONS_HEIGHT,
+        )
         self._log_ui_timing("appearance_ui.initial_state.load", section_started_at)
         self._log_ui_timing("appearance_ui.build.total", total_started_at)
 
     def on_page_activated(self) -> None:
-        self._schedule_lower_sections_build()
+        # Блок нижних разделов уже понадобился, но настроек тогда ещё не было:
+        # пробуем достроить их снова.
+        if self._lower_sections_wanted:
+            self._schedule_lower_sections_build()
 
     def onboarding_target(self, name: str):
         """Экскурсия показывает три главных блока страницы."""
@@ -506,7 +525,21 @@ class AppearancePage(BasePage):
             "accent": "_accent_group",
             "performance": "_performance_group",
         }.get(name)
+        if name in ("accent", "performance"):
+            # Эти разделы лежат в блоке, который собирается позже страницы.
+            self.ensure_block(LOWER_SECTIONS_BLOCK)
         return self.__dict__.get(attribute) if attribute else None
+
+    def _build_lower_sections_block(self) -> None:
+        """Собирает нижние разделы в их блоке (вызывает ядро ui.block_build)."""
+        self._lower_sections_wanted = True
+        # Пока блок ждал своей очереди, настройки могли смениться не на этой
+        # странице (прозрачность — из меню в трее): показываем свежие.
+        try:
+            self._initial_state_plan = appearance_settings.load_page_initial_state()
+        except Exception as exc:
+            log(f"Оформление: настройки для нижних разделов не перечитаны: {exc}", "DEBUG")
+        self._ensure_lower_sections_built(require_visible=False)
 
     def on_page_hidden(self) -> None:
         self._lower_sections_build_scheduled = False
@@ -889,7 +922,7 @@ class AppearancePage(BasePage):
         self._initial_state_plan = plan
         self._ui_language = plan.ui_language
         self._apply_initial_display_state(plan)
-        if self._lower_sections_build_scheduled or self.isVisible():
+        if self._lower_sections_wanted and (self._lower_sections_build_scheduled or self.isVisible()):
             self._schedule_lower_sections_build()
 
     def _on_initial_state_failed(self, request_id: int, error: str) -> None:
@@ -903,7 +936,7 @@ class AppearancePage(BasePage):
         log(f"Ошибка загрузки настроек оформления: {error}", "WARNING")
         if self._initial_state_plan is None:
             self._initial_state_plan = appearance_settings.build_default_page_initial_state()
-        if self._lower_sections_build_scheduled or self.isVisible():
+        if self._lower_sections_wanted and (self._lower_sections_build_scheduled or self.isVisible()):
             self._schedule_lower_sections_build()
 
     def _on_initial_state_worker_finished(self, _worker) -> None:
@@ -1124,6 +1157,8 @@ class AppearancePage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        # Перевод обращается и к разделам из блока, который собирается позже.
+        self.ensure_block(LOWER_SECTIONS_BLOCK)
         apply_appearance_language(
             language=language,
             begin_ui_sync=self._begin_ui_sync,

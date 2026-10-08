@@ -25,6 +25,10 @@ class QfluentStyleCacheTests(unittest.TestCase):
         # Библиотечные функции без запаса — с ними сверяем результат.
         cls._plain_read = staticmethod(fluent_style.getStyleSheetFromFile)
         cls._plain_render = staticmethod(fluent_style.renderQss)
+        cls._plain_register = fluent_style.StyleSheetManager.register
+        cls._plain_set_light = fluent_style.CustomStyleSheet.setLightStyleSheet
+        cls._plain_set_dark = fluent_style.CustomStyleSheet.setDarkStyleSheet
+        cls._plain_update = staticmethod(fluent_style.updateStyleSheet)
         if getattr(fluent_style.renderQss, style_cache._PATCH_MARK, False):
             raise unittest.SkipTest("запас стилей уже установлен другим тестом: сверять не с чем")
         style_cache.install_qfluent_style_cache()
@@ -33,6 +37,10 @@ class QfluentStyleCacheTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         fluent_style.getStyleSheetFromFile = cls._plain_read
         fluent_style.renderQss = cls._plain_render
+        fluent_style.StyleSheetManager.register = cls._plain_register
+        fluent_style.CustomStyleSheet.setLightStyleSheet = cls._plain_set_light
+        fluent_style.CustomStyleSheet.setDarkStyleSheet = cls._plain_set_dark
+        fluent_style.updateStyleSheet = cls._plain_update
         style_cache.clear_qfluent_style_cache()
 
     def setUp(self) -> None:
@@ -156,6 +164,55 @@ class QfluentStyleCacheTests(unittest.TestCase):
         expected = fluent_style.getStyleSheet(fluent_style.FluentStyleSheet.BUTTON, Theme.LIGHT)
         self.assertEqual(alive.styleSheet().strip(), expected.strip())
         self.assertNotIn(dead, fluent_style.styleSheetManager.widgets, "мёртвую запись библиотека выбрасывает сама")
+
+    def test_styled_widget_carries_no_event_filters_of_the_library(self) -> None:
+        # Два перехватчика на каждом виджете со стилем — это два вызова
+        # функции на Python на каждое событие виджета (перерисовка, мышь).
+        button = PushButton("кнопка")
+        self.addCleanup(button.deleteLater)
+        label = BodyLabel("надпись")
+        self.addCleanup(label.deleteLater)
+        for widget in (button, label):
+            watchers = [
+                child
+                for child in widget.children()
+                if isinstance(child, (fluent_style.CustomStyleSheetWatcher, fluent_style.DirtyStyleSheetWatcher))
+            ]
+            self.assertEqual(watchers, [], type(widget).__name__)
+
+    def test_custom_sheet_is_applied_where_it_is_set_and_follows_the_theme(self) -> None:
+        self._set_theme(Theme.DARK)
+        button = PushButton("кнопка")
+        self.addCleanup(button.deleteLater)
+        fluent_style.CustomStyleSheet(button).setDarkStyleSheet("PushButton { color: #abcdef; }")
+        self.assertIn("#abcdef", button.styleSheet())
+        fluent_style.CustomStyleSheet(button).setLightStyleSheet("PushButton { color: #123456; }")
+        self.assertNotIn("#123456", button.styleSheet(), "в тёмной теме действует тёмный вариант")
+
+        qconfig.theme = Theme.LIGHT
+        fluent_style.updateStyleSheet()
+        self.assertIn("#123456", button.styleSheet())
+        self.assertNotIn("#abcdef", button.styleSheet())
+
+        # Тот же текст повторно стиль не переустанавливает.
+        before = button.styleSheet()
+        with mock.patch.object(fluent_style, "addStyleSheet", wraps=fluent_style.addStyleSheet) as applied:
+            fluent_style.CustomStyleSheet(button).setLightStyleSheet("PushButton { color: #123456; }")
+        applied.assert_not_called()
+        self.assertEqual(button.styleSheet(), before)
+
+    def test_lazy_theme_update_restyles_hidden_widgets_at_once(self) -> None:
+        # Ленивое обновление библиотеки ждало перерисовки виджета через свой
+        # перехватчик. Его больше нет, поэтому стиль обновляется сразу.
+        self._set_theme(Theme.DARK)
+        hidden = PushButton("скрытая")
+        self.addCleanup(hidden.deleteLater)
+        dark = hidden.styleSheet()
+
+        qconfig.theme = Theme.LIGHT
+        fluent_style.updateStyleSheet(lazy=True)
+        self.assertNotEqual(hidden.styleSheet(), dark)
+        self.assertFalse(hidden.property("dirty-qss"))
 
     def test_install_is_idempotent(self) -> None:
         patched = fluent_style.renderQss
