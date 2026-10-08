@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.08.5")
+        self.assertEqual(catalog.catalog_version, "2026.10.08.6")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -131,7 +131,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 786)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 3968)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 2435)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -153,6 +153,15 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                 "62.133.62.97",
                 "45.95.233.23",
                 "217.60.245.219",
+                # Посредники XBOX DNS: владелец погасил сервисы 2026-10-08.
+                "188.68.214.130",
+                "188.68.214.131",
+                "188.68.214.132",
+                "188.68.214.143",
+                "188.68.214.144",
+                "188.68.214.145",
+                "87.228.47.198",
+                "87.228.47.199",
             ):
                 self.assertEqual(
                     connection.execute(
@@ -163,19 +172,54 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                     dead_relay,
                 )
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM hosts_entries").fetchone()[0], 517)
+            # У XBOX DNS остался один живой посредник — вход в Xbox Live: профиль
+            # предлагается только сервису Microsoft.
+            self.assertEqual(
+                connection.execute(
+                    "SELECT DISTINCT d.service_id FROM dns_answers a"
+                    " JOIN domains d USING(domain_id) WHERE a.profile_id = 'xbox_dns'"
+                ).fetchall(),
+                [("dns.microsoft_copilot_designer_xbox",)],
+            )
         finally:
             connection.close()
 
-    def test_sni_proxy_profiles_cover_only_chatgpt(self) -> None:
+    def test_geohide_opens_spotify_through_its_relays(self) -> None:
+        """Имена Spotify с гео-ограничением идут через посредников GeoHide, раздача — напрямую."""
+        relays = {"159.194.200.33", "193.233.112.67", "193.233.112.68", "193.233.112.88"}
         connection = sqlite3.connect(PRIVATE_DATABASE)
         try:
-            for profile_id, proxy_ip in (("astracat", "217.60.179.6"), ("geohide", "159.194.200.33")):
+            first = dict(
+                connection.execute(
+                    "SELECT d.hostname, a.ip_address FROM dns_answers a JOIN domains d USING(domain_id)"
+                    " WHERE d.service_id = 'dns.spotify' AND a.profile_id = 'geohide' AND a.priority = 0"
+                ).fetchall()
+            )
+            total = connection.execute("SELECT COUNT(*) FROM domains WHERE service_id = 'dns.spotify'").fetchone()[0]
+        finally:
+            connection.close()
+        # Профиль предлагается, только когда покрывает каждое имя сервиса.
+        self.assertEqual(len(first), total)
+        for hostname in ("open.spotify.com", "accounts.spotify.com", "api.spotify.com", "spclient.wg.spotify.com"):
+            self.assertIn(first[hostname], relays, hostname)
+        # Раздачу картинок и звука посредник не пропускает: у неё настоящие адреса.
+        self.assertNotIn(first["image-cdn-fa.spotifycdn.com"], relays)
+        self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles("Spotify"))
+        self.assertNotIn("xbox_dns", self.proxy_domains.get_service_available_dns_profiles("Spotify"))
+
+    def test_sni_proxy_profiles_cover_only_their_services(self) -> None:
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            for profile_id, proxy_ip, covered in (
+                ("astracat", "217.60.179.6", [("dns.chatgpt_and_sora_openai",)]),
+                ("geohide", "159.194.200.33", [("dns.chatgpt_and_sora_openai",), ("dns.spotify",)]),
+            ):
                 services = connection.execute(
                     "SELECT DISTINCT d.service_id FROM dns_answers a"
-                    " JOIN domains d USING(domain_id) WHERE a.profile_id = ?",
+                    " JOIN domains d USING(domain_id) WHERE a.profile_id = ? ORDER BY 1",
                     (profile_id,),
                 ).fetchall()
-                self.assertEqual(services, [("dns.chatgpt_and_sora_openai",)], profile_id)
+                self.assertEqual(services, covered, profile_id)
                 uncovered = connection.execute(
                     "SELECT COUNT(*) FROM domains d WHERE d.service_id = 'dns.chatgpt_and_sora_openai'"
                     " AND NOT EXISTS (SELECT 1 FROM dns_answers a"
@@ -280,8 +324,8 @@ class HostsCatalogSqliteTests(unittest.TestCase):
 
     def test_runtime_reads_dns_and_direct_rows_from_sqlite(self) -> None:
         self.assertEqual(
-            len(self.proxy_domains.get_service_domain_ip_rows("ChatGPT & Sora (OpenAI)", "xbox_dns")),
-            99,
+            len(self.proxy_domains.get_service_domain_ip_rows("ChatGPT & Sora (OpenAI)", "comss_dns")),
+            101,
         )
         self.assertEqual(
             self.proxy_domains.get_service_domain_ip_rows("Discord", "hosts")[:2],
@@ -405,7 +449,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                     "ChatGPT & Sora (OpenAI)"
                 )
             self.assertNotIn("comss_dns", available)
-            self.assertIn("xbox_dns", available)
+            self.assertIn("geohide", available)
 
     def test_multiple_answers_preserve_priority_and_top_ip_map(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -420,11 +464,11 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                     """
                 ).fetchone()[0]
                 connection.execute(
-                    "DELETE FROM dns_answers WHERE domain_id = ? AND profile_id = 'xbox_dns'",
+                    "DELETE FROM dns_answers WHERE domain_id = ? AND profile_id = 'geohide'",
                     (domain_id,),
                 )
                 connection.executemany(
-                    "INSERT INTO dns_answers VALUES (?, 'xbox_dns', ?, ?)",
+                    "INSERT INTO dns_answers VALUES (?, 'geohide', ?, ?)",
                     [(domain_id, "87.228.47.205", 1), (domain_id, "87.228.47.204", 0)],
                 )
                 connection.commit()
@@ -435,10 +479,10 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             with patch.object(self.proxy_domains, "_get_hosts_catalog_path", return_value=database):
                 self.proxy_domains.invalidate_hosts_catalog_cache()
                 rows = self.proxy_domains.get_service_domain_ip_rows(
-                    "ChatGPT & Sora (OpenAI)", "xbox_dns"
+                    "ChatGPT & Sora (OpenAI)", "geohide"
                 )
                 domain_map = self.proxy_domains.get_service_domain_ip_map(
-                    "ChatGPT & Sora (OpenAI)", "xbox_dns"
+                    "ChatGPT & Sora (OpenAI)", "geohide"
                 )
             self.assertEqual(rows[:2], [("ab.chatgpt.com", "87.228.47.204"), ("ab.chatgpt.com", "87.228.47.205")])
             self.assertEqual(domain_map["ab.chatgpt.com"], "87.228.47.204")
@@ -484,7 +528,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             )
             self.assertTrue(
                 self.proxy_domains.save_user_hosts_selection(
-                    {"ChatGPT & Sora (OpenAI)": "xbox_dns"}
+                    {"ChatGPT & Sora (OpenAI)": "geohide"}
                 )
             )
 
@@ -492,15 +536,20 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             written,
             [{
                 "removed.future_service": "future_dns",
-                "dns.chatgpt_and_sora_openai": "xbox_dns",
+                "dns.chatgpt_and_sora_openai": "geohide",
             }],
         )
 
     def test_selection_of_a_removed_profile_is_not_loaded(self) -> None:
         """Профиль убрали из каталога (его посредник умер) — у сервиса просто нет выбора."""
-        stored = {"dns.chatgpt_and_sora_openai": "malw_dns", "dns.claude": "xbox_dns"}
+        # malw_dns убран целиком, а XBOX DNS больше не предлагается для ChatGPT.
+        stored = {
+            "dns.chatgpt_and_sora_openai": "malw_dns",
+            "dns.spotify": "xbox_dns",
+            "dns.claude": "comss_dns",
+        }
         with patch.object(self.proxy_domains.settings_store, "get_hosts_selection", return_value=stored):
-            self.assertEqual(self.proxy_domains.load_user_hosts_selection(), {"Claude": "xbox_dns"})
+            self.assertEqual(self.proxy_domains.load_user_hosts_selection(), {"Claude": "comss_dns"})
 
     def test_legacy_display_name_selection_is_converted_on_next_save(self) -> None:
         written: list[dict[str, str]] = []
