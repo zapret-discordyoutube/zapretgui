@@ -155,6 +155,16 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertFalse(page._partial_timer.isActive())
         self.assertIsNone(page._pending_partial)
 
+    def test_own_domains_row_is_hidden_while_a_check_runs(self) -> None:
+        # Список сайтов берётся в момент запуска: добавлять свои домены во время проверки бесполезно.
+        page = _make_page()
+        with patch("blockcheck.ui.page.start_blockcheck_page_run"):
+            page._on_start()
+        self.assertTrue(page._domains_card.isHidden())
+
+        page._on_finished(None)
+        self.assertFalse(page._domains_card.isHidden())
+
     def test_cards_have_no_headers_to_save_space(self) -> None:
         page = _make_page()
         self.addCleanup(page.deleteLater)

@@ -801,6 +801,8 @@ class BlockcheckPage(BasePage):
             ("sites", "hostings", "voice", "ipv6", "system") + (("dns_servers", "filter") if scope == SCOPE_FULL else ())
         )
         self._progress_card.setVisible(True)
+        # Список сайтов проверки уже взят: добавлять свои домены до конца проверки бесполезно.
+        self._domains_card.setVisible(False)
         self._report_btn.setEnabled(False)
         self._set_support_footer_available(False)
         start_blockcheck_page_run(
@@ -1191,6 +1193,7 @@ class BlockcheckPage(BasePage):
             scope_combo=self._scope_combo,
             progress_bar=self._progress_bar,
         )
+        self._domains_card.setVisible(True)
 
     def _update_scope_combo_accessibility(self, *_args) -> None:
         text = str(self._scope_combo.currentText() or "").strip() or "не выбрано"
