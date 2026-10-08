@@ -82,6 +82,15 @@ TOUR_SUBPAGE_PARENTS: dict[str, str] = {
     "custom_dns": "dns",
 }
 
+# Страницы, о которых экскурсия сознательно не рассказывает, и почему. Любая
+# страница программы должна быть либо в таблицах выше, либо здесь: новая
+# страница без шагов и без записи тут роняет tests/test_onboarding_tour_drift.py.
+TOUR_PAGES_WITHOUT_STEPS: dict[PageName, str] = {
+    PageName.PREMIUM: "Подписка не нужна, чтобы научиться пользоваться программой.",
+    PageName.SUPPORT: "Куда обращаться за помощью, рассказывает шаг about_help.",
+    PageName.ORCHESTRA_SETTINGS: "Оркестратор — отдельный режим, у экскурсии для него только общие шаги.",
+}
+
 TourTarget = QWidget | tuple[QWidget, QRect]
 
 
@@ -418,6 +427,7 @@ __all__ = [
     "COMMON_TOUR_PAGES",
     "CONTROL_PAGE_NAMES",
     "MODE_TOUR_PAGES",
+    "TOUR_PAGES_WITHOUT_STEPS",
     "TOUR_STEPS",
     "TOUR_SUBPAGE_PARENTS",
     "TourContext",

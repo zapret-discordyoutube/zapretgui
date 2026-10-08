@@ -360,8 +360,21 @@ class ProfilePageTourStatesTests(unittest.TestCase):
 
 
 # Шаги, которые обязаны найти свою цель на страницах с заглушками вместо данных.
-# Шаги про пресеты, профили и плитки hosts сюда не входят: им нужны настоящие данные.
 STEPS_WITH_TARGET = (
+    "control_nav",
+    "start",
+    "status",
+    "preset",
+    "presets_list",
+    "presets_toolbar",
+    "profiles_toolbar",
+    "profile_order",
+    "dpi_mode",
+    "tools",
+    "geo_blocks",
+    "diagnostics",
+    "appearance",
+    "finish",
     "quick_actions",
     "program_settings",
     "windows_settings",
@@ -409,6 +422,43 @@ STEPS_WITH_TARGET = (
     "about_version",
     "about_help",
     "updates",
+)
+
+# Шаги, цели которых появляются только с настоящими данными: строка пресета,
+# текст пресета в редакторе, профили и их стратегии, плитки сервисов hosts,
+# запись реестра фейков. Общий прогон ниже их не видит; шаги про страницу
+# профиля проверяет ProfilePageTourStatesTests.
+STEPS_NEEDING_REAL_DATA = (
+    "preset_menu",
+    "preset_file",
+    "preset_header",
+    "preset_lua_init",
+    "preset_engine_options",
+    "preset_interception",
+    "preset_blobs",
+    "preset_profile",
+    "preset_profile_name",
+    "preset_profile_match",
+    "preset_profile_packets",
+    "preset_profile_strategy",
+    "preset_profile_new",
+    "profiles_list",
+    "profile_group",
+    "profile_row",
+    "profile_menu",
+    "list_type",
+    "ranges",
+    "profile_tabs",
+    "strategy_choice",
+    "strategy_try",
+    "strategy_find",
+    "strategy_details",
+    "strategy_details_places",
+    "profile_geo_notice",
+    "list_entries",
+    "fakes_blob",
+    "hosts_direct",
+    "hosts_ai",
 )
 
 _NAV_GROUPS = {
@@ -502,6 +552,21 @@ class TourWalkOverRealPagesTests(unittest.TestCase):
             page_host=host,
         )
         return window, host
+
+    def test_every_step_with_a_target_is_checked_on_real_pages_or_listed_as_needing_data(self) -> None:
+        from ui.onboarding.steps import TOUR_STEPS
+
+        with_target = {step.key for step in TOUR_STEPS if step.target is not None}
+        self.assertEqual(set(STEPS_WITH_TARGET) & set(STEPS_NEEDING_REAL_DATA), set())
+        self.assertEqual(
+            sorted(with_target - set(STEPS_WITH_TARGET) - set(STEPS_NEEDING_REAL_DATA)),
+            [],
+            "Новый шаг с подсветкой не проверяется на настоящей странице. Добавьте его ключ в "
+            "STEPS_WITH_TARGET (или в STEPS_NEEDING_REAL_DATA, если цели нет без настоящих данных). "
+            "Как править экскурсию: .codex/skills/zapretgui-guided-tour/SKILL.md",
+        )
+        # Удалённый шаг не остаётся в списках.
+        self.assertEqual(sorted((set(STEPS_WITH_TARGET) | set(STEPS_NEEDING_REAL_DATA)) - with_target), [])
 
     def test_every_new_step_finds_its_target_on_the_real_page(self) -> None:
         from ui.onboarding.overlay import OnboardingOverlay
