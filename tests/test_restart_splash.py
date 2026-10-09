@@ -252,11 +252,16 @@ class SplashSpecTests(unittest.TestCase):
         self.assertEqual(hidden.statuses, ("Done", "In progress", "Waiting"))
 
 
-    def test_automatic_update_gets_small_card_in_the_middle_of_the_app(self) -> None:
-        """Обновление без вопроса показывает маленькую карточку, а не окно в пол-экрана."""
+    def test_small_card_sits_in_the_bottom_right_corner_of_the_screen(self) -> None:
+        """Маленькая карточка встаёт там, где Windows показывает уведомления."""
         from PyQt6.QtWidgets import QWidget
 
-        from updater.ui.restart_splash_spec import COMPACT_HEIGHT, COMPACT_WIDTH, build_restart_splash_spec
+        from updater.ui.restart_splash_spec import (
+            COMPACT_HEIGHT,
+            COMPACT_MARGIN,
+            COMPACT_WIDTH,
+            build_restart_splash_spec,
+        )
 
         host = QWidget()
         host.setGeometry(200, 100, 1000, 800)
@@ -269,9 +274,12 @@ class SplashSpecTests(unittest.TestCase):
 
         self.assertEqual(spec.layout, "compact")
         self.assertEqual((spec.width, spec.height), (COMPACT_WIDTH, COMPACT_HEIGHT))
-        frame = host.frameGeometry()
-        self.assertEqual(spec.x, frame.x() + (frame.width() - COMPACT_WIDTH) // 2)
-        self.assertEqual(spec.y, frame.y() + (frame.height() - COMPACT_HEIGHT) // 2)
+        # Место не зависит от окна программы (оно может быть в трее): правый
+        # нижний угол рабочей области экрана, над панелью задач.
+        area = host.screen().availableGeometry()
+        ratio = host.screen().devicePixelRatio()
+        self.assertEqual(spec.x + spec.width, round((area.x() + area.width() - COMPACT_MARGIN) * ratio))
+        self.assertEqual(spec.y + spec.height, round((area.y() + area.height() - COMPACT_MARGIN) * ratio))
         self.assertEqual((spec.title, spec.subtitle), ("Обновляем Zapret", "Ставим версию 2.0"))
         # Этапы и фразы — те же, что у большого окна.
         self.assertEqual(len(spec.stages), 3)
@@ -300,16 +308,17 @@ class SplashScriptContractTests(unittest.TestCase):
         script = render_splash_script()
 
         self.assertNotRegex(script, r"@[A-Z_]+@")
-        # Поверх всех — только пока старая программа на экране: иначе защита
-        # от кражи фокуса ставила окно позади неё. Потом — обычное окно,
-        # чтобы сообщение установщика было видно.
+        # Поверх всех окон — всё время обновления (решение владельца: окно не
+        # прятать). Снимается только при неудаче, чтобы сообщение установщика
+        # об ошибке было видно; тогда же окно уходит.
         self.assertIn("$form.TopMost = (-not $S.Snapshot)", script)
         self.assertIn("function Watch-OldApp", script)
-        watch = script[script.index("function Watch-OldApp"):script.index("function Poll-State")]
-        self.assertIn("$form.TopMost = $false", watch)
+        watch = script[script.index("function Watch-OldApp"):script.index("function Read-SetupLog")]
+        self.assertNotIn("$form.TopMost = $false", watch)
         self.assertIn("Watch-OldApp", script[script.index("function Poll-State"):])
-        # Неудача установки или отменённое обновление — окно уходит сразу.
-        self.assertIn("'failed'    { Start-Closing $true", script)
+        failed = script[script.index("'failed'    {"):script.index("'failed'    {") + 260]
+        self.assertIn("$form.TopMost = $false", failed)
+        self.assertIn("Start-Closing $true 'установка не удалась'", failed)
         self.assertIn("'обновление отменено'", script)
         # Гаснет по метке новой версии, по её окну или по срокам.
         self.assertIn("function Test-AppReady", script)
@@ -406,9 +415,9 @@ class PageSplashTests(unittest.TestCase):
 
         page._install_service.start.assert_called_once_with("21.1.5.80", splash=spec, start_in_tray=False)
         # По кнопке «Обновить» — окно на месте окна обновления.
-        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": False})
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"take_focus": True})
 
-    def test_automatic_install_asks_for_small_card(self) -> None:
+    def _automatic_install(self, *, shown: bool, in_use: bool):
         from app.feature_facades.updater import UpdaterFeature
         from test_update_check_coordinator import UpdateCheckCoordinatorTests
 
@@ -418,15 +427,73 @@ class PageSplashTests(unittest.TestCase):
         page._updater_feature.finish_update_check(dict(case._FOUND), source="manual", token=token)
         page._apply_check_snapshot(page._updater_feature.current_update_check_snapshot())
         page._install_service.start.return_value = True
-        spec = _spec(layout="compact")
-        page._build_restart_splash_spec = Mock(return_value=spec)
-        page._host_window_shown = Mock(return_value=True)
+        page._build_restart_splash_spec = Mock(return_value=_spec())
+        page._host_window_shown = Mock(return_value=shown)
+        page._host_window_in_use = Mock(return_value=in_use)
 
         with patch("updater.ui.page.run_update_setting_write"):
             self.assertTrue(page._start_install(automatic=True))
+        return page
 
-        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": True})
-        page._install_service.start.assert_called_once_with("21.1.5.80", splash=spec, start_in_tray=False)
+    def test_automatic_install_shows_the_big_window_to_a_person_who_is_in_the_app(self) -> None:
+        page = self._automatic_install(shown=True, in_use=True)
+
+        # Окно обновления одно — большое: его видят все, и при автообновлении тоже.
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"take_focus": True})
+        self.assertFalse(page._install_service.start.call_args.kwargs["start_in_tray"])
+
+    def test_automatic_install_does_not_grab_the_keyboard_from_another_program(self) -> None:
+        # Окно программы открыто, но человек в другом окне: большое окно
+        # появляется, а клавиатуру у его программы не выхватывает.
+        page = self._automatic_install(shown=True, in_use=False)
+
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"take_focus": False})
+        self.assertFalse(page._install_service.start.call_args.kwargs["start_in_tray"])
+
+    def test_automatic_install_from_tray_also_shows_the_window(self) -> None:
+        page = self._automatic_install(shown=False, in_use=False)
+
+        # Раньше из трея обновление шло совсем без окон.
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"take_focus": False})
+        self.assertIsNotNone(page._install_service.start.call_args.kwargs["splash"])
+        self.assertTrue(page._install_service.start.call_args.kwargs["start_in_tray"])
+
+    def test_update_window_stays_on_top_until_the_end(self) -> None:
+        script = render_splash_script()
+
+        watch = script[script.index("function Watch-OldApp"):script.index("function Read-SetupLog")]
+        # Поверх всех окон — до конца обновления; снимается только при неудаче,
+        # чтобы сообщение установщика об ошибке было видно.
+        self.assertNotIn("$form.TopMost = $false", watch)
+        self.assertIn("окно остаётся поверх всех", watch)
+        failed = script[script.index("'failed'    {"):script.index("'failed'    {") + 260]
+        self.assertIn("$form.TopMost = $false", failed)
+
+    def test_quiet_window_is_shown_without_taking_focus(self) -> None:
+        script = render_splash_script()
+
+        self.assertIn("$quiet = ($null -ne $spec.take_focus -and -not [bool]$spec.take_focus)", script)
+        front = script[script.index("function Bring-ToFront"):script.index("function Watch-OldApp")]
+        self.assertLess(front.index("if ($quiet) {"), front.index("$form.Activate()"))
+        self.assertIn("if (($compact -or $quiet) -and $null -ne $native -and -not $S.Snapshot) {", script)
+        self.assertTrue(_spec().to_payload(logo_path="", shown_path="", ready_path="", log_path="")["take_focus"])
+        quiet = _spec(take_focus=False).to_payload(logo_path="", shown_path="", ready_path="", log_path="")
+        self.assertFalse(quiet["take_focus"])
+
+    def test_small_card_stays_on_top_and_never_takes_focus(self) -> None:
+        script = render_splash_script()
+
+        front = script[script.index("function Bring-ToFront"):script.index("function Watch-OldApp")]
+        # Карточка — как уведомление: поверх всех окон, но без активации.
+        self.assertIn("if ($compact) {", front)
+        self.assertIn("$form.TopMost = $true", front)
+        self.assertIn("SetWindowPos($form.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x0013)", front)
+        self.assertLess(front.index("return"), front.index("$form.Activate()"))
+        self.assertIn("$form.ShowInTaskbar = (-not $compact)", script)
+        # Запрет активации и скрытие из Alt+Tab ставятся до показа окна.
+        self.assertIn("$style = if ($compact) { 0x08000080 } else { 0x08000000 }", script)
+        # Вне экранов карточка встаёт в правый нижний угол, а не в центр.
+        self.assertIn("($area.Right - $w - 16), ($area.Bottom - $h - 16)", script)
 
 
 if __name__ == "__main__":

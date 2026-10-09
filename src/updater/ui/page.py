@@ -340,12 +340,20 @@ class ServersPage(BasePage):
         host = self.window()
         return host is not None and host is not self and host.isVisible()
 
+    def _host_window_in_use(self) -> bool:
+        """Человек сейчас в окне программы: оно на экране и активно."""
+        host = self.window()
+        return self._host_window_shown() and not host.isMinimized() and host.isActiveWindow()
+
     def _start_install(self, *, automatic: bool) -> bool:
         """Начинает скачивание и установку. False — установка не началась.
 
         ``automatic`` — программа ставит находку сама, без кнопки «Обновить».
-        Если она при этом свёрнута в трей, обновление проходит без окон:
-        окно-продолжение не показывается, а новая версия откроется в трее.
+        Окно обновления одно и то же — большое, его видят все (решение
+        владельца: не прятать его и при автообновлении). Разница лишь в
+        фокусе: если человек сейчас не в программе (она в трее или он в
+        другом окне), окно появляется, но клавиатуру не выхватывает. Из трея
+        новая версия откроется тоже в трее.
         """
         offer = self._flow.offer
         if self._cleanup_in_progress or offer is None:
@@ -353,9 +361,8 @@ class ServersPage(BasePage):
         if self._check_service.is_busy:
             return False
         in_tray = automatic and not self._host_window_shown()
-        # Сама, без вопроса — маленькая карточка; по кнопке «Обновить» — окно
-        # на месте окна обновления.
-        splash = None if in_tray else self._build_restart_splash_spec(offer, compact=automatic)
+        take_focus = not automatic or self._host_window_in_use()
+        splash = self._build_restart_splash_spec(offer, take_focus=take_focus)
         if not self._install_service.start(offer.version, splash=splash, start_in_tray=in_tray):
             return False
         # Новая версия покажет «Что нового» из сохранённого текста, без сети.
@@ -364,7 +371,7 @@ class ServersPage(BasePage):
         if automatic:
             log(
                 f"Обновление v{version} ставится само, без вопроса"
-                + (" (программа в трее: без окон)" if in_tray else ""),
+                + (" (программа в трее: новая версия откроется там же)" if in_tray else ""),
                 "🔄 UPDATE",
             )
             # Попытка идёт в счёт лимита: он останавливает петлю перезапусков,
@@ -382,7 +389,7 @@ class ServersPage(BasePage):
         self._flow.start_download()
         return True
 
-    def _build_restart_splash_spec(self, offer, *, compact: bool = False):
+    def _build_restart_splash_spec(self, offer, *, compact: bool = False, take_focus: bool = True):
         """Окно-продолжение встанет на место окна обновления, пока версия меняется."""
         try:
             from updater.ui.restart_splash_spec import build_restart_splash_spec
@@ -395,6 +402,7 @@ class ServersPage(BasePage):
                 target_version=offer.version,
                 language=self._ui_language,
                 compact=compact,
+                take_focus=take_focus,
             )
         except Exception as exc:
             # Без окна-продолжения обновление всё равно пройдёт.

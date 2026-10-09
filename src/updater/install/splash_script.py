@@ -75,6 +75,9 @@ try {
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+[DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hwnd, int index);
+[DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr hwnd, int index, int value);
+[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 '@
     $native = [ZapretRestartSplash.Native]
     [void]$native::SetProcessDPIAware()
@@ -153,6 +156,8 @@ if ($null -ne $logo) {
 $stages = @($spec.texts.stages)
 # Маленькая карточка: её показывает обновление, которое программа ставит сама.
 $compact = ([string]$spec.layout -eq 'compact')
+# Не забирать фокус ввода: человек сейчас в другой программе.
+$quiet = ($null -ne $spec.take_focus -and -not [bool]$spec.take_focus)
 $jokes = @($spec.jokes | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
 
 # Изменяемое состояние живёт в таблице: обработчики событий WinForms видят её
@@ -276,6 +281,27 @@ function Test-NewAppWindow {
 
 function Bring-ToFront([string]$why) {
     $ok = $false
+    if ($compact) {
+        # Маленькая карточка — как уведомление: всегда поверх остальных окон,
+        # но фокус у программы, в которой сейчас человек, не забирает.
+        try {
+            $form.TopMost = $true
+            # HWND_TOPMOST; не менять размер и место, не активировать.
+            if ($null -ne $native) { $ok = [bool]$native::SetWindowPos($form.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x0013) }
+        } catch { }
+        Write-Line "Поверх всех без фокуса ($why): $ok"
+        return
+    }
+    if ($quiet) {
+        # Человек сейчас не в программе: окно обновления видно, но клавиатуру
+        # у его программы не выхватывает — иначе набранное улетело бы сюда.
+        try {
+            $after = if ($form.TopMost) { [IntPtr](-1) } else { [IntPtr]::Zero }
+            if ($null -ne $native) { $ok = [bool]$native::SetWindowPos($form.Handle, $after, 0, 0, 0, 0, 0x0013) }
+        } catch { }
+        Write-Line "Показано без фокуса ($why): $ok"
+        return
+    }
     try {
         $form.Activate()
         $form.BringToFront()
@@ -285,8 +311,10 @@ function Bring-ToFront([string]$why) {
 }
 
 function Watch-OldApp {
-    # Старая программа закрылась — «поверх всех» больше не нужно: установщик
-    # может показать сообщение об ошибке, и оно должно быть видно.
+    # Окно обновления остаётся поверх всех окон до самого конца (решение
+    # владельца): человек видит ход обновления, в какой бы программе ни был.
+    # «Поверх всех» снимается только при неудаче — чтобы сообщение
+    # установщика об ошибке не осталось под окном (см. Start-Closing).
     $now = $S.Clock.Elapsed.TotalSeconds
     if (-not $S.OldAlive -or ($now - $S.OldCheckedAt) -lt 0.25) { return }
     $S.OldCheckedAt = $now
@@ -294,8 +322,7 @@ function Watch-OldApp {
     try { $alive = [bool](Get-Process -Id ([int]$spec.old_pid) -ErrorAction SilentlyContinue) } catch { }
     if ($alive -and $now -lt 60) { return }
     $S.OldAlive = $false
-    $form.TopMost = $false
-    Write-Line "Старая версия закрылась ($([int]($now * 1000)) мс), окно больше не поверх всех"
+    Write-Line "Старая версия закрылась ($([int]($now * 1000)) мс), окно остаётся поверх всех"
     Bring-ToFront 'старая версия закрылась'
 }
 
@@ -360,7 +387,11 @@ function Poll-State {
         'prepared'  { Set-Stage 0 }
         'launched'  { Set-Stage 1 }
         'succeeded' { Set-Stage 2 }
-        'failed'    { Start-Closing $true 'установка не удалась' }
+        'failed'    {
+            # Сообщение установщика об ошибке должно быть видно.
+            try { $form.TopMost = $false } catch { }
+            Start-Closing $true 'установка не удалась'
+        }
         ''          {
             # Запись исчезла: обновление отменили — показывать нечего.
             if ($now -gt 3) { Start-Closing $true 'обновление отменено' }
@@ -1024,8 +1055,9 @@ function Draw-Window([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
 $form = New-Object System.Windows.Forms.Form
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-$form.ShowInTaskbar = $true
-# Поверх всех — только пока старая программа на экране (см. Watch-OldApp).
+# У маленькой карточки своей кнопки на панели задач нет: это уведомление.
+$form.ShowInTaskbar = (-not $compact)
+# Поверх всех окон — всё время обновления (см. Watch-OldApp).
 $form.TopMost = (-not $S.Snapshot)
 $form.Text = [string]$spec.texts.window_title
 $form.BackColor = if ($compact) { $C.Card } else { $C.Background }
@@ -1051,15 +1083,30 @@ foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
     if ($screen.WorkingArea.IntersectsWith($bounds)) { $visible = $true }
 }
 if (-not $visible -or $bounds.Width -lt 200 -or $bounds.Height -lt 150) {
-    # Место окна обновления за пределами экранов: по центру основного.
+    # Место окна за пределами экранов: большое окно — по центру основного,
+    # маленькая карточка — в его правом нижнем углу.
     $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $minWidth = if ($compact) { 460.0 } else { 720.0 }
     $minHeight = if ($compact) { 190.0 } else { 460.0 }
     $w = [int][Math]::Min([Math]::Max([double]$bounds.Width, $minWidth), $area.Width - 40.0)
     $h = [int][Math]::Min([Math]::Max([double]$bounds.Height, $minHeight), $area.Height - 40.0)
-    $bounds = New-Object System.Drawing.Rectangle(($area.X + ($area.Width - $w) / 2), ($area.Y + ($area.Height - $h) / 2), $w, $h)
+    if ($compact) {
+        $bounds = New-Object System.Drawing.Rectangle(($area.Right - $w - 16), ($area.Bottom - $h - 16), $w, $h)
+    } else {
+        $bounds = New-Object System.Drawing.Rectangle(($area.X + ($area.Width - $w) / 2), ($area.Y + ($area.Height - $h) / 2), $w, $h)
+    }
 }
 $form.Bounds = $bounds
+if (($compact -or $quiet) -and $null -ne $native -and -not $S.Snapshot) {
+    # Окно не становится активным при показе: WS_EX_NOACTIVATE ставится до
+    # него. Маленькая карточка вдобавок не видна в Alt+Tab (WS_EX_TOOLWINDOW).
+    try {
+        $handle = $form.Handle
+        $extended = $native::GetWindowLong($handle, -20)
+        $style = if ($compact) { 0x08000080 } else { 0x08000000 }
+        [void]$native::SetWindowLong($handle, -20, ($extended -bor $style))
+    } catch { Write-Line "Окно без запрета фокуса: $($_.Exception.Message)" }
+}
 
 # Общий масштаб картинки: макет рассчитан на окно 1040×660 и растягивается
 # или сжимается вместе с настоящим окном — пустых полей не остаётся.

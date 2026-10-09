@@ -65,6 +65,10 @@ class RestartSplashSpec:
     # «compact» — маленькая карточка: логотип, фраза, полоса и строка этапа.
     # Её показывает обновление, которое программа ставит сама, без вопроса.
     layout: str = "full"
+    # Забирать ли фокус ввода. Если человек сейчас не в программе (она в трее
+    # или он в другом окне), окно обновления появляется, но клавиатуру у его
+    # программы не выхватывает.
+    take_focus: bool = True
 
     def to_payload(
         self,
@@ -94,6 +98,7 @@ class RestartSplashSpec:
             "colors": {str(key): str(value) for key, value in dict(self.colors).items()},
             "font_family": str(self.font_family or "Segoe UI"),
             "layout": "compact" if self.layout == "compact" else "full",
+            "take_focus": bool(self.take_focus),
             "logo_path": str(logo_path),
             "shown_path": str(shown_path),
             "ready_path": str(ready_path),

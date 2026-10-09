@@ -31,6 +31,8 @@ _LOGO_SIDE = 128
 # рассчитана на две строки фразы; скрипт окна рисует макет в этих же числах.
 COMPACT_WIDTH = 460
 COMPACT_HEIGHT = 190
+# Отступ маленькой карточки от правого и нижнего края рабочей области экрана.
+COMPACT_MARGIN = 16
 
 
 def _solid(value: str, over: QColor, fallback: str) -> str:
@@ -115,12 +117,17 @@ def _place(dialog_widget: QWidget | None, host: QWidget) -> QRect:
     )
 
 
-def _place_compact(host: QWidget) -> QRect:
-    """Маленькая карточка — по центру окна программы."""
-    frame = host.frameGeometry()
+def _place_compact(screen) -> QRect:
+    """Маленькая карточка — в правом нижнем углу экрана, над панелью задач.
+
+    Программа обновляется сама, человек её об этом не просил: карточка не
+    встаёт посреди его работы, а показывается там, где Windows показывает
+    уведомления. Место не зависит от окна программы — оно может быть в трее.
+    """
+    area = screen.availableGeometry() if screen is not None else QRect(0, 0, 1280, 720)
     return QRect(
-        frame.x() + (frame.width() - COMPACT_WIDTH) // 2,
-        frame.y() + (frame.height() - COMPACT_HEIGHT) // 2,
+        area.x() + area.width() - COMPACT_WIDTH - COMPACT_MARGIN,
+        area.y() + area.height() - COMPACT_HEIGHT - COMPACT_MARGIN,
         COMPACT_WIDTH,
         COMPACT_HEIGHT,
     )
@@ -134,16 +141,22 @@ def build_restart_splash_spec(
     target_version: str,
     language: str,
     compact: bool = False,
+    take_focus: bool = True,
 ) -> RestartSplashSpec:
     """``compact`` — программа ставит обновление сама: вместо окна на месте
-    окна обновления показывается маленькая карточка по центру программы."""
+    окна обновления показывается маленькая карточка в правом нижнем углу
+    экрана, всегда поверх остальных окон и без захвата фокуса."""
     from ui.theme import get_theme_tokens
 
     def t(key: str, default: str) -> str:
         return plans.update_flow_text(language, f"restart.{key}", default)
 
-    rect = _place_compact(host) if compact else _place(dialog_widget, host)
-    screen = host.screen() or QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
+    if compact:
+        screen = host.screen() or QGuiApplication.primaryScreen()
+        rect = _place_compact(screen)
+    else:
+        rect = _place(dialog_widget, host)
+        screen = host.screen() or QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
     x, y, width, height = to_physical_rect(rect, screen=screen)
     if compact:
         title = t("compact.title", "Обновляем Zapret")
@@ -159,6 +172,7 @@ def build_restart_splash_spec(
         width=width,
         height=height,
         layout="compact" if compact else "full",
+        take_focus=bool(take_focus),
         title=title,
         subtitle=subtitle,
         stages=(
@@ -182,4 +196,11 @@ def build_restart_splash_spec(
     )
 
 
-__all__ = ["COMPACT_HEIGHT", "COMPACT_WIDTH", "build_restart_splash_spec", "splash_colors", "to_physical_rect"]
+__all__ = [
+    "COMPACT_HEIGHT",
+    "COMPACT_MARGIN",
+    "COMPACT_WIDTH",
+    "build_restart_splash_spec",
+    "splash_colors",
+    "to_physical_rect",
+]

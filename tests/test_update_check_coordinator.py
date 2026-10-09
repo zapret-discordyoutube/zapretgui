@@ -143,6 +143,7 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         page._declined_version = ""
         page._background_offered_version = ""
         page._host_window_shown = Mock(return_value=True)
+        page._host_window_in_use = Mock(return_value=True)
         page._dialog_wait_timer = Mock()
         page.update_card = Mock()
         page.present_update_dialog = Mock(return_value=True)
@@ -384,12 +385,13 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         page.update_card.show_found_update.assert_called_once_with("21.1.5.80", "Forgejo")
         page.update_card.set_details_action.assert_called_with("Подробнее")
 
-    def test_self_install_from_tray_shows_no_window_and_returns_to_tray(self) -> None:
+    def test_self_install_from_tray_returns_to_tray(self) -> None:
         with patch("settings.store.add_auto_install_attempt", return_value=1):
             page = self._auto_page(window_shown=False)
 
         kwargs = page._install_service.start.call_args.kwargs
-        self.assertIsNone(kwargs["splash"])
+        # Новая версия откроется там же, в трее; о ходе обновления говорит
+        # маленькая карточка в углу экрана (см. test_restart_splash).
         self.assertTrue(kwargs["start_in_tray"])
 
     def test_self_install_with_open_window_restarts_as_a_window(self) -> None:
