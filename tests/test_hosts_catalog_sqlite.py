@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.09.5")
+        self.assertEqual(catalog.catalog_version, "2026.10.09.6")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -131,7 +131,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 954)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 5780)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6118)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -192,7 +192,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         после этого не осталось рабочего профиля, выключены, а не удалены.
         """
         relays = {
-            "comss_dns": ("103.137.248.145", "89.150.59.128"),
+            "comss_dns": ("157.22.177.90", "95.81.102.20", "132.243.112.221"),
             "geohide": ("159.194.200.33", "193.233.112.67", "193.233.112.68", "193.233.112.88"),
             "astracat": ("217.60.179.6",),
         }
@@ -261,6 +261,15 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         # AstraCat и GeoHide из России закрыты, и из-за них профиль не записывался (21.1.7.117).
         foreign = {"103.137.248.145", "89.150.59.128", "217.60.179.6", "35.228.34.253", "159.194.200.33"}
         self.assertEqual({host for host, ip in first.items() if ip in foreign}, set())
+        # Comss DNS сменил посредников (сверено с его сервером 2026-10-09): старых адресов в каталоге нет.
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            stale = connection.execute(
+                "SELECT COUNT(*) FROM dns_answers WHERE ip_address IN ('103.137.248.145', '89.150.59.128')"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(stale, 0)
         for hostname in ("dam.strava.com", "api.claude.ai", "login.x.ai"):
             self.assertEqual(first[hostname], "83.217.211.149", hostname)
         # Раздача Spotify идёт напрямую: у неё нет гео-ограничения.
@@ -445,7 +454,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
     def test_runtime_reads_dns_and_direct_rows_from_sqlite(self) -> None:
         self.assertEqual(
             len(self.proxy_domains.get_service_domain_ip_rows("ChatGPT & Sora (OpenAI)", "comss_dns")),
-            101,
+            147,
         )
         self.assertEqual(
             self.proxy_domains.get_service_domain_ip_rows("Discord", "hosts")[:2],
