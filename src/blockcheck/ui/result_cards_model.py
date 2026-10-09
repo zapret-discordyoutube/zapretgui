@@ -809,15 +809,19 @@ def _crowd_card(crowd: dict) -> Card:
     facts = [Line(INFO, "Сайт", " · ".join(part for part in (str(crowd.get("label") or ""), str(crowd.get("host") or "")) if part))]
     if crowd.get("address"):
         facts.append(Line(INFO, "Адрес сервера", str(crowd["address"])))
-    # Исходы отдельных соединений — готовыми строками отчёта, когда он их даёт: коды исходов экран в слова не переводит.
-    facts += [
+    # Исходы отдельных соединений и время возвращения — готовыми строками отчёта: коды исходов
+    # и секунды экран в слова не переводит.
+    rows = [
         Line(_shown_state(row.get("state")), str(row.get("title") or ""), str(row.get("text") or ""))
         for row in crowd.get("rows") or ()
     ]
-    if crowd.get("recovered_s") is not None:
-        facts.append(Line(INFO, "Сайт вернулся через", f"{crowd['recovered_s']} с"))
-    if crowd.get("waited_s"):
-        facts.append(Line(INFO, "Ждали после пачки", f"{crowd['waited_s']} с"))
+    facts += rows
+    if not rows:
+        # Отчёт, сохранённый до появления готовых строк: остаются только числа.
+        if crowd.get("recovered_s") is not None:
+            facts.append(Line(INFO, "Сайт вернулся через", f"{crowd['recovered_s']} с"))
+        if crowd.get("waited_s"):
+            facts.append(Line(INFO, "Ждали после пачки", f"{crowd['waited_s']} с"))
     sections = [Section("Вывод", (Line(level, text),))]
     if advice:
         sections.append(Section(_CROWD_ADVICE_TITLE, (Line(INFO, advice),)))
@@ -827,7 +831,7 @@ def _crowd_card(crowd: dict) -> Card:
         icon="fa5s.layer-group",
         title="Несколько соединений сразу",
         level=level,
-        # Слово итога — из отчёта; пока его нет, им служит сама фраза вывода.
+        # Слово итога — из отчёта; у отчёта постарше, где его нет, им служит сама фраза вывода.
         status=str(crowd.get("status") or text),
         lines=tuple(lines),
         sections=tuple(sections),

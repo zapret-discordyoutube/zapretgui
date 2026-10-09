@@ -473,6 +473,8 @@ class NewSectionsCardsTests(unittest.TestCase):
         with_rows = self._card({"crowd": {**crowd, "status": "Замирает", "rows": [{"title": "Соединение 2 из пачки", "text": "без ответа", "state": "fail"}]}}, "crowd")
         self.assertEqual(with_rows.status, "Замирает")
         self.assertIn(("Соединение 2 из пачки", "без ответа", "fail"), [(line.name, line.text, line.state) for line in with_rows.sections[-1].lines])
+        # Готовые строки отчёта уже говорят, когда сайт вернулся: своих чисел экран рядом не дописывает.
+        self.assertNotIn("Сайт вернулся через", [line.name for line in with_rows.sections[-1].lines])
         # Проба не делалась — карточки нет.
         self.assertFalse([item for item in build_cards({"crowd": None}) if item.key == "crowd"])
 
