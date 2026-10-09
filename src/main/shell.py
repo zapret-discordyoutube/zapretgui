@@ -42,6 +42,30 @@ def handle_update_mode(argv: list[str] | None = None) -> None:
             pass
 
 
+def _update_is_being_installed() -> bool:
+    """Прямо сейчас установщик заменяет программу на более новую версию.
+
+    Этот запуск ему помешал бы: старая версия начала бы второе обновление и
+    заняла место новой. Поэтому программа тихо выходит — новую версию откроет
+    сам установщик. Любая ошибка чтения записи значит «не мешаем запуску»:
+    программа обязана открываться, даже если каталог обновления недоступен.
+    """
+    try:
+        from updater.install.interrupted import installation_in_progress
+
+        record = installation_in_progress()
+    except Exception:
+        return False
+    if record is None:
+        return False
+    log(
+        f"Идёт установка обновления v{record.version}: этот запуск отменён, "
+        "новую версию откроет установщик",
+        "🔁 UPDATE",
+    )
+    return True
+
+
 def shell_bootstrap(argv: list[str] | None = None) -> bool:
     args = list(argv or sys.argv)
 
@@ -54,6 +78,11 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
         sys.exit(0)
 
     start_in_tray = "--tray" in args
+
+    # До запроса прав администратора: иначе человек увидел бы окно UAC от
+    # запуска, который тут же закроется.
+    if _update_is_being_installed():
+        sys.exit(0)
 
     if not is_admin():
         params = subprocess.list2cmdline(list(args[1:]))

@@ -17,6 +17,7 @@ from updater.install.handoff import HandoffState, UpdateHandoffRecord, write_rec
 from updater.install.interrupted import (
     describe_interrupted_update,
     detect_interrupted_update,
+    installation_in_progress,
 )
 
 
@@ -219,6 +220,103 @@ class InterruptedUpdateMessageTests(unittest.TestCase):
         self.assertFalse(detected.installer_available)
         self.assertNotIn(r"C:\absent", message)
         self.assertIn("Серверы", message)
+
+
+class InstallationInProgressTests(unittest.TestCase):
+    """Пока установщик работает, прежняя версия не должна запускаться поверх."""
+
+    NOW = 1_800_000_000.0
+
+    def _in_progress(self, *, current: str = "21.1.1.3", age: float = 10.0, **overrides):
+        record = _record(error="", updated_at=self.NOW - age, **overrides)
+        return installation_in_progress(current_version=current, record=record, now=self.NOW)
+
+    def test_running_installer_is_seen_by_the_older_version(self) -> None:
+        self.assertIsNotNone(self._in_progress(state=HandoffState.LAUNCHED))
+        # Программа уже отдала установщик наблюдателю и закрывается.
+        self.assertIsNotNone(self._in_progress(state=HandoffState.PREPARED))
+
+    def test_new_version_opened_by_the_installer_starts_normally(self) -> None:
+        # Установщик открывает новую версию раньше, чем наблюдатель запишет
+        # итог: запись ещё «запущена», но этой версии она не касается.
+        self.assertIsNone(self._in_progress(state=HandoffState.LAUNCHED, current="21.1.1.4"))
+
+    def test_finished_installation_blocks_nothing(self) -> None:
+        self.assertIsNone(self._in_progress(state=HandoffState.SUCCEEDED))
+        self.assertIsNone(self._in_progress(state=HandoffState.FAILED))
+
+    def test_stale_record_never_locks_the_app_out(self) -> None:
+        # Установка оборвалась (выключили компьютер): программа обязана открыться.
+        self.assertIsNone(
+            self._in_progress(
+                state=HandoffState.LAUNCHED, age=interrupted.LAUNCHED_IN_PROGRESS_SECONDS + 1
+            )
+        )
+        self.assertIsNone(
+            self._in_progress(
+                state=HandoffState.PREPARED, age=interrupted.PREPARED_IN_PROGRESS_SECONDS + 1
+            )
+        )
+
+    def test_clock_moved_back_does_not_lock_the_app_out(self) -> None:
+        self.assertIsNone(self._in_progress(state=HandoffState.LAUNCHED, age=-3600.0))
+
+    def test_broken_version_does_not_lock_the_app_out(self) -> None:
+        self.assertIsNone(self._in_progress(state=HandoffState.LAUNCHED, version="мусор"))
+
+    def test_running_installer_is_not_reported_as_a_failed_update(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "handoff.json"
+            write_record(_record(state=HandoffState.LAUNCHED, error=""), state_path)
+
+            with patch.object(interrupted, "clear_recovery_hook") as clear_hook:
+                detected = detect_interrupted_update(current_version="21.1.1.3", state_path=state_path)
+
+            self.assertIsNone(detected)
+            # Запись нужна наблюдателю, чтобы дописать итог.
+            self.assertTrue(state_path.exists())
+            clear_hook.assert_not_called()
+
+
+class StartupDuringInstallationTests(unittest.TestCase):
+    def _bootstrap(self, record):
+        from main import shell
+
+        with (
+            patch.object(interrupted, "installation_in_progress", return_value=record),
+            patch.object(shell, "is_admin", return_value=True) as is_admin,
+            patch.object(shell, "log"),
+            patch("startup.single_instance.create_mutex", return_value=(1, False)) as create_mutex,
+            patch("startup.single_instance.create_show_event"),
+            patch.object(shell, "register_exit_step"),
+        ):
+            try:
+                result = shell.shell_bootstrap(["zapret.exe"])
+            except SystemExit as exc:
+                result = exc
+        return result, is_admin, create_mutex
+
+    def test_launch_during_installation_steps_aside_before_anything_else(self) -> None:
+        result, is_admin, create_mutex = self._bootstrap(_record(state=HandoffState.LAUNCHED))
+
+        self.assertIsInstance(result, SystemExit)
+        self.assertEqual(result.code, 0)
+        # Ни окна UAC, ни отметки «программа уже запущена», которая не дала
+        # бы открыться новой версии.
+        is_admin.assert_not_called()
+        create_mutex.assert_not_called()
+
+    def test_ordinary_launch_goes_on(self) -> None:
+        result, _is_admin, create_mutex = self._bootstrap(None)
+
+        self.assertIs(result, False)
+        create_mutex.assert_called_once()
+
+    def test_unreadable_update_state_never_blocks_the_launch(self) -> None:
+        from main import shell
+
+        with patch.object(interrupted, "installation_in_progress", side_effect=OSError("нет доступа")):
+            self.assertFalse(shell._update_is_being_installed())
 
 
 if __name__ == "__main__":

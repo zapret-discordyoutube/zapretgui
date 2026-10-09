@@ -12,6 +12,7 @@ from __future__ import annotations
 «сорвалось ли прошлое обновление и что об этом известно».
 """
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,14 @@ from .recovery_hook import clear_recovery_hook
 
 
 UPDATE_LOG_LEVEL = "🔁 UPDATE"
+
+# Сколько запись об установке считается «идёт прямо сейчас». «Подготовлена» —
+# программа передала установщик наблюдателю и закрывается; «запущена» —
+# установщик работает. Обычно всё вместе занимает секунды, на медленном
+# компьютере с антивирусом — минуты. Дольше этого запись уже ничего не
+# доказывает: установка могла оборваться, и программа обязана запускаться.
+PREPARED_IN_PROGRESS_SECONDS = 2 * 60.0
+LAUNCHED_IN_PROGRESS_SECONDS = 5 * 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +64,45 @@ def _forget(state_path: str | Path | None) -> None:
     clear_recovery_hook()
 
 
+def installation_in_progress(
+    *,
+    current_version: str = APP_VERSION,
+    record: UpdateHandoffRecord | None = None,
+    state_path: str | Path | None = None,
+    now: float | None = None,
+) -> UpdateHandoffRecord | None:
+    """Запись об обновлении, которое ставится прямо сейчас, либо None.
+
+    Нужна запуску программы. Пока установщик заменяет файлы, прежней версии
+    на экране нет, и человек щёлкает по ярлыку ещё раз (при тихом обновлении
+    из трея он и не знает, что оно идёт). Запустившаяся в этот момент старая
+    версия мешала установке: начинала второе обновление и не давала открыться
+    новой — та видела «программа уже запущена» и выходила.
+
+    Запись касается только версии старше той, что ставится: новая версия,
+    которую открыл сам установщик, стартует, когда запись ещё «запущена».
+    """
+    known = record if record is not None else read_record(state_path)
+    if known is None:
+        return None
+    if known.state is HandoffState.PREPARED:
+        limit = PREPARED_IN_PROGRESS_SECONDS
+    elif known.state is HandoffState.LAUNCHED:
+        limit = LAUNCHED_IN_PROGRESS_SECONDS
+    else:
+        return None
+    age = float(now if now is not None else time.time()) - float(known.updated_at or 0.0)
+    # Отрицательный возраст — часы перевели назад: записи не верим.
+    if age < 0 or age > limit:
+        return None
+    try:
+        if compare_versions(current_version, known.version) >= 0:
+            return None
+    except ValueError:
+        return None
+    return known
+
+
 def detect_interrupted_update(
     *,
     current_version: str = APP_VERSION,
@@ -75,6 +123,10 @@ def detect_interrupted_update(
     if known.state is HandoffState.PREPARED:
         # Установка ещё не начиналась: либо её запускают прямо сейчас, либо
         # пользователь закрыл приложение до передачи управления.
+        return None
+    if installation_in_progress(current_version=current_version, record=known) is not None:
+        # Установщик ещё работает: это не сорвавшееся обновление, и запись
+        # наблюдателю ещё нужна — стирать её нельзя.
         return None
 
     try:
@@ -130,4 +182,5 @@ __all__ = [
     "InterruptedUpdate",
     "describe_interrupted_update",
     "detect_interrupted_update",
+    "installation_in_progress",
 ]
