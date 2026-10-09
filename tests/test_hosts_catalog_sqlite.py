@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.09.4")
+        self.assertEqual(catalog.catalog_version, "2026.10.09.5")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -131,7 +131,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 954)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 5799)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 5780)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -256,6 +256,12 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(order[0], "zapret_dns")
         self.assertGreaterEqual(services, 80)
         for hostname in ("chatgpt.com", "claude.ai", "gemini.google.com", "open.spotify.com", "www.notion.so"):
+            self.assertEqual(first[hostname], "83.217.211.149", hostname)
+        # Имена, которые сервер ведёт сам, не должны уходить на чужие посредники: адреса Comss,
+        # AstraCat и GeoHide из России закрыты, и из-за них профиль не записывался (21.1.7.117).
+        foreign = {"103.137.248.145", "89.150.59.128", "217.60.179.6", "35.228.34.253", "159.194.200.33"}
+        self.assertEqual({host for host, ip in first.items() if ip in foreign}, set())
+        for hostname in ("dam.strava.com", "api.claude.ai", "login.x.ai"):
             self.assertEqual(first[hostname], "83.217.211.149", hostname)
         # Раздача Spotify идёт напрямую: у неё нет гео-ограничения.
         self.assertNotEqual(first["image-cdn-fa.spotifycdn.com"], "83.217.211.149")
