@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import diagnostics.engine as engine
+from blockcheck_words import report_with_words
 from blockcheck.ui.block_kinds_view import _COLORS
 from blockcheck.ui.result_cards_model import build_cards
 from diagnostics import block_cause as bc
@@ -303,7 +304,7 @@ class FingerprintOnScreenTests(unittest.TestCase):
                 }
             ]
         }
-        return build_cards(report)[0]
+        return build_cards(report_with_words(report))[0]
 
     def test_card_of_an_open_site_turns_to_warning(self) -> None:
         card = self._card("fingerprint")

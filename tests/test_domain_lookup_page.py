@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
+from blockcheck_words import report_with_words, with_words
 from blockcheck.ui.page import BlockcheckPage
 from dns import domain_lookup as engine
 from dns.ui import domain_lookup_cards as lookup_cards
@@ -77,7 +78,8 @@ class LookupCardsTests(unittest.TestCase):
 
         # Пока сайт не проверен, карточки нет; адрес (не домен) так не проверяется вовсе.
         self.assertNotIn("site:user:example.com", [card.key for card in lookup_cards.build_lookup_cards(_report())])
-        report = _report(site=self.SITE)
+        # Запись сайта приходит из проверки уже со словами (итог, дороги, метки) — как в отчёте BlockCheck.
+        report = _report(site=with_words(self.SITE))
         site = lookup_cards.build_lookup_cards(report)[0]
         self.assertEqual((site.key, site.title, site.site, site.level), ("site:user:example.com", "example.com", True, "fail"))
         self.assertEqual([mark.label for mark in site.marks], ["TLS 1.2", "TLS 1.3", "Chrome", "HTTP", "QUIC", "DNS"])

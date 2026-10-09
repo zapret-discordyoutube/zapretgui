@@ -63,8 +63,33 @@ def _blocked_by_name(host: str, purpose: str, address: str, *, main: bool = Fals
     )
 
 
-def _service(key: str, label: str, level: str, targets: list[dict], **extra) -> dict:
-    return {"key": key, "label": label, "level": level, "kind": "", "control": False, "targets": targets, **extra}
+_QUIC_HINT = "QUIC — быстрый способ соединения поверх UDP: им браузер открывает YouTube и многие крупные сайты."
+_DNS_HINT = "DNS — справочная, которая по имени сайта выдаёт его адрес. Провайдер может подменять её ответы."
+
+
+def _roads(targets: list[dict]) -> list[dict]:
+    """Дороги к сайту примера — в том виде, в каком их кладёт в отчёт настоящая проверка."""
+    main = next((item for item in targets if item.get("main")), targets[0] if targets else {})
+    roads = [
+        {"key": item["key"], "label": item["title"], "state": item["state"], "word": item["word"], "text": item["text"], "hint": ""}
+        for item in main.get("protocols") or ()
+    ]
+    if not roads:
+        return []
+    quic = str(main.get("quic") or "")
+    quic_word, quic_state = {"blocked_by_name": ("закрыт", "warn"), "ok": ("работает", "ok")}.get(quic, ("—", "unknown"))
+    roads.append({"key": "quic", "label": "QUIC", "state": quic_state, "word": quic_word, "text": str(main.get("quic_text") or ""), "hint": _QUIC_HINT})
+    roads.append({"key": "dns", "label": "DNS", "state": "ok", "word": "честный", "text": "адрес сайта DNS выдаёт верно", "hint": _DNS_HINT})
+    return roads
+
+
+def _service(key: str, label: str, level: str, targets: list[dict], *, status: str = "Открывается", cause: str = "", **extra) -> dict:
+    # Слово итога, дороги и метки лежат в отчёте готовыми — экран их только показывает (как у настоящей проверки).
+    tags = [{"key": "cause", "text": cause, "state": "fail"}] if cause else []
+    if extra.get("control"):
+        tags.append({"key": "control", "text": "контрольный", "state": "info"})
+    words = {"status": status, "roads": _roads(targets), "tags": tags}
+    return {"key": key, "label": label, "level": level, "kind": "", "control": False, "targets": targets, **words, **extra}
 
 
 _STRATEGY_ADVICE = "Подберите стратегию Zapret для сайта: вкладка «Подбор стратегии»."
@@ -87,6 +112,8 @@ def demo_report() -> dict:
                 _target("cdn.discordapp.com", "картинки и файлы"),
             ],
             kind="sni",
+            status="По имени (SNI)",
+            cause="блокировка по имени",
             headline="Discord не открывается",
             advice=[_STRATEGY_ADVICE],
         ),
@@ -96,13 +123,16 @@ def demo_report() -> dict:
             "fail",
             [_blocked_by_name("x.com", "сайт", "104.244.42.193", main=True)],
             kind="sni",
+            status="По имени (SNI)",
+            cause="блокировка по имени",
             headline="X (Twitter) не открывается",
             advice=[_STRATEGY_ADVICE],
         ),
         _service(
             "youtube",
             "YouTube",
-            "warn",
+            # Сайт открывается: закрытый QUIC — отдельная строка итога, а не беда самого сайта.
+            "ok",
             [
                 _target(
                     "www.youtube.com",
@@ -116,7 +146,6 @@ def demo_report() -> dict:
                 _target("i.ytimg.com", "превью видео"),
                 _target("rr1---sn-gvnuxaxjvh-n8vs.googlevideo.com", "видео"),
             ],
-            kind="quic",
             headline="YouTube открывается, но QUIC закрыт",
             advice=[_QUIC_ADVICE],
         ),

@@ -2,6 +2,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
+from blockcheck_words import report_with_words
 from blockcheck.ui.result_cards_model import build_cards, build_counters
 from diagnostics import block_cause as bc
 from diagnostics import protocol_probe as pp
@@ -122,7 +123,8 @@ class ProtocolCardsTests(unittest.TestCase):
     }
 
     def test_site_card_shows_roads_stale_hosts_and_tried_addresses(self) -> None:
-        [card] = build_cards(self.REPORT)
+        # Слова сайта (итог, дороги, метки) в отчёте лежат готовыми — образец дополняется ими.
+        [card] = build_cards(report_with_words(self.REPORT))
 
         self.assertIn(("TLS 1.2: работает", "ok"), card.chips)
         self.assertIn(("TLS 1.3: сброс", "fail"), card.chips)

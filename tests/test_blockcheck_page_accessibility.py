@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
+from blockcheck_words import report_with_words
 from blockcheck.page_run_workflow import request_blockcheck_stop, reset_blockcheck_running_ui, start_blockcheck_page_run
 from blockcheck.ui.check_results import BlockcheckSummaryPanel
 from blockcheck.ui.page import BlockcheckPage
@@ -238,7 +239,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
         page._report_lines = ["🔍 BlockCheck"]
 
-        page._on_finished(dict(_REPORT))
+        page._on_finished(report_with_words(_REPORT))
 
         self.assertEqual(page._summary_panel.level, "fail")
         # Точный смысл — в начале заголовка, шутка (если есть) — после.

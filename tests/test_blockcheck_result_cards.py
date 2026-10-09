@@ -18,6 +18,7 @@ from blockcheck.ui.result_cards import (
     ResultDetailView,
     card_plain_text,
 )
+from blockcheck_words import with_words
 from blockcheck.ui.result_cards_model import FILTER_MARK, PREVIEW_LINES, Card, Line, build_cards, build_counters
 from diagnostics.freeze_check import FreezeState, check_freeze, every_freeze_target
 from diagnostics.tls_probe import ProbeResult
@@ -37,7 +38,8 @@ def _target(host, purpose="сайт", ok=True, **extra):
 
 
 def _service(key, label, level, targets, **extra):
-    return {"key": key, "label": label, "level": level, "kind": "", "targets": targets, **extra}
+    # Образец сайта — со словами отчёта (итог, дороги, метки): экран показывает только их.
+    return with_words({"key": key, "label": label, "level": level, "kind": "", "targets": targets, **extra})
 
 
 def _servers():
@@ -429,10 +431,7 @@ class NewSectionsCardsTests(unittest.TestCase):
             "dns_note": "подмена",
             "control": True,
         }
-        with patch.object(model, "_legacy_site_words", side_effect=AssertionError("у свежего отчёта запасной путь не нужен")), patch.object(
-            model, "_legacy_site_level", side_effect=AssertionError("уровень берётся из отчёта")
-        ), patch.object(model, "_legacy_site_kind", side_effect=AssertionError("вид берётся из отчёта")):
-            [card] = [item for item in build_cards({"services": [service]}) if item.site]
+        [card] = [item for item in build_cards({"services": [service]}) if item.site]
 
         self.assertEqual((card.status, card.level, card.kind), ("Слово из отчёта", "warn", "fingerprint"))
         self.assertEqual([(mark.label, mark.word, mark.state) for mark in card.marks], [(road["label"], road["word"], road["state"]) for road in roads])
@@ -449,11 +448,21 @@ class NewSectionsCardsTests(unittest.TestCase):
         self.assertEqual(model.site_level({**service, "level": "ok"}), "ok")
         self.assertEqual(model.site_kind({**service, "kind": ""}, "warn"), "")
 
-        # Отчёт, сохранённый до этой правки, слов не содержит — работает подписанный запасной путь.
-        old = _service("example", "Example", "warn", [_target("example.org", main=True, hosts_stale=True)])
-        self.assertFalse(model.has_ready_words(old))
-        [legacy] = [item for item in build_cards({"services": [old]}) if item.site]
-        self.assertEqual(legacy.status, "Мешает запись в hosts")
+        # Запасного расчёта у экрана нет вовсе: источник слов один — отчёт.
+        self.assertFalse([name for name in dir(model) if "legacy" in name.lower()])
+        # Отчёт, сохранённый до появления готовых слов, открывается без падения — но без слова итога,
+        # дорог и меток: экран показывает только то, что в отчёте есть, и ничего не достраивает.
+        old = {"key": "example", "label": "Example", "level": "warn", "kind": "", "targets": [_target("example.org", main=True, hosts_stale=True, cause="by_name", quic="ok", protocols=[{"title": "TLS 1.3", "state": "fail", "word": "сброс", "text": "сброс"}])]}
+        [bare] = [item for item in build_cards({"services": [old]}) if item.site]
+        self.assertEqual((bare.status, bare.marks, bare.tags, bare.chips), ("", (), (), ()))
+        self.assertEqual((bare.level, bare.title), ("warn", "Example"))
+        self.assertTrue(bare.sections)
+        from blockcheck.ui.result_cards import ResultCard
+
+        widget = ResultCard(bare)
+        self.addCleanup(widget.deleteLater)
+        widget.resize(304, widget.height_for(304))
+        widget.grab()
 
     def test_crowd_card_shows_the_report_words_and_says_the_check_caused_the_stop(self) -> None:
         crowd = {
@@ -886,7 +895,8 @@ class PageCardsTests(unittest.TestCase):
         self.assertTrue(page._tabs_pivot.isHidden())
         self.assertTrue(all(widget.isHidden() for widget in page._tab_widgets))
         # На подстранице первой идёт строка пути: название и описание раздела скрыты.
-        self.assertTrue(page.title_label.isHidden())
+        # Заголовок стоит в ряду со ссылкой на инструкцию — прячется весь ряд, поэтому смотрим, виден ли он.
+        self.assertFalse(page.title_label.isVisible())
         self.assertTrue(page.subtitle_label.isHidden())
         self.assertEqual(bar.value(), 0)
 
@@ -894,7 +904,7 @@ class PageCardsTests(unittest.TestCase):
         QApplication.processEvents()
         self.assertTrue(page._detail_view.isHidden())
         self.assertFalse(page._tabs_pivot.isHidden())
-        self.assertFalse(page.title_label.isHidden())
+        self.assertTrue(page.title_label.isVisible())
         self.assertFalse(page.subtitle_label.isHidden())
         # Возврат — к тому месту списка, с которого уходили.
         self.assertGreater(was_at, 0)

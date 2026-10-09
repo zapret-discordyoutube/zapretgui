@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QLabel, QWidget
 
+from blockcheck_words import report_with_words, with_words
 from blockcheck.ui.brand_icons import brands_in_text, named_brand, readable_color, site_brand
 from blockcheck.ui.check_results import (
     BlockcheckSummaryPanel,
@@ -691,7 +692,7 @@ class LightAndFittingTests(unittest.TestCase):
         def service(key: str, label: str, quic: str) -> dict:
             protocols = [proto("TLS 1.2", "fail", "сброс"), proto("TLS 1.3", "fail", "сброс"), proto("Как Chrome", "ok", "проходит"), proto("HTTP", "info", "переход")]
             target = {"host": f"{key}.com", "purpose": "сайт", "main": True, "ok": False, "state": "dpi", "short": "сброс", "text": "сброс", "protocols": protocols, "quic": quic, "dns_state": "ok", "cause": "by_name"}
-            return {"key": key, "label": label, "level": "fail", "kind": "sni", "targets": [target]}
+            return with_words({"key": key, "label": label, "level": "fail", "kind": "sni", "targets": [target]})
 
         panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=lambda _key: None)
         self.addCleanup(panel.deleteLater)
