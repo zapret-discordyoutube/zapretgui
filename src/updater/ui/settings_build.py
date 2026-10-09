@@ -71,10 +71,12 @@ def build_servers_settings_section(
 ) -> ServersSettingsWidgets:
     settings_card = setting_card_group_cls(tr_fn("page.servers.settings.title", "Настройки"), content_parent)
 
-    auto_check_title = tr_fn("page.servers.settings.auto_check", "Проверять обновления при запуске")
+    auto_check_title = tr_fn("page.servers.settings.auto_check", "Обновлять программу автоматически")
     auto_check_description = tr_fn(
         "page.servers.settings.auto_check.description",
-        "Автоматически проверять наличие обновлений при старте приложения.",
+        "Программа сама узнаёт о выходе обновления, скачивает новую версию и "
+        "перезапускается, не спрашивая. Сразу после выхода версии обновления "
+        "раздаются по очереди.",
     )
     auto_check_card = win11_toggle_row_cls(
         "fa5s.sync-alt",

@@ -232,10 +232,10 @@ class UpdaterLanguageAccessibilityTests(unittest.TestCase):
             refresh_server_rows=lambda: None,
         )
 
-        expected = "Проверять обновления при запуске"
+        expected = "Обновлять программу автоматически"
         self.assertEqual(auto_check_card.accessibleName(), expected)
         self.assertEqual(auto_check_card.property("screenReaderStateText"), expected)
-        self.assertIn("Автоматически проверять", auto_check_card.accessibleDescription())
+        self.assertIn("скачивает новую версию", auto_check_card.accessibleDescription())
 
     def test_language_refresh_updates_telegram_screen_reader_action(self) -> None:
         telegram_card = _Card()

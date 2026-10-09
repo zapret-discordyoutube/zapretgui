@@ -64,6 +64,10 @@ class UpdaterFeature:
     def set_update_skipped_version(self, version: str) -> None:
         self._commands().set_update_skipped_version(str(version or ""))
 
+    def note_auto_install_attempt(self, version: str) -> int:
+        """Программа сама взялась ставить версию: попытка идёт в счёт лимита."""
+        return int(self._commands().note_auto_install_attempt(str(version or "")))
+
     def remember_whats_new(self, version: str, history) -> None:
         self._commands().remember_whats_new(str(version or ""), tuple(history or ()))
 
@@ -104,8 +108,12 @@ class UpdaterFeature:
     def repair_installation(self, report=None, *, allow_download: bool = True):
         return self._commands().repair_installation(report, allow_download=bool(allow_download))
 
-    def run_startup_update_check(self) -> dict:
-        return self._commands().run_startup_update_check()
+    def run_startup_update_check(self, *, signalled: bool = False) -> dict:
+        return self._commands().run_startup_update_check(signalled=bool(signalled))
+
+    def create_release_watcher(self, *, on_release, on_queued):
+        """Слушатель очереди обновлений на сервере; оба вызова приходят из фона."""
+        return self._commands().create_release_watcher(on_release=on_release, on_queued=on_queued)
 
     def open_update_channel(self, channel: str):
         return self._commands().open_update_channel(channel)

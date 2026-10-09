@@ -30,6 +30,11 @@ class UpdateCheckSnapshot:
     release_url: str = ""
     # Пользователь просил не напоминать об этой версии при запуске.
     user_skipped: bool = False
+    # Сервер разрешил обновиться: эту находку ставим сразу, без вопроса.
+    auto_install: bool = False
+    # Находка ждёт очереди на скачивание, которую ведёт сервер: программа
+    # поставит её сама, окно с предложением не нужно.
+    awaiting_signal: bool = False
 
 
 class UpdateCheckCoordinator:
@@ -157,6 +162,14 @@ class UpdateCheckCoordinator:
                 ) if not error else (),
                 release_url=str(payload.get("release_url") or "") if not error else "",
                 user_skipped=bool(payload.get("user_skipped")) and not error,
+                auto_install=bool(payload.get("auto_install"))
+                and bool(payload.get("has_update"))
+                and not error
+                and not skipped,
+                awaiting_signal=bool(payload.get("awaiting_signal"))
+                and bool(payload.get("has_update"))
+                and not error
+                and not skipped,
             )
             self._snapshot = snapshot
 

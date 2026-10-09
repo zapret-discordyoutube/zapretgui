@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from updater.commands import (
     check_installation_integrity,
+    create_release_watcher,
     get_update_skipped_version,
     is_auto_update_enabled,
+    note_auto_install_attempt,
     load_release_history,
     mark_update_app_ready,
     mark_whats_new_seen,
@@ -18,8 +20,10 @@ from updater.commands import (
 
 __all__ = [
     "check_installation_integrity",
+    "create_release_watcher",
     "get_update_skipped_version",
     "is_auto_update_enabled",
+    "note_auto_install_attempt",
     "load_release_history",
     "mark_update_app_ready",
     "mark_whats_new_seen",

@@ -667,6 +667,15 @@ def normalize_self_repair(data: object) -> dict[str, Any]:
     return {"attempts": attempts[-SELF_REPAIR_ATTEMPTS_KEPT:]}
 
 
+def normalize_auto_install(data: object) -> dict[str, Any]:
+    raw = as_dict(data)
+    version = as_clean_str(raw.get("version"), "")
+    return {
+        "version": version,
+        "attempts": as_int(raw.get("attempts"), 0, minimum=0) if version else 0,
+    }
+
+
 def normalize_updater(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     auto_check_raw = as_dict(raw.get("auto_check"))
@@ -679,6 +688,7 @@ def normalize_updater(data: object) -> dict[str, Any]:
         "auto_check": {"last_success_at": last_success_at},
         "self_repair": normalize_self_repair(raw.get("self_repair")),
         "skipped_version": as_clean_str(raw.get("skipped_version"), ""),
+        "auto_install": normalize_auto_install(raw.get("auto_install")),
         "whats_new": normalize_whats_new(raw.get("whats_new")),
     }
 

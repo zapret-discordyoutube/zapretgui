@@ -33,6 +33,12 @@ def set_update_skipped_version(version: str) -> None:
     set_update_skipped_version(str(version or ""))
 
 
+def note_auto_install_attempt(version: str) -> int:
+    from settings.store import add_auto_install_attempt
+
+    return int(add_auto_install_attempt(str(version or "")))
+
+
 def remember_whats_new(version: str, history) -> None:
     from updater.whats_new import remember_pending
 
@@ -63,10 +69,25 @@ def mark_update_app_ready(version: str) -> bool:
     return bool(_mark(version))
 
 
-def run_startup_update_check() -> dict:
+def run_startup_update_check(*, signalled: bool = False) -> dict:
     from updater.startup_update_check import check_for_update_sync
 
-    return check_for_update_sync()
+    return check_for_update_sync(signalled=bool(signalled))
+
+
+def create_release_watcher(*, on_release, on_queued):
+    """Слушатель сервера, который ведёт очередь обновлений своего канала."""
+    from config.build_info import APP_VERSION, CHANNEL
+
+    from updater.release.watch import ReleaseWatcher
+
+    return ReleaseWatcher(
+        channel=CHANNEL,
+        current_version=APP_VERSION,
+        on_release=on_release,
+        on_queued=on_queued,
+        is_enabled=is_auto_update_enabled,
+    )
 
 
 def check_installation_integrity(*, deep: bool = False):

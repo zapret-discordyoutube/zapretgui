@@ -3214,8 +3214,18 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Settings",
     },
     "page.servers.settings.auto_check": {
-        "ru": "Проверять обновления при запуске",
-        "en": "Check for updates on startup",
+        "ru": "Обновлять программу автоматически",
+        "en": "Update the app automatically",
+    },
+    "page.servers.settings.auto_check.description": {
+        "ru": (
+            "Программа сама узнаёт о выходе обновления, скачивает новую версию и перезапускается, "
+            "не спрашивая. Сразу после выхода версии обновления раздаются по очереди."
+        ),
+        "en": (
+            "The app learns about a new release by itself, downloads the new version and restarts "
+            "without asking. Right after a release, updates are handed out in a queue."
+        ),
     },
     "page.servers.settings.version_channel_template": {
         "ru": "v{version} · {channel}",
@@ -3350,8 +3360,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Press the button to check",
     },
     "page.servers.update.subtitle.auto_on": {
-        "ru": "Автопроверка включена",
-        "en": "Auto-check enabled",
+        "ru": "Автообновление включено",
+        "en": "Auto-update enabled",
     },
     "page.servers.update.subtitle.checked_ago_sec_template": {
         "ru": "Проверено {seconds}с назад",

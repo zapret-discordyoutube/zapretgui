@@ -19,7 +19,12 @@ class StartupUpdateCheckTests(unittest.TestCase):
     def setUp(self) -> None:
         self.stored: dict = {}
         self.lookups: list[str] = []
+        self.auto_install_attempts = 0
         patches = (
+            patch(
+                "settings.store.get_auto_install_attempts",
+                side_effect=lambda _version: self.auto_install_attempts,
+            ),
             patch("config.build_info.APP_VERSION", "21.1.5.79"),
             patch("config.build_info.CHANNEL", "dev"),
             patch(
@@ -35,13 +40,13 @@ class StartupUpdateCheckTests(unittest.TestCase):
             item.start()
             self.addCleanup(item.stop)
 
-    def _check(self, lookup: ReleaseLookup, *, now: float = NOW) -> dict:
+    def _check(self, lookup: ReleaseLookup, *, now: float = NOW, signalled: bool = False) -> dict:
         def fake_lookup(channel: str) -> ReleaseLookup:
             self.lookups.append(channel)
             return lookup
 
         with patch("updater.release.resolver.lookup_latest_release", side_effect=fake_lookup):
-            return startup_update_check.check_for_update_sync(now=now)
+            return startup_update_check.check_for_update_sync(now=now, signalled=signalled)
 
     def test_failed_check_reports_error_and_does_not_pause_next_launch(self) -> None:
         failed = self._check(ReleaseLookup(None, "Не удалось узнать новейшую версию"))
@@ -69,6 +74,15 @@ class StartupUpdateCheckTests(unittest.TestCase):
         self.assertTrue(skipped["skipped"])
         self.assertEqual(self.lookups, ["dev"])
 
+    def test_server_signal_is_checked_despite_the_pause(self) -> None:
+        self._check(ReleaseLookup({"version": "21.1.5.79"}))
+        signalled = self._check(
+            ReleaseLookup({"version": "21.1.5.80"}), now=NOW + 60, signalled=True
+        )
+
+        self.assertTrue(signalled["has_update"])
+        self.assertEqual(self.lookups, ["dev", "dev"])
+
     def test_pause_is_short(self) -> None:
         self._check(ReleaseLookup({"version": "21.1.5.79"}))
         later = self._check(
@@ -91,10 +105,10 @@ class StartupSkippedVersionTests(unittest.TestCase):
     setUp = StartupUpdateCheckTests.setUp
     _check = StartupUpdateCheckTests._check
 
-    def _found(self, skipped: str) -> dict:
+    def _found(self, skipped: str, *, signalled: bool = False) -> dict:
         release = {"version": "21.1.5.80", "release_notes": "новое", "source": "Forgejo"}
         with patch("settings.store.get_update_skipped_version", return_value=skipped):
-            return self._check(ReleaseLookup(release))
+            return self._check(ReleaseLookup(release), signalled=signalled)
 
     def test_skipped_version_is_marked(self) -> None:
         result = self._found("21.1.5.80")
@@ -110,6 +124,63 @@ class StartupSkippedVersionTests(unittest.TestCase):
 
         self.assertEqual([item["version"] for item in result["release_history"]], ["21.1.5.80"])
         self.assertTrue(result["release_url"].endswith("/releases/tag/21.1.5.80"))
+
+
+class SelfInstallDecisionTests(unittest.TestCase):
+    """Ставить ли находку без вопроса, решает сервер с очередью, а не программа."""
+
+    setUp = StartupUpdateCheckTests.setUp
+    _check = StartupUpdateCheckTests._check
+    _found = StartupSkippedVersionTests._found
+
+    def test_update_allowed_by_server_is_installed_without_asking(self) -> None:
+        self.assertTrue(self._found("", signalled=True)["auto_install"])
+
+    def test_app_never_installs_on_its_own_decision(self) -> None:
+        # Пользователей около миллиона: без очереди на сервере все установки
+        # пошли бы за установщиком разом.
+        found = self._found("")
+
+        self.assertTrue(found["has_update"])
+        self.assertFalse(found["auto_install"])
+
+    def test_skipped_version_is_not_installed_by_the_app(self) -> None:
+        self.assertFalse(self._found("21.1.5.80", signalled=True)["auto_install"])
+
+    def test_app_stops_installing_a_version_that_keeps_failing(self) -> None:
+        # Каждая попытка закрывает программу: без лимита сбой установщика
+        # стал бы петлёй перезапусков.
+        self.auto_install_attempts = startup_update_check.AUTO_INSTALL_MAX_ATTEMPTS - 1
+        self.assertTrue(self._found("", signalled=True)["auto_install"])
+
+        self.auto_install_attempts = startup_update_check.AUTO_INSTALL_MAX_ATTEMPTS
+        limited = self._found("", signalled=True)
+
+        self.assertFalse(limited["auto_install"])
+        # Обновление никуда не делось: его предложит окно.
+        self.assertTrue(limited["has_update"])
+
+    def test_unreadable_attempt_count_falls_back_to_asking(self) -> None:
+        with patch("settings.store.get_auto_install_attempts", side_effect=OSError("диск")):
+            self.assertFalse(self._found("", signalled=True)["auto_install"])
+
+
+class SelfInstallAttemptCounterTests(unittest.TestCase):
+    def test_attempts_are_counted_per_version(self) -> None:
+        import tempfile
+
+        from settings.store import add_auto_install_attempt, get_auto_install_attempts
+
+        with tempfile.TemporaryDirectory() as tmp, patch("settings.store.MAIN_DIRECTORY", tmp):
+            self.assertEqual(get_auto_install_attempts("21.1.5.80"), 0)
+            self.assertEqual(add_auto_install_attempt("21.1.5.80"), 1)
+            self.assertEqual(add_auto_install_attempt("21.1.5.80"), 2)
+            self.assertEqual(get_auto_install_attempts("21.1.5.80"), 2)
+
+            # У следующей версии счёт начинается заново.
+            self.assertEqual(get_auto_install_attempts("21.1.5.81"), 0)
+            self.assertEqual(add_auto_install_attempt("21.1.5.81"), 1)
+            self.assertEqual(get_auto_install_attempts("21.1.5.80"), 0)
 
 
 if __name__ == "__main__":

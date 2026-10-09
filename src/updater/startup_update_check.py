@@ -1,13 +1,20 @@
 """
 updater/startup_update_check.py
 ────────────────────────────────────────────────────────────────
-Проверка обновлений при запуске приложения.
+Автоматическая проверка обновлений: при запуске приложения и дальше в фоне,
+пока оно работает, — по расписанию и по сигналу сервера о новой версии
+(``updater.release.watch``).
 Не содержит Qt-импортов — вызывается из фонового потока.
 
-Каждый запуск делает свежий запрос: он стоит меньше секунды. Пауза нужна
+Каждая проверка делает свежий запрос: он стоит меньше секунды. Пауза нужна
 только против частых перезапусков подряд и отсчитывается лишь от успешной
 проверки без находки: неудачная не лишает пользователя следующей попытки, а
-о найденном обновлении программа напоминает при каждом запуске.
+найденное обновление программа берётся ставить при каждой проверке.
+
+Здесь же решается, ставить ли находку без вопроса (``auto_install``). Сама
+программа на это не решается никогда: разрешение даёт сервер, который ведёт
+очередь на скачивание (``updater.release.watch``). Без очереди миллион
+установок пошёл бы за установщиком разом.
 """
 from __future__ import annotations
 
@@ -17,6 +24,10 @@ from log.log import log
 
 
 AUTO_CHECK_PAUSE_SECONDS = 10 * 60
+# Сколько раз программа сама берётся ставить одну и ту же версию. Попытка
+# закрывает программу, поэтому без лимита сбой установщика превратился бы в
+# петлю перезапусков. После лимита версия предлагается окном, как раньше.
+AUTO_INSTALL_MAX_ATTEMPTS = 3
 
 
 def _last_successful_check_at() -> float:
@@ -47,6 +58,24 @@ def _is_skipped_by_user(version: str) -> bool:
         return False
 
 
+def _auto_install_allowed(version: str) -> bool:
+    from settings import store as settings_store
+
+    try:
+        attempts = int(settings_store.get_auto_install_attempts(version))
+    except Exception:
+        # Счёт попыток недоступен: без него петлю не остановить, спрашиваем.
+        return False
+    if attempts >= AUTO_INSTALL_MAX_ATTEMPTS:
+        log(
+            f"Обновление v{version} уже ставилось само {attempts} раз(а) и не встало: "
+            "дальше — только по кнопке в окне обновления",
+            "🔁 UPDATE",
+        )
+        return False
+    return True
+
+
 def _pause_left(now: float) -> float:
     elapsed = now - _last_successful_check_at()
     # Часы перевели назад: пауза считается истёкшей.
@@ -55,9 +84,13 @@ def _pause_left(now: float) -> float:
     return max(AUTO_CHECK_PAUSE_SECONDS - elapsed, 0.0)
 
 
-def check_for_update_sync(*, now: float | None = None) -> dict:
+def check_for_update_sync(*, now: float | None = None, signalled: bool = False) -> dict:
     """
     Проверяет наличие обновлений синхронно.
+
+    ``signalled`` — проверка по разрешению сервера обновиться. Только её
+    находка ставится без вопроса, и короткая пауза после недавней проверки ей
+    не мешает: иначе разрешение пропало бы зря.
 
     Возвращает dict:
         has_update   : bool      — найдено ли новое обновление
@@ -66,6 +99,8 @@ def check_for_update_sync(*, now: float | None = None) -> dict:
         error        : str|None  — текст ошибки (если проверка не удалась)
         release_info : dict|None — полные метаданные найденного выпуска
         skipped      : bool      — проверка не нужна (недавно уже была)
+        user_skipped : bool      — пользователь просил пропустить эту версию
+        auto_install : bool      — ставить находку сразу, без окна с вопросом
     """
     from config.build_info import APP_VERSION, CHANNEL
 
@@ -73,10 +108,10 @@ def check_for_update_sync(*, now: float | None = None) -> dict:
     from updater.versions import compare_versions
 
     current = float(now if now is not None else time.time())
-    pause_left = _pause_left(current)
+    pause_left = 0.0 if signalled else _pause_left(current)
     if pause_left > 0:
         reason = f"обновления уже проверялись {int((AUTO_CHECK_PAUSE_SECONDS - pause_left) // 60)} мин назад"
-        log(f"Автопроверка обновлений при запуске пропущена: {reason}", "🔁 UPDATE")
+        log(f"Автопроверка обновлений пропущена: {reason}", "🔁 UPDATE")
         return {
             "has_update": False,
             "version": APP_VERSION,
@@ -88,7 +123,7 @@ def check_for_update_sync(*, now: float | None = None) -> dict:
             "checked_at": _last_successful_check_at(),
         }
 
-    log("Проверка обновлений при запуске...", "🔁 UPDATE")
+    log("Автоматическая проверка обновлений...", "🔁 UPDATE")
     lookup = lookup_latest_release(CHANNEL)
     if not lookup.ok:
         return {
@@ -116,6 +151,7 @@ def check_for_update_sync(*, now: float | None = None) -> dict:
         from updater.release.history import release_history_since, release_url_for
 
         log(f"Найдено обновление v{new_version} (текущая v{APP_VERSION})", "🔁 UPDATE")
+        user_skipped = _is_skipped_by_user(new_version)
         return {
             "has_update": True,
             "version": new_version,
@@ -123,15 +159,16 @@ def check_for_update_sync(*, now: float | None = None) -> dict:
             "release_source": str(release.get("source") or ""),
             "release_history": release_history_since(release, current_version=APP_VERSION),
             "release_url": release_url_for(release),
-            # «Пропустить версию»: при запуске окно само не открывается.
-            "user_skipped": _is_skipped_by_user(new_version),
+            # «Пропустить версию»: программа сама её не ставит и окно не открывает.
+            "user_skipped": user_skipped,
+            "auto_install": bool(signalled) and not user_skipped and _auto_install_allowed(new_version),
             "error": None,
             "release_info": release,
         }
 
     log(f"Обновлений нет (v{APP_VERSION})", "🔁 UPDATE")
-    # Пауза только после проверки без находки: о найденном обновлении
-    # программа напоминает при каждом запуске.
+    # Пауза только после проверки без находки: найденное обновление
+    # программа берётся ставить при каждой проверке.
     _remember_successful_check(current)
     return {
         "has_update": False,

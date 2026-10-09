@@ -68,11 +68,12 @@ class UpdateInstallService(QObject):
     def is_busy(self) -> bool:
         return self._busy
 
-    def start(self, requested_version: str, *, splash=None) -> bool:
+    def start(self, requested_version: str, *, splash=None, start_in_tray: bool = False) -> bool:
         """Начинает установку. False — если она уже идёт.
 
         ``splash`` — ``RestartSplashSpec`` окна-продолжения: оно держит
         обновление на экране, пока старая версия закрыта, а новая не открылась.
+        ``start_in_tray`` — новая версия откроется в трее, без окна.
         """
         if self._busy or self._shutting_down:
             return False
@@ -111,6 +112,7 @@ class UpdateInstallService(QObject):
                     ),
                     on_downloaded=lambda: emit(self._task_downloaded, generation),
                     splash=splash,
+                    start_in_tray=bool(start_in_tray),
                 )
             except UpdateCancelled:
                 error = "Обновление остановлено"

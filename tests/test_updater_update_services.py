@@ -272,6 +272,41 @@ class InstallFlowTests(unittest.TestCase):
                 error = exc
         return error, stages, start, downloaded
 
+    def _started_arguments(self, *, start_in_tray: bool) -> tuple[str, ...]:
+        from updater.install.launcher import InstallerHandoff
+
+        handoff = InstallerHandoff(
+            version="1.0.0.9",
+            installer_path="setup.exe",
+            installer_sha256="ab" * 32,
+            arguments=("/AUTOUPDATE", "/VERYSILENT"),
+        )
+        start = Mock(return_value=True)
+        with patch.object(download_flow, "_resolve_and_download", return_value=handoff):
+            download_flow.run_update_install(
+                "1.0.0.9",
+                token=CancellationToken(),
+                dpi=_Dpi().guard(),
+                on_stage=lambda _text: None,
+                start_installation=start,
+                start_in_tray=start_in_tray,
+            )
+        return tuple(start.call_args.args[0].arguments)
+
+    def test_update_from_tray_asks_installer_to_reopen_the_app_in_tray(self) -> None:
+        from updater.install.launcher import START_IN_TRAY_ARGUMENT
+
+        self.assertEqual(
+            self._started_arguments(start_in_tray=True),
+            ("/AUTOUPDATE", "/VERYSILENT", START_IN_TRAY_ARGUMENT),
+        )
+
+    def test_ordinary_update_reopens_the_app_as_a_window(self) -> None:
+        self.assertEqual(
+            self._started_arguments(start_in_tray=False),
+            ("/AUTOUPDATE", "/VERYSILENT"),
+        )
+
     def test_success_stops_dpi_before_installer_and_never_restores_it(self) -> None:
         dpi = _Dpi()
         error, stages, start, downloaded = self._run([self.HANDOFF], dpi=dpi)
@@ -429,7 +464,7 @@ class UpdateInstallServiceTests(unittest.TestCase):
         actions = dpi.actions()
         launched = Mock()
 
-        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded, splash=None):
+        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded, splash=None, start_in_tray=False):
             on_stage("Скачивание обновления…")
             on_downloaded()
             dpi.stop(reason="updater_installer_handoff", update_runtime_state=False)
@@ -483,7 +518,7 @@ class DpiRestoreThreadTests(unittest.TestCase):
         self.assertEqual(len(dpi.stops), 1)
 
     def test_failed_install_restores_dpi_on_main_thread(self) -> None:
-        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded, splash=None):
+        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded, splash=None, start_in_tray=False):
             try:
                 dpi.stop(reason="updater_download_connectivity", update_runtime_state=False)
                 raise UpdatePipelineError("нет сети")

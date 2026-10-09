@@ -31,6 +31,11 @@ from .recovery_hook import build_recovery_command, clear_recovery_hook, set_reco
 
 UPDATE_LOG_LEVEL = "🔁 UPDATE"
 
+# Просьба к установщику открыть новую версию в трее, а не окном. Её понимает
+# установщик той версии, на которую идёт обновление; более старый незнакомый
+# параметр просто не заметит и откроет окно, как раньше.
+START_IN_TRAY_ARGUMENT = "/STARTINTRAY"
+
 _state_dir_hardened = False
 
 
@@ -42,6 +47,21 @@ class InstallerHandoff:
     installer_path: str
     installer_sha256: str
     arguments: tuple[str, ...]
+
+    def starting_in_tray(self) -> "InstallerHandoff":
+        """Та же передача, но новая версия откроется в трее.
+
+        Нужна обновлению, которое программа ставит сама, пока свёрнута в
+        трей: окно, которого на экране не было, не должно появиться само.
+        """
+        if START_IN_TRAY_ARGUMENT in self.arguments:
+            return self
+        return InstallerHandoff(
+            version=self.version,
+            installer_path=self.installer_path,
+            installer_sha256=self.installer_sha256,
+            arguments=(*self.arguments, START_IN_TRAY_ARGUMENT),
+        )
 
 
 def ensure_private_state_dir() -> None:
@@ -254,6 +274,7 @@ def start_supervised_installation(
 
 
 __all__ = [
+    "START_IN_TRAY_ARGUMENT",
     "InstallerHandoff",
     "ensure_private_state_dir",
     "installer_arguments",

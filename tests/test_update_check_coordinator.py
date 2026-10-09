@@ -140,6 +140,9 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         page._flow.changed.connect(lambda: page._on_flow_changed())
         page._update_dialog = None
         page._auto_opened_revision = 0
+        page._declined_version = ""
+        page._background_offered_version = ""
+        page._host_window_shown = Mock(return_value=True)
         page._dialog_wait_timer = Mock()
         page.update_card = Mock()
         page.present_update_dialog = Mock(return_value=True)
@@ -330,6 +333,143 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         self.assertEqual(page._flow.progress.error_text, "Не удалось скачать обновление")
         page.update_card.show_download_error.assert_called_once_with()
         page.update_card.set_check_enabled.assert_called_once_with(True)
+
+    # ── Программа ставит находку сама ───────────────────────────────────
+
+    def _auto_page(self, *, source: str = "startup", window_shown: bool = True, **result) -> ServersPage:
+        """Страница получила итог автоматической проверки с решением «ставить»."""
+        feature = UpdaterFeature()
+        page = self._page(feature)
+        page._install_service.start.return_value = True
+        page._host_window_shown.return_value = window_shown
+        page._updater_feature = Mock(wraps=feature)
+        token = feature.begin_update_check(source=source)
+        feature.finish_update_check(
+            dict(self._FOUND, auto_install=True, **result), source=source, token=token
+        )
+        with patch("updater.ui.page.run_update_setting_write", side_effect=lambda action, **_: action()):
+            page._apply_check_snapshot(feature.current_update_check_snapshot())
+        return page
+
+    def test_update_found_by_the_app_is_installed_without_asking(self) -> None:
+        for source in ("startup", "background"):
+            with self.subTest(source=source):
+                with patch("settings.store.add_auto_install_attempt", return_value=1) as attempt:
+                    page = self._auto_page(source=source)
+
+                page._install_service.start.assert_called_once()
+                self.assertEqual(page._install_service.start.call_args.args, ("21.1.5.80",))
+                self.assertEqual(page._flow.phase, PHASE_DOWNLOADING)
+                page.present_update_dialog.assert_not_called()
+                # Попытка идёт в счёт лимита, который останавливает петлю перезапусков.
+                attempt.assert_called_once_with("21.1.5.80")
+
+    def test_update_waiting_for_the_server_queue_is_neither_installed_nor_offered(self) -> None:
+        feature = UpdaterFeature()
+        page = self._page(feature)
+        self._finish_startup(feature, dict(self._FOUND, awaiting_signal=True))
+
+        page._apply_check_snapshot(feature.current_update_check_snapshot())
+
+        # Программа поставит версию сама, когда сервер разрешит.
+        page._install_service.start.assert_not_called()
+        page.present_update_dialog.assert_not_called()
+        # Торопящийся откроет окно кнопкой на карточке.
+        page.update_card.show_found_update.assert_called_once_with("21.1.5.80", "Forgejo")
+        page.update_card.set_details_action.assert_called_with("Подробнее")
+
+    def test_self_install_from_tray_shows_no_window_and_returns_to_tray(self) -> None:
+        with patch("settings.store.add_auto_install_attempt", return_value=1):
+            page = self._auto_page(window_shown=False)
+
+        kwargs = page._install_service.start.call_args.kwargs
+        self.assertIsNone(kwargs["splash"])
+        self.assertTrue(kwargs["start_in_tray"])
+
+    def test_self_install_with_open_window_restarts_as_a_window(self) -> None:
+        with patch("settings.store.add_auto_install_attempt", return_value=1):
+            page = self._auto_page(window_shown=True)
+
+        self.assertFalse(page._install_service.start.call_args.kwargs["start_in_tray"])
+
+    def test_manual_install_never_asks_for_tray_start(self) -> None:
+        page = self._offer_page()
+        page._install_service.start.return_value = True
+        page._host_window_shown.return_value = False
+        page._updater_feature = Mock()
+
+        with patch("updater.ui.page.run_update_setting_write", side_effect=lambda action, **_: action()):
+            page._request_install_update()
+
+        self.assertFalse(page._install_service.start.call_args.kwargs["start_in_tray"])
+        page._updater_feature.note_auto_install_attempt.assert_not_called()
+
+    def test_manual_check_still_asks_even_when_self_install_is_allowed(self) -> None:
+        feature = UpdaterFeature()
+        page = self._page(feature)
+        token = feature.begin_update_check(source="manual")
+        feature.finish_update_check(dict(self._FOUND, auto_install=True), source="manual", token=token)
+
+        page._apply_check_snapshot(feature.current_update_check_snapshot())
+
+        page._install_service.start.assert_not_called()
+        page.present_update_dialog.assert_called_once_with()
+
+    def test_skipped_version_is_not_installed_by_the_app(self) -> None:
+        page = self._auto_page(user_skipped=True)
+
+        page._install_service.start.assert_not_called()
+        page.present_update_dialog.assert_not_called()
+
+    def test_version_postponed_in_window_is_left_alone_until_restart(self) -> None:
+        feature = UpdaterFeature()
+        page = self._page(feature)
+        token = feature.begin_update_check(source="manual")
+        feature.finish_update_check(dict(self._FOUND), source="manual", token=token)
+        page._apply_check_snapshot(feature.current_update_check_snapshot())
+        page._request_dismiss_update()
+        page.present_update_dialog.reset_mock()
+
+        token = feature.begin_update_check(source="background")
+        feature.finish_update_check(dict(self._FOUND, auto_install=True), source="background", token=token)
+        page._apply_check_snapshot(feature.current_update_check_snapshot())
+
+        page._install_service.start.assert_not_called()
+        page.present_update_dialog.assert_not_called()
+
+    def test_background_find_without_self_install_opens_window_once_per_version(self) -> None:
+        feature = UpdaterFeature()
+        page = self._page(feature)
+
+        # Попытки автоустановки исчерпаны: фоновая проверка повторяется
+        # каждые полчаса, а окно с предложением — нет.
+        for _ in range(3):
+            token = feature.begin_update_check(source="background")
+            feature.finish_update_check(dict(self._FOUND), source="background", token=token)
+            page._apply_check_snapshot(feature.current_update_check_snapshot())
+
+        page._install_service.start.assert_not_called()
+        page.present_update_dialog.assert_called_once_with()
+
+    def test_window_is_offered_when_self_install_did_not_start(self) -> None:
+        feature = UpdaterFeature()
+        page = self._page(feature)
+        page._install_service.start.return_value = False
+        self._finish_startup(feature, dict(self._FOUND, auto_install=True))
+
+        page._apply_check_snapshot(feature.current_update_check_snapshot())
+
+        page.present_update_dialog.assert_called_once_with()
+
+    def test_background_check_does_not_replace_download_progress_on_card(self) -> None:
+        feature = UpdaterFeature()
+        page = self._page(feature)
+        page._install_service.is_busy = True
+        feature.subscribe_update_check(page._apply_check_snapshot)
+
+        feature.begin_update_check(source="background")
+
+        page.update_card.start_checking.assert_not_called()
 
     def test_page_cleanup_stops_services_and_unsubscribes(self) -> None:
         page = self._page(UpdaterFeature())

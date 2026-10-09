@@ -243,20 +243,20 @@ class UpdaterSettingsBuildTests(unittest.TestCase):
 
         self.assertEqual(
             enabled_widgets.auto_check_card.accessibleName(),
-            "Проверять обновления при запуске, включено",
+            "Обновлять программу автоматически, включено",
         )
         self.assertEqual(
             enabled_widgets.auto_check_card.property("screenReaderStateText"),
-            "Проверять обновления при запуске, включено",
+            "Обновлять программу автоматически, включено",
         )
-        self.assertIn("Автоматически проверять", enabled_widgets.auto_check_card.accessibleDescription())
+        self.assertIn("скачивает новую версию", enabled_widgets.auto_check_card.accessibleDescription())
         self.assertEqual(
             disabled_widgets.auto_check_card.accessibleName(),
-            "Проверять обновления при запуске, выключено",
+            "Обновлять программу автоматически, выключено",
         )
         self.assertEqual(
             disabled_widgets.auto_check_card.property("screenReaderStateText"),
-            "Проверять обновления при запуске, выключено",
+            "Обновлять программу автоматически, выключено",
         )
 
     def test_telegram_card_and_button_expose_screen_reader_action(self) -> None:

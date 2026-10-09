@@ -153,12 +153,16 @@ def run_update_install(
     start_installation: Callable[[InstallerHandoff], bool] = start_supervised_installation,
     splash: RestartSplashSpec | None = None,
     show_splash: Callable[[RestartSplashSpec | None], bool] = show_restart_splash,
+    start_in_tray: bool = False,
 ) -> None:
     """Скачивает, проверяет и передаёт установщик наблюдателю.
 
     Возвращается только после успешной передачи. Любая неудача —
     ``UpdatePipelineError`` с понятным текстом; DPI к этому моменту уже
     запущен обратно.
+
+    ``start_in_tray`` — новая версия откроется в трее: так ставится
+    обновление, найденное, пока программа была свёрнута в трей.
     """
     launched = False
     try:
@@ -185,6 +189,8 @@ def run_update_install(
             dpi.stop(reason="updater_installer_handoff", update_runtime_state=False)
         token.checkpoint()
         on_stage("Запуск установщика…")
+        if start_in_tray:
+            handoff = handoff.starting_in_tray()
         if not start_installation(handoff):
             raise UpdatePipelineError("Не удалось запустить установщик")
         launched = True

@@ -322,7 +322,7 @@ def build_update_status_card_plan(
     if state == "auto_on":
         return UpdateStatusCardPlan(
             title=tr("page.servers.update.title.default", "Проверка обновлений"),
-            subtitle=tr("page.servers.update.subtitle.auto_on", "Автопроверка включена"),
+            subtitle=tr("page.servers.update.subtitle.auto_on", "Автообновление включено"),
             button_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
         )
     if state == "manual":

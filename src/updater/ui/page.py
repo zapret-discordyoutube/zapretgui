@@ -50,6 +50,9 @@ from updater.ui.update_flow import UpdateFlow, UpdateOffer
 _DIALOG_WAIT_INTERVAL_MS = 1000
 _DIALOG_WAIT_MAX_TICKS = 20 * 60
 
+# Проверки, которые программа запускает сама: при запуске и дальше в фоне.
+_AUTOMATIC_CHECK_SOURCES = frozenset({"startup", "background"})
+
 
 class ServersPage(BasePage):
     """Страница «Серверы»: статус обновления, таблица источников, установка.
@@ -58,9 +61,13 @@ class ServersPage(BasePage):
     установкой — ``UpdateInstallService``, общий итог проверки — координатор
     ``UpdaterFeature``: его видят и страница, и проверка при запуске.
 
-    Найденное обновление всегда показывается одним окном ``UpdateDialog`` —
-    как бы оно ни нашлось. Его состояние (и ход загрузки) хранит
-    ``UpdateFlow``: окно можно скрыть и открыть снова кнопкой на карточке.
+    Обновление программа ставит сама, без окна с вопросом, когда это
+    разрешил сервер, ведущий очередь на скачивание (``auto_install`` в итоге
+    проверки). Пока очередь не дошла (``awaiting_signal``), находка тихо ждёт
+    на карточке. Во всех остальных случаях она показывается одним окном
+    ``UpdateDialog``. Его
+    состояние (и ход загрузки) хранит ``UpdateFlow``: окно можно скрыть и
+    открыть снова кнопкой на карточке.
     """
 
     def __init__(
@@ -97,8 +104,15 @@ class ServersPage(BasePage):
         self._found_source = ""
         self._flow = UpdateFlow(language=self._ui_language, parent=self)
         self._update_dialog: UpdateDialog | None = None
-        # Номер итога проверки, для которого окно уже открывалось само.
+        # Номер итога проверки, на который страница уже ответила сама:
+        # установкой или окном.
         self._auto_opened_revision = 0
+        # Версия, которую пользователь отложил или пропустил в окне: до
+        # перезапуска программа её сама не ставит и окном не предлагает.
+        self._declined_version = ""
+        # Версия, для которой окно уже открывалось по фоновой проверке:
+        # она повторяется каждые полчаса, а окно — нет.
+        self._background_offered_version = ""
         # Таймер принадлежит странице и умирает вместе с ней.
         self._dialog_wait_timer = QTimer(self)
         self._dialog_wait_timer.setInterval(_DIALOG_WAIT_INTERVAL_MS)
@@ -162,6 +176,10 @@ class ServersPage(BasePage):
         if self._cleanup_in_progress:
             return
         phase = str(getattr(snapshot, "phase", "") or "")
+        if self._install_service.is_busy and phase != "completed":
+            # Фоновая проверка совпала с идущей установкой: карточка
+            # показывает загрузку, а не «Проверка…».
+            return
         if phase == "checking":
             self.update_card.start_checking()
             return
@@ -215,16 +233,33 @@ class ServersPage(BasePage):
             self.update_card.stop_checking(True, version)
         self.update_card.set_details_action(self._tr("page.servers.update.button.details", "Подробнее"))
 
-        # Окно открывается само один раз на каждый итог проверки. При запуске —
-        # только если пользователь не просил пропустить эту версию.
+        # На каждый итог проверки страница отвечает сама один раз.
         revision = int(getattr(snapshot, "revision", 0) or 0)
-        startup_skipped = (
-            str(getattr(snapshot, "source", "") or "") == "startup"
-            and bool(getattr(snapshot, "user_skipped", False))
-        )
-        if revision != self._auto_opened_revision and not startup_skipped:
-            self._auto_opened_revision = revision
+        if revision == self._auto_opened_revision:
+            return
+        self._auto_opened_revision = revision
+        source = str(getattr(snapshot, "source", "") or "")
+        if source not in _AUTOMATIC_CHECK_SOURCES:
+            # Пользователь проверил сам: показываем, что нашлось, и ждём кнопку.
             self.present_update_dialog()
+            return
+        if bool(getattr(snapshot, "user_skipped", False)) or version == self._declined_version:
+            # «Пропустить версию» и «Позже»: программа не навязывает находку.
+            return
+        if bool(getattr(snapshot, "auto_install", False)) and self._start_install(automatic=True):
+            return
+        if bool(getattr(snapshot, "awaiting_signal", False)):
+            # Версия в очереди на скачивание: программа поставит её сама,
+            # когда сервер разрешит. Торопящийся нажмёт «Подробнее».
+            return
+        # Очереди на сервере нет, попытки автоустановки исчерпаны или
+        # установка не началась: предлагаем окном. Фоновая проверка
+        # повторяется, поэтому окно на одну версию — одно.
+        if source == "background":
+            if version == self._background_offered_version:
+                return
+            self._background_offered_version = version
+        self.present_update_dialog()
 
     def _show_idle_hint(self, snapshot=None) -> None:
         if snapshot is None:
@@ -299,23 +334,51 @@ class ServersPage(BasePage):
         self._on_flow_changed()
 
     def _request_install_update(self) -> None:
+        self._start_install(automatic=False)
+
+    def _host_window_shown(self) -> bool:
+        host = self.window()
+        return host is not None and host is not self and host.isVisible()
+
+    def _start_install(self, *, automatic: bool) -> bool:
+        """Начинает скачивание и установку. False — установка не началась.
+
+        ``automatic`` — программа ставит находку сама, без кнопки «Обновить».
+        Если она при этом свёрнута в трей, обновление проходит без окон:
+        окно-продолжение не показывается, а новая версия откроется в трее.
+        """
         offer = self._flow.offer
         if self._cleanup_in_progress or offer is None:
-            return
+            return False
         if self._check_service.is_busy:
-            return
-        splash = self._build_restart_splash_spec(offer)
-        if not self._install_service.start(offer.version, splash=splash):
-            return
+            return False
+        in_tray = automatic and not self._host_window_shown()
+        splash = None if in_tray else self._build_restart_splash_spec(offer)
+        if not self._install_service.start(offer.version, splash=splash, start_in_tray=in_tray):
+            return False
         # Новая версия покажет «Что нового» из сохранённого текста, без сети.
         history = offer.history
         version = offer.version
+        if automatic:
+            log(
+                f"Обновление v{version} ставится само, без вопроса"
+                + (" (программа в трее: без окон)" if in_tray else ""),
+                "🔄 UPDATE",
+            )
+            # Попытка идёт в счёт лимита: он останавливает петлю перезапусков,
+            # если установщик раз за разом не справляется.
+            run_update_setting_write(
+                lambda: self._updater_feature.note_auto_install_attempt(version),
+                name="updater-auto-install-attempt",
+                description="попытку автообновления",
+            )
         run_update_setting_write(
             lambda: self._updater_feature.remember_whats_new(version, history),
             name="updater-whats-new-remember",
             description="текст «Что нового»",
         )
         self._flow.start_download()
+        return True
 
     def _build_restart_splash_spec(self, offer):
         """Окно-продолжение встанет на место окна обновления, пока версия меняется."""
@@ -368,6 +431,7 @@ class ServersPage(BasePage):
         if not self._found_version:
             return
         log("Обновление отложено пользователем", "🔄 UPDATE")
+        self._declined_version = self._found_version
         self.update_card.show_deferred(self._found_version)
         self.update_card.set_details_action(self._tr("page.servers.update.button.details", "Подробнее"))
 
@@ -375,7 +439,8 @@ class ServersPage(BasePage):
         version = self._found_version
         if not version:
             return
-        log(f"Пользователь пропустил версию v{version}: при запуске окно не откроется", "🔄 UPDATE")
+        log(f"Пользователь пропустил версию v{version}: программа её не ставит и не предлагает", "🔄 UPDATE")
+        self._declined_version = version
         run_update_setting_write(
             lambda: self._updater_feature.set_update_skipped_version(version),
             name="updater-skip-version",
@@ -403,7 +468,7 @@ class ServersPage(BasePage):
             self.update_card.show_auto_enabled_hint()
         else:
             self.update_card.show_manual_hint()
-        log(f"Автопроверка при запуске: {'включена' if enabled else 'отключена'}", "🔄 UPDATE")
+        log(f"Автообновление: {'включено' if enabled else 'отключено'}", "🔄 UPDATE")
 
     def _set_auto_check_toggle_checked(self, enabled: bool) -> None:
         toggle = getattr(self, "auto_check_toggle", None)

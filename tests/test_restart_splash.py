@@ -344,7 +344,7 @@ class PageSplashTests(unittest.TestCase):
         with patch("updater.ui.page.run_update_setting_write"):
             page._request_install_update()
 
-        page._install_service.start.assert_called_once_with("21.1.5.80", splash=spec)
+        page._install_service.start.assert_called_once_with("21.1.5.80", splash=spec, start_in_tray=False)
 
 
 if __name__ == "__main__":

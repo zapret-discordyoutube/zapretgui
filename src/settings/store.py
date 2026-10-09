@@ -694,6 +694,43 @@ def set_update_skipped_version(value: str) -> bool:
     return _set_str(("updater", "skipped_version"), str(value or ""))
 
 
+def get_auto_install_attempts(version: str) -> int:
+    """Сколько раз программа уже сама бралась ставить эту версию."""
+    state = _read_path_value(("updater", "auto_install"), {}) or {}
+    if str(state.get("version") or "") != str(version or ""):
+        return 0
+    try:
+        return max(int(state.get("attempts") or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def add_auto_install_attempt(version: str) -> int:
+    """Записывает ещё одну попытку поставить версию самой программой.
+
+    Счёт ведётся по одной версии: у следующей он начинается заново. Чтение и
+    запись — одна транзакция, как у остальных счётчиков попыток.
+    """
+    target = str(version or "")
+    attempts = 0
+
+    def _mutate(data: dict[str, Any]) -> None:
+        nonlocal attempts
+
+        state = _as_dict(_get_path_value(data, ("updater", "auto_install"), {}))
+        previous = 0
+        if str(state.get("version") or "") == target:
+            try:
+                previous = max(int(state.get("attempts") or 0), 0)
+            except (TypeError, ValueError):
+                previous = 0
+        attempts = previous + 1
+        _set_path_value(data, ("updater", "auto_install"), {"version": target, "attempts": attempts})
+
+    _update_settings(_mutate)
+    return attempts
+
+
 def get_whats_new_state() -> dict[str, Any]:
     """``{"seen_version", "pending": {"version", "history"}}``."""
     return _read_path_value(("updater", "whats_new"), {}) or {}
@@ -1953,11 +1990,13 @@ def clear_orchestra_history() -> bool:
 
 
 __all__ = [
+    "add_auto_install_attempt",
     "append_self_repair_attempt",
     "close_settings_database",
     "get_accent_color",
     "get_active_hosts_domains",
     "get_animations_enabled",
+    "get_auto_install_attempts",
     "get_auto_update_enabled",
     "get_update_skipped_version",
     "get_whats_new_state",

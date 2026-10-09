@@ -803,12 +803,16 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
         "ru": (
             "Нажмите «Проверить обновления» — программа опросит серверы и предложит новую версию, если "
             "она есть. В таблице видно, какие серверы ответили и какие версии на них лежат.\n\n"
-            "Выключатель «Проверять обновления при запуске» ниже делает это за вас."
+            "Пока включён выключатель «Обновлять программу автоматически» ниже, нажимать ничего не "
+            "нужно: программа сама узнаёт о новой версии, скачивает её и перезапускается. Сразу после "
+            "выхода версии обновления раздаются по очереди, поэтому до вас оно может дойти не в ту же минуту."
         ),
         "en": (
             "Press Check for updates and the app polls the servers and offers a new version if there is "
             "one. The table shows which servers answered and which versions they hold.\n\n"
-            "The Check for updates at startup switch below does it for you."
+            "While the Update the app automatically switch below is on, you do not need to press "
+            "anything: the app learns about a new version, downloads it and restarts by itself. Right "
+            "after a release, updates are handed out in a queue, so yours may arrive a little later."
         ),
     },
 }

@@ -132,5 +132,25 @@ class InstallerRuntimeSwapTests(unittest.TestCase):
         self.assertIn("MsgBox", _routine(self.iss, "WarnRuntimeSwapFailed"))
 
 
+class AutoUpdateRelaunchTests(unittest.TestCase):
+    """После автообновления программу открывает установщик."""
+
+    def setUp(self) -> None:
+        self.iss = _read_script()
+        self.step_changed = _routine(self.iss, "CurStepChanged")
+
+    def test_tray_request_matches_the_argument_sent_by_the_app(self) -> None:
+        from updater.install.launcher import START_IN_TRAY_ARGUMENT
+
+        self.assertIn(f"'{START_IN_TRAY_ARGUMENT}'", _routine(self.iss, "IsStartInTray"))
+
+    def test_app_updated_in_tray_is_reopened_in_tray(self) -> None:
+        self.assertRegex(
+            self.step_changed,
+            r"if IsStartInTray\(\) then\s+LaunchArguments := '--tray';",
+        )
+        self.assertRegex(self.step_changed, r"Exec\(\s*LaunchPath, LaunchArguments,")
+
+
 if __name__ == "__main__":
     unittest.main()

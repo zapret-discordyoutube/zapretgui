@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import random
+import time
+
 from PyQt6.QtCore import QCoreApplication, QObject, pyqtSignal
 
 from app_notifications import advisory_notification
@@ -13,6 +16,10 @@ class _UpdateCheckBridge(QObject):
     whats_new_ready = pyqtSignal(object)
     # (ожидавшаяся версия, готовый текст уведомления)
     interrupted_update_found = pyqtSignal(str, str)
+    # Сервер разрешил обновиться до версии новее установленной.
+    release_signalled = pyqtSignal(str)
+    # Версия вышла, но очередь на скачивание до программы ещё не дошла.
+    release_queued = pyqtSignal(str)
 
 
 # «Что нового» ждёт, пока окно программы откроется и успокоится.
@@ -24,6 +31,32 @@ _WHATS_NEW_DELAY_MS = 1500
 _WHATS_NEW_RETRY_MS = 3000
 _WHATS_NEW_MAX_RETRIES = 400
 
+# О новой версии программе сообщает сервер (updater.release.watch): он же
+# ведёт очередь на скачивание и разрешает обновляться. Проверка по расписанию
+# — запасной путь на случай, когда сервер с очередью недоступен: пока он
+# отвечает, расписание молчит и не нагружает Forgejo лишними запросами.
+BACKGROUND_CHECK_INTERVAL_MS = 30 * 60 * 1000
+# Случайная добавка к интервалу: установки не приходят на сервер одной волной.
+BACKGROUND_CHECK_JITTER_MS = 5 * 60 * 1000
+# После неудачной проверки (сети не было) следующая попытка — раньше срока.
+BACKGROUND_CHECK_RETRY_MS = 5 * 60 * 1000
+
+# Сигнал сервера застал идущую проверку (она могла начаться до выхода
+# версии) либо проверка по сигналу ещё не увидела выпуск: она запускается
+# снова через эту паузу.
+SIGNAL_CHECK_RETRY_MS = 15 * 1000
+SIGNAL_CHECK_MAX_RETRIES = 4
+# Сколько действует разрешение сервера обновиться. В этот срок программа
+# ставит находку сама и при повторной проверке — например, если скачивание
+# с первого раза не удалось.
+SIGNAL_GRANT_SECONDS = 60 * 60
+# Сколько проверка при запуске ждёт ответа сервера с очередью, прежде чем
+# решить, что его нет, и предложить находку окном.
+SIGNAL_PROBE_WAIT_SECONDS = 10.0
+
+_SOURCE_STARTUP = "startup"
+_SOURCE_BACKGROUND = "background"
+
 
 def install_update_check(
     startup_host,
@@ -34,9 +67,17 @@ def install_update_check(
     idle_tasks,
 ) -> None:
     update_bridge = _UpdateCheckBridge(QCoreApplication.instance())
-    startup_check_token: int | None = None
+    check_token: int | None = None
+    check_source = _SOURCE_STARTUP
+    check_signalled = False
+    signal_granted_until = 0.0
+    signal_retries_left = 0
+    # Версия, установку которой программа уже начала по разрешению сервера.
+    install_started_for = ""
+    release_watcher = None
 
-    def _on_update_found(version: str, user_skipped: bool) -> None:
+    def _on_update_found(version: str, user_skipped: bool, auto_install: bool) -> None:
+        nonlocal install_started_for
         if not is_startup_host_alive(startup_host):
             return
         try:
@@ -45,23 +86,37 @@ def install_update_check(
             except Exception:
                 pass
             if user_skipped:
-                log(f"Обновление v{version} пропущено пользователем: окно не открывается", "🔁 UPDATE")
+                log(f"Обновление v{version} пропущено пользователем: не ставится и не предлагается", "🔁 UPDATE")
                 return
+            if auto_install:
+                install_started_for = version
+                notify(
+                    advisory_notification(
+                        level="info",
+                        title=f"Обновление до v{version}",
+                        content="Скачиваем новую версию. Программа перезапустится сама.",
+                        source="update.auto_install",
+                        presentation="infobar",
+                        queue="immediate",
+                        duration=8000,
+                        dedupe_key=f"update.auto_install:{version}",
+                    )
+                )
             from app.page_names import PageName as StartupPageName
 
-            # Окно обновления открывает сама страница «Серверы» по общему итогу
-            # проверки — одно окно на любой путь. Здесь страницу только
-            # создаём, не переходя на неё. Сборка страницы занимает GUI-поток
-            # (~100 мс на быстром компьютере), поэтому ждёт паузы пользователя:
-            # окно обновления не выскакивает посреди клика. При окне в трее
-            # ждать нечего — страница строится сразу, как и раньше.
+            # Установкой владеет страница «Серверы»: по общему итогу проверки
+            # она сама ставит находку либо открывает окно обновления — один
+            # путь на любой случай. Здесь страницу только создаём, не переходя
+            # на неё. Сборка страницы занимает GUI-поток (~100 мс на быстром
+            # компьютере), поэтому ждёт паузы пользователя. При окне в трее
+            # ждать нечего — страница строится сразу.
             idle_tasks.add(
                 "UpdateWindowPage",
                 lambda: _ensure_update_page(StartupPageName.SERVERS),
                 needs_shown_window=False,
             )
         except Exception as exc:
-            log(f"Ошибка при показе окна обновления: {exc}", "❌ ERROR")
+            log(f"Ошибка при передаче обновления странице «Серверы»: {exc}", "❌ ERROR")
 
     def _ensure_update_page(page_name) -> None:
         if not is_startup_host_alive(startup_host):
@@ -103,6 +158,26 @@ def install_update_check(
             pass
         log(f"Не удалось проверить обновления при запуске: {error}", "⚠️ UPDATE")
 
+    def _on_background_check_finished(payload: dict, *, signalled: bool) -> None:
+        """Фоновая проверка молчит: говорит только находка."""
+        nonlocal signal_retries_left
+        if payload.get("skipped"):
+            return
+        if payload.get("error"):
+            log(f"Фоновая проверка обновлений не удалась: {payload.get('error')}", "⚠️ UPDATE")
+            return
+        if signalled and not payload.get("has_update") and signal_retries_left > 0:
+            # Сервер уже объявил версию, а список выпусков её ещё не показал.
+            signal_retries_left -= 1
+            schedule_after(SIGNAL_CHECK_RETRY_MS, lambda: _start_update_check(_SOURCE_BACKGROUND))
+            return
+        if payload.get("has_update"):
+            _on_update_found(
+                str(payload.get("version") or ""),
+                bool(payload.get("user_skipped")),
+                bool(payload.get("auto_install")),
+            )
+
     def _on_update_check_skipped(reason: str) -> None:
         if not is_startup_host_alive(startup_host):
             return
@@ -112,20 +187,33 @@ def install_update_check(
             pass
 
     def _on_update_check_finished(result: object) -> None:
-        nonlocal startup_check_token
+        nonlocal check_token
         payload = dict(result or {}) if isinstance(result, dict) else {
             "has_update": False,
             "version": "",
             "release_notes": "",
             "error": "Некорректный результат проверки обновлений",
         }
-        token = startup_check_token
-        startup_check_token = None
+        token = check_token
+        check_token = None
+        source = check_source
+        signalled = check_signalled
         if token is None or not updater_feature.finish_update_check(
             payload,
-            source="startup",
+            source=source,
             token=token,
         ):
+            return
+
+        if payload.get("error") and not payload.get("skipped") and (signalled or not _server_queue_reachable()):
+            # Повтор нужен, когда от него что-то зависит: разрешение сервера
+            # ещё не использовано либо сервера с очередью нет вовсе.
+            schedule_after(
+                BACKGROUND_CHECK_RETRY_MS,
+                lambda: _start_update_check(_SOURCE_BACKGROUND),
+            )
+        if source != _SOURCE_STARTUP:
+            _on_background_check_finished(payload, signalled=signalled)
             return
 
         if payload.get("skipped"):
@@ -143,16 +231,35 @@ def install_update_check(
             _on_update_found(
                 str(payload.get("version") or ""),
                 bool(payload.get("user_skipped")),
+                bool(payload.get("auto_install")),
             )
             return
         _on_no_update(str(payload.get("version") or ""))
 
     update_bridge.result_ready.connect(_on_update_check_finished)
 
-    def _startup_update_worker() -> None:
+    def _awaits_server_queue(result: dict) -> bool:
+        """Находка ждёт очереди на сервере: программа поставит её сама.
+
+        Вызывается в фоновом потоке проверки и ждёт первый ответ сервера с
+        очередью. Если сервера нет, находка предлагается окном, как раньше.
+        """
+        if not result.get("has_update") or result.get("auto_install") or result.get("user_skipped"):
+            return False
+        watcher = release_watcher
+        if watcher is None:
+            return False
         try:
-            result = updater_feature.run_startup_update_check()
-            update_bridge.result_ready.emit(dict(result or {}))
+            return bool(watcher.wait_until_probed(SIGNAL_PROBE_WAIT_SECONDS))
+        except Exception:
+            return False
+
+    def _update_check_worker() -> None:
+        try:
+            result = dict(updater_feature.run_startup_update_check(signalled=check_signalled) or {})
+            if _awaits_server_queue(result):
+                result["awaiting_signal"] = True
+            update_bridge.result_ready.emit(result)
         except Exception as exc:
             log(f"Ошибка воркера проверки обновлений: {exc}", "❌ ERROR")
             update_bridge.result_ready.emit(
@@ -164,27 +271,127 @@ def install_update_check(
                 }
             )
 
-    def _schedule_startup_update_check() -> None:
-        nonlocal startup_check_token
+    def _start_update_check(source: str) -> bool:
+        """Одна автоматическая проверка: при запуске либо фоновая.
+
+        Выключатель автообновления читается перед каждой проверкой: его могли
+        переключить, пока программа работала. False — проверка не началась.
+
+        Пока действует разрешение сервера обновиться, любая проверка идёт
+        «по сигналу»: её находка ставится без вопроса.
+        """
+        nonlocal check_token, check_source, check_signalled
+        at_startup = source == _SOURCE_STARTUP
+        if not is_startup_host_alive(startup_host):
+            return False
+        if at_startup and install_started_for:
+            # Разрешение сервера пришло раньше проверки при запуске, версия
+            # уже скачивается: вторая проверка ничего не добавит.
+            return False
+        if not updater_feature.is_auto_update_enabled():
+            if at_startup:
+                log("Автообновление отключено: программа сама обновления не проверяет", "🔁 UPDATE")
+            return False
+        token = updater_feature.begin_update_check(source=source)
+        if token is None:
+            if at_startup:
+                log(
+                    "Автопроверка при запуске не запущена: проверка уже идёт или выполнена в этой сессии",
+                    "🔁 UPDATE",
+                )
+            return False
+        check_token = int(token)
+        check_source = source
+        check_signalled = time.monotonic() < signal_granted_until
+        if at_startup:
+            try:
+                set_status("Проверка обновлений...")
+            except Exception:
+                pass
+
+        enqueue_subsystem_task(
+            "update",
+            "StartupUpdateCheckWorker" if at_startup else "BackgroundUpdateCheckWorker",
+            _update_check_worker,
+        )
+        return True
+
+    def _on_release_signalled(version: str, attempt: int = 0) -> None:
+        """Сервер разрешил обновиться: проверяем и ставим сразу."""
+        nonlocal signal_granted_until, signal_retries_left
         if not is_startup_host_alive(startup_host):
             return
-        if not updater_feature.is_auto_update_enabled():
-            log("Автопроверка обновлений при запуске отключена", "🔁 UPDATE")
+        if attempt == 0:
+            signal_granted_until = time.monotonic() + SIGNAL_GRANT_SECONDS
+            signal_retries_left = SIGNAL_CHECK_MAX_RETRIES
+        if _start_update_check(_SOURCE_BACKGROUND):
             return
-        token = updater_feature.begin_update_check(source="startup")
-        if token is None:
-            log(
-                "Автопроверка при запуске не запущена: проверка уже идёт или выполнена в этой сессии",
-                "🔁 UPDATE",
+        if attempt < SIGNAL_CHECK_MAX_RETRIES:
+            schedule_after(
+                SIGNAL_CHECK_RETRY_MS,
+                lambda: _on_release_signalled(version, attempt + 1),
             )
+
+    update_bridge.release_signalled.connect(_on_release_signalled)
+
+    def _on_release_queued(version: str) -> None:
+        """Версия вышла, но очередь на скачивание ещё не дошла: говорим, что будет."""
+        if not is_startup_host_alive(startup_host):
             return
-        startup_check_token = int(token)
         try:
-            set_status("Проверка обновлений...")
+            set_status(f"Обновление v{version} ждёт очереди на скачивание")
         except Exception:
             pass
+        try:
+            notify(
+                advisory_notification(
+                    level="info",
+                    title=f"Вышла версия v{version}",
+                    content=(
+                        "Программа обновится сама, когда подойдёт её очередь на скачивание. "
+                        "Не хотите ждать — «Серверы» → «Подробнее» → «Обновить»."
+                    ),
+                    source="update.queued",
+                    presentation="infobar",
+                    queue="immediate",
+                    duration=12000,
+                    dedupe_key=f"update.queued:{version}",
+                )
+            )
+        except Exception as exc:
+            log(f"Не удалось показать уведомление об очереди обновления: {exc}", "❌ ERROR")
 
-        enqueue_subsystem_task("update", "StartupUpdateCheckWorker", _startup_update_worker)
+    update_bridge.release_queued.connect(_on_release_queued)
+
+    def _start_release_watcher() -> None:
+        nonlocal release_watcher
+        try:
+            watcher = updater_feature.create_release_watcher(
+                on_release=lambda version: update_bridge.release_signalled.emit(str(version or "")),
+                on_queued=lambda version: update_bridge.release_queued.emit(str(version or "")),
+            )
+            watcher.start()
+            release_watcher = watcher
+        except Exception as exc:
+            # Без сервера с очередью программа проверяет обновления сама.
+            log(f"Слушатель новых версий не запущен: {exc}", "WARNING")
+
+    def _server_queue_reachable() -> bool:
+        watcher = release_watcher
+        return watcher is not None and watcher.reachable is True
+
+    def _schedule_background_check() -> None:
+        delay_ms = BACKGROUND_CHECK_INTERVAL_MS + random.randint(0, BACKGROUND_CHECK_JITTER_MS)
+        schedule_after(delay_ms, _run_background_check)
+
+    def _run_background_check() -> None:
+        if not is_startup_host_alive(startup_host):
+            return
+        # Сервер с очередью на связи — он и сообщит о версии: проверка по
+        # расписанию от миллиона программ только нагружала бы Forgejo.
+        if not _server_queue_reachable():
+            _start_update_check(_SOURCE_BACKGROUND)
+        _schedule_background_check()
 
     def _interrupted_update_worker() -> None:
         """Ищет обновление, которое не довёл до конца прошлый запуск.
@@ -299,10 +506,11 @@ def install_update_check(
         # самому интерфейсу. Сама проверка идёт в фоне и стоит около секунды.
         delay_ms = 2000
         log(f"Автопроверка обновлений отложена на {delay_ms}ms после готовности UI", "DEBUG")
-        schedule_after(
-            delay_ms,
-            lambda: is_startup_host_alive(startup_host) and _schedule_startup_update_check(),
-        )
+        # Слушатель стартует первым: проверка при запуске спросит у него,
+        # ведёт ли сервер очередь.
+        _start_release_watcher()
+        schedule_after(delay_ms, lambda: _start_update_check(_SOURCE_STARTUP))
+        _schedule_background_check()
 
     def _mark_update_app_ready() -> None:
         # Если эту версию только что поставило обновление, его окно-продолжение

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 """Мелкие фоновые действия страницы «Серверы».
 
-* ``AutoCheckSetting`` — переключатель «проверять при запуске»: чтение и
+* ``AutoCheckSetting`` — выключатель автообновления: чтение и
   запись в ``settings.sqlite3`` вне главного потока. Если переключатель
   щёлкнули несколько раз подряд, записывается последнее значение.
 * ``ChannelOpener`` — открыть Telegram-канал обновлений.
 * ``run_update_setting_write`` — записать отметку окна обновления
-  («пропустить версию», текст «Что нового» перед установкой).
+  («пропустить версию», текст «Что нового» перед установкой, попытка
+  автообновления).
 
 Потоки фоновые (daemon): закрытие программы их не ждёт.
 """
@@ -35,7 +36,7 @@ class AutoCheckSetting(QObject):
             try:
                 enabled = bool(self._updater_feature.is_auto_update_enabled())
             except Exception as exc:
-                log(f"Не удалось загрузить автопроверку обновлений: {exc}", "WARNING")
+                log(f"Не удалось загрузить настройку автообновления: {exc}", "WARNING")
                 return
             try:
                 self.loaded.emit(enabled)
@@ -69,7 +70,7 @@ class AutoCheckSetting(QObject):
             try:
                 self._updater_feature.set_auto_update_enabled(value)
             except Exception as exc:
-                log(f"Не удалось сохранить автопроверку обновлений: {exc}", "WARNING")
+                log(f"Не удалось сохранить настройку автообновления: {exc}", "WARNING")
 
 
 class ChannelOpener(QObject):
