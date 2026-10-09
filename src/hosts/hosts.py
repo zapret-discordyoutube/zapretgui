@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from .proxy_domains import (
     get_dns_profiles,
+    get_relay_addresses,
     get_service_domain_ip_rows,
     service_has_proxy_profiles,
 )
@@ -618,7 +619,7 @@ class HostsManager:
             return False
 
         # Посредник, заблокированный провайдером, не открыл бы сервис, а сломал его.
-        dead = unreachable_relays(self._new_relay_rows(service_dns))
+        dead = unreachable_relays(self._new_relay_rows(service_dns), get_relay_addresses())
         if dead:
             self.set_status(
                 f"Сервер-посредник {', '.join(dead)} не отвечает из вашей сети — похоже, его блокирует провайдер. "

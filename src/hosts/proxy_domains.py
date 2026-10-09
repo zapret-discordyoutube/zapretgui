@@ -239,6 +239,35 @@ def get_service_available_dns_profiles(service_name: str) -> list[str]:
     return _get_service_available_dns_profiles_from_catalog(_load_catalog(), service_name)
 
 
+# Через столько сервисов должен вести один адрес профиля, чтобы считаться посредником.
+RELAY_MIN_SERVICES = 5
+
+
+def get_relay_addresses() -> set[str]:
+    """Адреса серверов-посредников из каталога.
+
+    Посредник — адрес, через который один профиль ведёт имена сразу многих
+    сервисов. Настоящий адрес сайта, даже общий для десятка имён, принадлежит
+    одному сервису (в каталоге 2026.10.09.6 посредники ведут от 5 до 92
+    сервисов, остальные адреса — не больше трёх).
+    """
+    catalog = _load_catalog()
+    services_by_address: dict[tuple[int, str], set[str]] = {}
+    for service_name, entries in catalog.service_entries.items():
+        if catalog.service_modes.get(_clean_str(service_name).casefold()) != _SERVICE_MODE_DNS:
+            continue
+        for _domain, ips in entries or []:
+            for profile_index, ip_address in enumerate(ips or []):
+                value = _clean_str(ip_address).casefold()
+                if value:
+                    services_by_address.setdefault((profile_index, value), set()).add(service_name)
+    return {
+        address
+        for (_profile_index, address), services in services_by_address.items()
+        if len(services) >= RELAY_MIN_SERVICES
+    }
+
+
 def _infer_direct_profile_index(catalog: HostsCatalog) -> int | None:
     try:
         return catalog.dns_profiles.index(HOSTS_PROFILE_ID)

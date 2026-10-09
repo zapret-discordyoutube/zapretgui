@@ -5,25 +5,30 @@
 его: сайт перестанет открываться совсем. Поэтому перед записью программа
 пробует соединиться с каждым посредником и не пишет строки, если он молчит.
 
-Посредником считается адрес, на который ведут сразу несколько имён: настоящий
-адрес сайта обычно стоит у одного-двух имён, а посредник — у всего сервиса.
+Какие адреса считать посредниками, решает каталог (`get_relay_addresses`): это
+адреса, через которые профиль ведёт много сервисов сразу. Угадывать посредник по
+числу имён нельзя: настоящий адрес сайта тоже бывает общим для десятка имён и
+при этом из России не отвечает — так ошибались версии 21.1.7.116–119.
 """
 
 from __future__ import annotations
 
 import socket
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-# На столько имён должен вести адрес, чтобы считаться посредником.
-RELAY_MIN_NAMES = 3
 CONNECT_TIMEOUT_S = 3.0
 RELAY_PORT = 443
 
 
-def relay_addresses(rows: list[tuple[str, str]]) -> list[str]:
-    counts = Counter(str(ip or "").strip() for _domain, ip in rows)
-    return [ip for ip, count in counts.items() if ip and count >= RELAY_MIN_NAMES]
+def relay_addresses(rows: list[tuple[str, str]], known_relays: set[str]) -> list[str]:
+    """Посредники среди адресов строк hosts, по порядку первого появления."""
+    known = {str(address).strip().casefold() for address in known_relays}
+    found: list[str] = []
+    for _domain, ip in rows:
+        address = str(ip or "").strip()
+        if address and address.casefold() in known and address not in found:
+            found.append(address)
+    return found
 
 
 def _connects(address: str) -> bool:
@@ -34,9 +39,9 @@ def _connects(address: str) -> bool:
         return False
 
 
-def unreachable_relays(rows: list[tuple[str, str]]) -> list[str]:
+def unreachable_relays(rows: list[tuple[str, str]], known_relays: set[str]) -> list[str]:
     """Посредники из строк hosts, с которыми не удалось соединиться."""
-    relays = relay_addresses(rows)
+    relays = relay_addresses(rows, known_relays)
     if not relays:
         return []
     with ThreadPoolExecutor(max_workers=min(8, len(relays)), thread_name_prefix="hosts-relay") as pool:
