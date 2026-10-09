@@ -667,12 +667,25 @@ def normalize_self_repair(data: object) -> dict[str, Any]:
     return {"attempts": attempts[-SELF_REPAIR_ATTEMPTS_KEPT:]}
 
 
+AUTO_INSTALL_OUTCOMES = ("", "started", "failed")
+
+
 def normalize_auto_install(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     version = as_clean_str(raw.get("version"), "")
+    try:
+        granted_at = max(float(raw.get("granted_at") or 0.0), 0.0)
+    except (TypeError, ValueError):
+        granted_at = 0.0
+    outcome = as_clean_str(raw.get("outcome"), "")
     return {
         "version": version,
         "attempts": as_int(raw.get("attempts"), 0, minimum=0) if version else 0,
+        # С какой версии и когда программа взялась обновляться сама и чем это
+        # кончилось: новая версия сообщает об этом серверу один раз.
+        "from_version": as_clean_str(raw.get("from_version"), "") if version else "",
+        "granted_at": granted_at if version else 0.0,
+        "outcome": outcome if version and outcome in AUTO_INSTALL_OUTCOMES else "",
     }
 
 

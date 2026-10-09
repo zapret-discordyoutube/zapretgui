@@ -53,6 +53,16 @@ SIGNAL_GRANT_SECONDS = 60 * 60
 # Сколько проверка при запуске ждёт ответа сервера с очередью, прежде чем
 # решить, что его нет, и предложить находку окном.
 SIGNAL_PROBE_WAIT_SECONDS = 10.0
+# Сервер разрешил обновиться, а человек занят (игра на весь экран, проверка
+# сети, подбор стратегии): установка закрыла бы программу и оборвала дело.
+# Она ждёт простоя, заглядывая с этой паузой.
+BUSY_RECHECK_MS = 30 * 1000
+
+_BUSY_TEXTS = {
+    "fullscreen": "идёт игра или видео на весь экран",
+    "blockcheck": "идёт проверка сети",
+    "strategy_scan": "идёт подбор стратегии",
+}
 
 _SOURCE_STARTUP = "startup"
 _SOURCE_BACKGROUND = "background"
@@ -75,6 +85,8 @@ def install_update_check(
     # Версия, установку которой программа уже начала по разрешению сервера.
     install_started_for = ""
     release_watcher = None
+    # Версия, установка которой отложена, пока человек занят.
+    deferred_version = ""
 
     def _on_update_found(version: str, user_skipped: bool, auto_install: bool) -> None:
         nonlocal install_started_for
@@ -317,11 +329,29 @@ def install_update_check(
         return True
 
     def _on_release_signalled(version: str, attempt: int = 0) -> None:
-        """Сервер разрешил обновиться: проверяем и ставим сразу."""
-        nonlocal signal_granted_until, signal_retries_left
+        """Сервер разрешил обновиться: проверяем и ставим сразу.
+
+        Если человек занят, установка ждёт простоя: разрешение сервера не
+        теряется, срок его действия отсчитывается с момента, когда программа
+        освободилась.
+        """
+        nonlocal signal_granted_until, signal_retries_left, deferred_version
         if not is_startup_host_alive(startup_host):
             return
+        if attempt == 0 and not updater_feature.is_auto_update_enabled():
+            deferred_version = ""
+            return
+        busy = _busy_reason() if attempt == 0 else ""
+        if busy:
+            if deferred_version != version:
+                deferred_version = version
+                _on_update_deferred(version, busy)
+            schedule_after(BUSY_RECHECK_MS, lambda: _on_release_signalled(version))
+            return
         if attempt == 0:
+            if deferred_version == version:
+                log(f"Программа освободилась: ставим обновление v{version}", "🔁 UPDATE")
+            deferred_version = ""
             signal_granted_until = time.monotonic() + SIGNAL_GRANT_SECONDS
             signal_retries_left = SIGNAL_CHECK_MAX_RETRIES
         if _start_update_check(_SOURCE_BACKGROUND):
@@ -333,6 +363,38 @@ def install_update_check(
             )
 
     update_bridge.release_signalled.connect(_on_release_signalled)
+
+    def _busy_reason() -> str:
+        try:
+            return str(updater_feature.update_busy_reason() or "")
+        except Exception:
+            return ""
+
+    def _on_update_deferred(version: str, busy: str) -> None:
+        what = _BUSY_TEXTS.get(busy, "программа занята")
+        log(f"Обновление v{version} отложено: {what}", "🔁 UPDATE")
+        try:
+            set_status(f"Обновление v{version} поставится, когда программа освободится")
+        except Exception:
+            pass
+        try:
+            notify(
+                advisory_notification(
+                    level="info",
+                    title=f"Вышла версия v{version}",
+                    content=(
+                        f"Сейчас {what}, поэтому обновление подождёт и поставится само, "
+                        "когда вы закончите."
+                    ),
+                    source="update.deferred",
+                    presentation="infobar",
+                    queue="immediate",
+                    duration=10000,
+                    dedupe_key=f"update.deferred:{version}",
+                )
+            )
+        except Exception as exc:
+            log(f"Не удалось показать уведомление об отложенном обновлении: {exc}", "❌ ERROR")
 
     def _on_release_queued(version: str) -> None:
         """Версия вышла, но очередь на скачивание ещё не дошла: говорим, что будет."""
@@ -411,6 +473,9 @@ def install_update_check(
             interrupted = detect_interrupted_update()
             if interrupted is None:
                 return
+            # Если эту версию программа ставила сама, сервер узнает о неудаче
+            # и придержит раздачу версии остальным.
+            updater_feature.note_auto_install_failed(str(interrupted.expected_version or ""))
             update_bridge.interrupted_update_found.emit(
                 str(interrupted.expected_version or ""),
                 str(describe_interrupted_update(interrupted) or ""),

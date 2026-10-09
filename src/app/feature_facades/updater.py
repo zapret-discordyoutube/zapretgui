@@ -68,6 +68,14 @@ class UpdaterFeature:
         """Программа сама взялась ставить версию: попытка идёт в счёт лимита."""
         return int(self._commands().note_auto_install_attempt(str(version or "")))
 
+    def note_auto_install_failed(self, version: str) -> None:
+        """Установщик версии не справился: сервер узнает и придержит её раздачу."""
+        self._commands().note_auto_install_failed(str(version or ""))
+
+    def update_busy_reason(self) -> str:
+        """Чем занят человек (игра на весь экран, проверка сети); пусто — можно обновляться."""
+        return str(self._commands().update_busy_reason() or "")
+
     def remember_whats_new(self, version: str, history) -> None:
         self._commands().remember_whats_new(str(version or ""), tuple(history or ()))
 

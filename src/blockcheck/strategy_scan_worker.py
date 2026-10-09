@@ -83,6 +83,11 @@ class StrategyScanWorker(QObject):
         self._cancelled = False
         self._running = True
         report = None
+        # Пока идёт подбор, программа сама не обновляется: перезапуск оборвал
+        # бы его, а Zapret на это время и так остановлен ради подбора.
+        from core.runtime.long_tasks import begin_long_task, end_long_task
+
+        long_task = begin_long_task("strategy_scan")
         try:
             self._start_run_log()
             probe_host = self._resolve_probe_host()
@@ -115,6 +120,7 @@ class StrategyScanWorker(QObject):
                 self._close_run_log_action(self._run_log_file)
             except Exception:
                 pass
+            end_long_task(long_task)
             self._running = False
         self.scan_finished.emit(report)
         self.finished.emit(report)

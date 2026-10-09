@@ -136,6 +136,15 @@ class _Feature:
         self.watcher = None
         self.on_release = None
         self.on_queued = None
+        # Чем занят человек при очередном вопросе; список кончился — свободен.
+        self.busy_reasons: list[str] = []
+        self.failed_versions: list[str] = []
+
+    def update_busy_reason(self) -> str:
+        return self.busy_reasons.pop(0) if self.busy_reasons else ""
+
+    def note_auto_install_failed(self, version: str) -> None:
+        self.failed_versions.append(version)
 
     def is_auto_update_enabled(self) -> bool:
         return self.auto_update_enabled
@@ -402,6 +411,70 @@ class BackgroundUpdateCheckTests(unittest.TestCase):
         # Только проверка по разрешению сервера вправе ставить без вопроса.
         self.assertEqual(feature.signalled, [False, True])
         host.ensure_page.assert_called_once_with(PageName.SERVERS)
+
+    def test_permission_waits_while_the_person_is_busy(self) -> None:
+        from app.page_names import PageName
+        from main import post_startup_update
+
+        feature = _Feature(self._CLEAN)
+        notify = Mock()
+        waits: list = []
+
+        class _BusyTimers(_Timers):
+            def schedule(self, delay_ms, callback) -> None:
+                if int(delay_ms) == post_startup_update.BUSY_RECHECK_MS:
+                    waits.append(callback)
+                    return
+                super().schedule(delay_ms, callback)
+
+        host = self._run(feature, timers=_BusyTimers(), notify=notify)
+        notify.reset_mock()
+        feature.result = dict(self._FOUND, auto_install=True)
+        feature.busy_reasons = ["fullscreen", "fullscreen"]
+
+        feature.on_release("9.9.9")
+
+        # Идёт игра на весь экран: установка закрыла бы программу посреди неё.
+        self.assertEqual(feature.sources, ["startup"])
+        host.ensure_page.assert_not_called()
+        self.assertEqual(len(waits), 1)
+        self.assertEqual(notify.call_args.args[0]["source"], "update.deferred")
+
+        waits.pop()()
+        # Всё ещё занят: ждём дальше, но второй раз об этом не говорим.
+        self.assertEqual(feature.sources, ["startup"])
+        self.assertEqual(notify.call_count, 1)
+
+        waits.pop()()
+        # Освободился: разрешение сервера не пропало.
+        self.assertEqual(feature.sources, ["startup", "background"])
+        self.assertEqual(feature.signalled, [False, True])
+        host.ensure_page.assert_called_once_with(PageName.SERVERS)
+
+    def test_deferred_update_is_dropped_when_auto_update_is_switched_off(self) -> None:
+        from main import post_startup_update
+
+        feature = _Feature(self._CLEAN)
+        waits: list = []
+
+        class _BusyTimers(_Timers):
+            def schedule(self, delay_ms, callback) -> None:
+                if int(delay_ms) == post_startup_update.BUSY_RECHECK_MS:
+                    waits.append(callback)
+                    return
+                super().schedule(delay_ms, callback)
+
+        host = self._run(feature, timers=_BusyTimers())
+        feature.result = dict(self._FOUND, auto_install=True)
+        feature.busy_reasons = ["blockcheck"]
+        feature.on_release("9.9.9")
+
+        feature.auto_update_enabled = False
+        waits.pop()()
+
+        self.assertEqual(waits, [])
+        self.assertEqual(feature.sources, ["startup"])
+        host.ensure_page.assert_not_called()
 
     def test_startup_check_is_skipped_when_permission_came_first(self) -> None:
         from main import post_startup_update

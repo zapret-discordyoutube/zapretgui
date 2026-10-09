@@ -28,7 +28,7 @@ class _Response:
 class _Harness:
     """Сервер и часы слушателя: ответы идут по сценарию, паузы не ждут."""
 
-    def __init__(self, test: unittest.TestCase, script: list, *, enabled=lambda: True) -> None:
+    def __init__(self, test: unittest.TestCase, script: list, *, enabled=lambda: True, **watcher_options) -> None:
         self.script = list(script)
         self.requests: list[tuple[str, bool]] = []
         self.pauses: list[float] = []
@@ -44,6 +44,7 @@ class _Harness:
             endpoints=lambda: (FORGEJO, MIRROR),
             session_factory=lambda: self,
             clock=lambda: self.now,
+            **watcher_options,
         )
         patcher = patch.object(self.watcher, "_pause", side_effect=self._pause)
         patcher.start()
@@ -92,7 +93,77 @@ def _queued(version: str, ticket: int = 0) -> _Response:
     return _Response(payload)
 
 
+def _held(version: str, reason: str) -> _Response:
+    return _Response({"channel": "dev", "version": version, "changed": False, "held": reason})
+
+
 class ReleaseWatcherTests(unittest.TestCase):
+    def test_answer_wait_for_your_stage_is_not_a_permission(self) -> None:
+        harness = _Harness(
+            self, [_held("21.1.7.119", "stage"), _held("21.1.7.119", "stage"), _held("21.1.7.119", "halted"), _news("21.1.7.119"), _quiet("21.1.7.119")]
+        )
+
+        harness.run()
+
+        # Сервер раздаёт версию по ступеням: пока очередь не подошла, программа
+        # ничего не ставит и никого не тревожит.
+        self.assertEqual(harness.queued, [])
+        self.assertEqual(harness.released, ["21.1.7.119"])
+        self.assertIn("known=21.1.7.118", harness.requests[3][0])
+        # Долгий вопрос честно отстоял свой срок: лишней паузы нет.
+        self.assertNotIn(watch.QUICK_ANSWER_PAUSE_SECONDS, harness.pauses)
+
+    def test_busy_program_says_so_and_asks_shorter(self) -> None:
+        busy = [True, True, False]
+        harness = _Harness(self, [_quiet(), _quiet(), _quiet()], is_busy=lambda: busy.pop(0) if busy else False)
+
+        harness.run()
+
+        urls = [url for url, _verify in harness.requests]
+        self.assertIn("busy=1", urls[0])
+        self.assertIn("hold=0", urls[0])
+        # Занятая программа переспрашивает раз в минуту: освободится — узнает быстро.
+        self.assertIn("busy=1", urls[1])
+        self.assertIn(f"hold={watch.BUSY_HOLD_SECONDS}", urls[1])
+        self.assertNotIn("busy=", urls[2])
+        self.assertNotIn("hold=", urls[2])
+
+    def test_update_outcome_is_reported_until_the_server_hears_it(self) -> None:
+        pending = [{"prev": "21.1.7.117", "took": "24"}]
+        delivered: list[dict] = []
+
+        def done(report: dict) -> None:
+            delivered.append(report)
+            pending.clear()
+
+        harness = _Harness(
+            self,
+            [OSError("нет сети"), _quiet(), _quiet()],
+            pending_report=lambda: dict(pending[0]) if pending else {},
+            report_delivered=done,
+        )
+
+        harness.run()
+
+        urls = [url for url, _verify in harness.requests]
+        # Первый вопрос не дошёл: сообщение повторяется на следующем источнике.
+        self.assertIn("prev=21.1.7.117", urls[0])
+        self.assertIn("prev=21.1.7.117", urls[1])
+        self.assertIn("took=24", urls[1])
+        self.assertEqual(delivered, [{"prev": "21.1.7.117", "took": "24"}])
+        self.assertNotIn("prev=", urls[2])
+
+    def test_broken_helpers_do_not_stop_the_listener(self) -> None:
+        def broken():
+            raise RuntimeError("сбой")
+
+        harness = _Harness(self, [_quiet(), _news("21.1.7.119")], is_busy=broken, pending_report=broken)
+
+        harness.run()
+
+        self.assertEqual(harness.released, ["21.1.7.119"])
+        self.assertNotIn("busy=", harness.requests[0][0])
+
     def test_first_question_is_a_probe_then_questions_wait(self) -> None:
         harness = _Harness(self, [_quiet(), _quiet(), _quiet()])
 

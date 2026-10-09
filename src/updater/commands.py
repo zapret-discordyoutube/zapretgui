@@ -34,9 +34,27 @@ def set_update_skipped_version(version: str) -> None:
 
 
 def note_auto_install_attempt(version: str) -> int:
+    from config.build_info import APP_VERSION
     from settings.store import add_auto_install_attempt
+    from updater.release.outcome import granted_at
 
-    return int(add_auto_install_attempt(str(version or "")))
+    target = str(version or "")
+    # С какой версии и по какому разрешению идёт обновление: новая версия
+    # сообщит серверу, что оно дошло.
+    return int(add_auto_install_attempt(target, from_version=APP_VERSION, granted_at=granted_at(target)))
+
+
+def update_busy_reason() -> str:
+    """Чем занят человек (игра на весь экран, проверка сети) либо пустая строка."""
+    from updater.busy import busy_reason
+
+    return str(busy_reason() or "")
+
+
+def note_auto_install_failed(version: str) -> None:
+    from updater.release.outcome import note_attempt_failed
+
+    note_attempt_failed(str(version or ""))
 
 
 def remember_whats_new(version: str, history) -> None:
@@ -79,14 +97,24 @@ def create_release_watcher(*, on_release, on_queued):
     """Слушатель сервера, который ведёт очередь обновлений своего канала."""
     from config.build_info import APP_VERSION, CHANNEL
 
+    from updater.busy import busy_reason
+    from updater.release import outcome
     from updater.release.watch import ReleaseWatcher
+
+    def _granted(version: str) -> None:
+        # Отсюда считается «от разрешения до запуска новой версии».
+        outcome.note_granted(version)
+        on_release(version)
 
     return ReleaseWatcher(
         channel=CHANNEL,
         current_version=APP_VERSION,
-        on_release=on_release,
+        on_release=_granted,
         on_queued=on_queued,
         is_enabled=is_auto_update_enabled,
+        is_busy=lambda: bool(busy_reason()),
+        pending_report=outcome.pending_report,
+        report_delivered=outcome.report_delivered,
     )
 
 

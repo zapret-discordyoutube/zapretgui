@@ -362,7 +362,13 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
                 self.assertEqual(page._flow.phase, PHASE_DOWNLOADING)
                 page.present_update_dialog.assert_not_called()
                 # Попытка идёт в счёт лимита, который останавливает петлю перезапусков.
-                attempt.assert_called_once_with("21.1.5.80")
+                attempt.assert_called_once()
+                self.assertEqual(attempt.call_args.args, ("21.1.5.80",))
+                # Вместе с попыткой запоминается, с какой версии идёт
+                # обновление: новая версия сообщит серверу, что оно дошло.
+                from config.build_info import APP_VERSION
+
+                self.assertEqual(attempt.call_args.kwargs["from_version"], APP_VERSION)
 
     def test_update_waiting_for_the_server_queue_is_neither_installed_nor_offered(self) -> None:
         feature = UpdaterFeature()

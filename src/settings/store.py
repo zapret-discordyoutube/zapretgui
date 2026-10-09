@@ -705,11 +705,38 @@ def get_auto_install_attempts(version: str) -> int:
         return 0
 
 
-def add_auto_install_attempt(version: str) -> int:
+def get_auto_install_state() -> dict[str, Any]:
+    """``{"version", "attempts", "from_version", "granted_at", "outcome"}``."""
+    return dict(_read_path_value(("updater", "auto_install"), {}) or {})
+
+
+def set_auto_install_outcome(version: str, outcome: str) -> bool:
+    """Меняет исход автоустановки версии; чужую версию не трогает."""
+    target = str(version or "")
+    changed = False
+
+    def _mutate(data: dict[str, Any]) -> None:
+        nonlocal changed
+
+        state = _as_dict(_get_path_value(data, ("updater", "auto_install"), {}))
+        if str(state.get("version") or "") != target or state.get("outcome") == outcome:
+            return
+        _set_path_value(data, ("updater", "auto_install"), {**state, "outcome": str(outcome or "")})
+        changed = True
+
+    _update_settings(_mutate)
+    return changed
+
+
+def add_auto_install_attempt(version: str, *, from_version: str = "", granted_at: float = 0.0) -> int:
     """Записывает ещё одну попытку поставить версию самой программой.
 
     Счёт ведётся по одной версии: у следующей он начинается заново. Чтение и
     запись — одна транзакция, как у остальных счётчиков попыток.
+
+    ``from_version`` и ``granted_at`` — с какой версии программа обновляется
+    и когда сервер это разрешил: по ним новая версия сообщит серверу, что
+    обновление дошло и сколько оно заняло.
     """
     target = str(version or "")
     attempts = 0
@@ -725,7 +752,17 @@ def add_auto_install_attempt(version: str) -> int:
             except (TypeError, ValueError):
                 previous = 0
         attempts = previous + 1
-        _set_path_value(data, ("updater", "auto_install"), {"version": target, "attempts": attempts})
+        _set_path_value(
+            data,
+            ("updater", "auto_install"),
+            {
+                "version": target,
+                "attempts": attempts,
+                "from_version": str(from_version or ""),
+                "granted_at": max(float(granted_at or 0.0), 0.0),
+                "outcome": "started",
+            },
+        )
 
     _update_settings(_mutate)
     return attempts
@@ -1997,6 +2034,7 @@ __all__ = [
     "get_active_hosts_domains",
     "get_animations_enabled",
     "get_auto_install_attempts",
+    "get_auto_install_state",
     "get_auto_update_enabled",
     "get_update_skipped_version",
     "get_whats_new_state",
@@ -2092,6 +2130,7 @@ __all__ = [
     "set_accent_color",
     "set_active_hosts_domains",
     "set_animations_enabled",
+    "set_auto_install_outcome",
     "set_auto_update_enabled",
     "set_update_skipped_version",
     "set_whats_new_pending",

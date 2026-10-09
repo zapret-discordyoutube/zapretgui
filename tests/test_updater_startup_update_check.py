@@ -182,6 +182,42 @@ class SelfInstallAttemptCounterTests(unittest.TestCase):
             self.assertEqual(add_auto_install_attempt("21.1.5.81"), 1)
             self.assertEqual(get_auto_install_attempts("21.1.5.80"), 0)
 
+    def test_attempt_remembers_where_the_update_started_and_its_outcome(self) -> None:
+        import tempfile
+
+        from settings.store import (
+            add_auto_install_attempt,
+            get_auto_install_state,
+            set_auto_install_outcome,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp, patch("settings.store.MAIN_DIRECTORY", tmp):
+            add_auto_install_attempt("21.1.5.80", from_version="21.1.5.79", granted_at=1234.5)
+
+            state = get_auto_install_state()
+            self.assertEqual(
+                (state["version"], state["from_version"], state["granted_at"], state["outcome"]),
+                ("21.1.5.80", "21.1.5.79", 1234.5, "started"),
+            )
+
+            # Исход чужой версии эту запись не трогает.
+            self.assertFalse(set_auto_install_outcome("21.1.5.81", "failed"))
+            self.assertTrue(set_auto_install_outcome("21.1.5.80", "failed"))
+            self.assertEqual(get_auto_install_state()["outcome"], "failed")
+            self.assertTrue(set_auto_install_outcome("21.1.5.80", ""))
+            # Счёт попыток при этом сохраняется: он останавливает петлю перезапусков.
+            self.assertEqual(get_auto_install_state()["attempts"], 1)
+
+    def test_garbage_in_saved_outcome_is_dropped(self) -> None:
+        from settings.normalize import normalize_auto_install
+
+        state = normalize_auto_install(
+            {"version": "21.1.5.80", "attempts": 2, "granted_at": "вчера", "outcome": "что-то"}
+        )
+
+        self.assertEqual((state["granted_at"], state["outcome"], state["attempts"]), (0.0, "", 2))
+        self.assertEqual(normalize_auto_install({"outcome": "failed"})["outcome"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

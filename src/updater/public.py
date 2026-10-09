@@ -6,6 +6,7 @@ from updater.commands import (
     get_update_skipped_version,
     is_auto_update_enabled,
     note_auto_install_attempt,
+    note_auto_install_failed,
     load_release_history,
     mark_update_app_ready,
     mark_whats_new_seen,
@@ -16,6 +17,7 @@ from updater.commands import (
     set_auto_update_enabled,
     set_update_skipped_version,
     startup_whats_new,
+    update_busy_reason,
 )
 
 __all__ = [
@@ -24,6 +26,7 @@ __all__ = [
     "get_update_skipped_version",
     "is_auto_update_enabled",
     "note_auto_install_attempt",
+    "note_auto_install_failed",
     "load_release_history",
     "mark_update_app_ready",
     "mark_whats_new_seen",
@@ -34,4 +37,5 @@ __all__ = [
     "set_auto_update_enabled",
     "set_update_skipped_version",
     "startup_whats_new",
+    "update_busy_reason",
 ]

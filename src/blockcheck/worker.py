@@ -72,6 +72,11 @@ class BlockcheckWorker(QObject):
         # проверку заново.
         self._running = True
         report = None
+        # Пока идёт проверка, программа сама не обновляется: перезапуск
+        # оборвал бы её.
+        from core.runtime.long_tasks import begin_long_task, end_long_task
+
+        long_task = begin_long_task("blockcheck")
         try:
             from diagnostics.engine import run_blockcheck
 
@@ -99,6 +104,7 @@ class BlockcheckWorker(QObject):
             self._save_unfinished(failed=True, error=str(e))
             report = {"failed": True, "error": str(e)}
         finally:
+            end_long_task(long_task)
             self._running = False
         self.finished.emit(report)
 

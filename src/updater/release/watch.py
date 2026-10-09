@@ -14,6 +14,13 @@ from __future__ import annotations
 очереди не теряется: сервер выдаёт «талон» (время постановки), и программа
 называет его в следующих вопросах.
 
+Версию сервер раздаёт по ступеням: сначала малой доле программ. Остальным он
+отвечает «ждите» (``held``) — их очередь придёт, когда первые обновятся и
+снова выйдут на связь. Для этого слушатель один раз добавляет к вопросу, чем
+кончилось прошлое обновление (``updater.release.outcome``). Если человек
+занят — игра на весь экран, идёт проверка сети — слушатель говорит об этом
+серверу (``busy=1``), и тот разрешения не выдаёт: оно не пропадёт зря.
+
 Ответ несёт только номер версии и запускает обычную проверку
 (``resolver.lookup_latest_release``): адрес, размер и SHA-256 установщика
 программа по-прежнему берёт сама. Ложный сигнал ничего установить не может —
@@ -52,6 +59,9 @@ CONNECT_TIMEOUT_SECONDS = 8
 PROBE_READ_TIMEOUT_SECONDS = 15
 # Сервер держит запрос до четырёх с половиной минут; ждём немного дольше.
 READ_TIMEOUT_SECONDS = 330
+# Занятая программа спрашивает короче: освободилась — и через минуту уже
+# просит разрешение по-настоящему.
+BUSY_HOLD_SECONDS = 60
 # Честный ответ «новостей нет» приходит не раньше срока ожидания сервера.
 # Быстрый пустой ответ — признак неисправности (чужой прокси, старый сервер):
 # без паузы слушатель завалил бы сервер запросами.
@@ -108,6 +118,9 @@ class ReleaseWatcher:
         on_release: Callable[[str], None],
         on_queued: Callable[[str], None] = lambda _version: None,
         is_enabled: Callable[[], bool] = lambda: True,
+        is_busy: Callable[[], bool] = lambda: False,
+        pending_report: Callable[[], dict] = dict,
+        report_delivered: Callable[[dict], None] = lambda _report: None,
         endpoints: Callable[[], tuple[WaitEndpoint, ...]] = wait_endpoints,
         session_factory: Callable[[], object] = new_session,
         clock: Callable[[], float] = time.monotonic,
@@ -117,6 +130,11 @@ class ReleaseWatcher:
         self._on_release = on_release
         self._on_queued = on_queued
         self._is_enabled = is_enabled
+        self._is_busy = is_busy
+        self._pending_report = pending_report
+        self._report_delivered = report_delivered
+        # О какой версии уже сказано в журнале «ждём своей ступени».
+        self._held_version = ""
         self._endpoints = endpoints
         self._session_factory = session_factory
         self._clock = clock
@@ -253,10 +271,24 @@ class ReleaseWatcher:
         except Exception:
             return False
 
+    def _call(self, callback: Callable, default):
+        try:
+            return callback()
+        except Exception:
+            return default
+
     def _ask(self, session, endpoint: WaitEndpoint, *, probe: bool) -> dict:
         params = {"channel": self._channel, "known": self._known}
+        busy = bool(self._call(self._is_busy, False))
         if probe:
             params["hold"] = "0"
+        elif busy:
+            params["hold"] = str(BUSY_HOLD_SECONDS)
+        if busy:
+            params["busy"] = "1"
+        report = self._call(self._pending_report, {})
+        report = {str(key): str(value) for key, value in report.items()} if isinstance(report, dict) else {}
+        params.update(report)
         if self._ticket:
             # С талоном программа стоит по времени первой постановки, а не
             # уходит в конец очереди при каждом новом вопросе.
@@ -271,6 +303,12 @@ class ReleaseWatcher:
         payload = response.json()
         if not isinstance(payload, dict):
             raise ValueError("сервер ответил не тем, чего ждал слушатель")
+        if report:
+            # Сервер ответил — сообщение об исходе обновления он получил.
+            try:
+                self._report_delivered(report)
+            except Exception as exc:
+                log(f"Исход обновления не отмечен как отправленный: {exc}", "WARNING")
         return payload
 
     def _newer_version(self, answer: dict) -> str:
@@ -315,6 +353,16 @@ class ReleaseWatcher:
                 about = f", примерно {max(wait // 60, 1)} мин" if wait else ""
                 log(f"Вышла версия v{version}: ждём очереди на скачивание{about}", UPDATE_LOG_LEVEL)
                 self._notify(self._on_queued, version)
+            return False
+        held = str(answer.get("held") or "")
+        if held and self._held_version != f"{held}:{version}":
+            self._held_version = f"{held}:{version}"
+            reason = {
+                "stage": "сервер раздаёт её по ступеням, очередь этой программы ещё не подошла",
+                "halted": "сервер остановил её раздачу",
+                "busy": "программа занята — обновится, когда освободится",
+            }.get(held, "сервер просит подождать")
+            log(f"Вышла версия v{version}: {reason}", UPDATE_LOG_LEVEL)
         return False
 
     @staticmethod
