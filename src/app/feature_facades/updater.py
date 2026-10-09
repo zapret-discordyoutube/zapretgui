@@ -119,9 +119,11 @@ class UpdaterFeature:
     def run_startup_update_check(self, *, signalled: bool = False) -> dict:
         return self._commands().run_startup_update_check(signalled=bool(signalled))
 
-    def create_release_watcher(self, *, on_release, on_queued):
+    def create_release_watcher(self, *, on_release, on_queued, is_bypass_running=None):
         """Слушатель очереди обновлений на сервере; оба вызова приходят из фона."""
-        return self._commands().create_release_watcher(on_release=on_release, on_queued=on_queued)
+        return self._commands().create_release_watcher(
+            on_release=on_release, on_queued=on_queued, is_bypass_running=is_bypass_running
+        )
 
     def open_update_channel(self, channel: str):
         return self._commands().open_update_channel(channel)

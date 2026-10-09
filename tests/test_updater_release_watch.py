@@ -153,11 +153,37 @@ class ReleaseWatcherTests(unittest.TestCase):
         self.assertEqual(delivered, [{"prev": "21.1.7.117", "took": "24"}])
         self.assertNotIn("prev=", urls[2])
 
+    def test_program_tells_what_it_is_doing_and_nothing_else(self) -> None:
+        harness = _Harness(
+            self,
+            [_quiet(), _quiet()],
+            activity=lambda: {"act": "tray", "run": "1", "user": "вася", "path": "C:/secret"},
+        )
+
+        harness.run()
+
+        for url, _verify in harness.requests:
+            self.assertIn("act=tray", url)
+            self.assertIn("run=1", url)
+            # В вопрос уходят только занятие и «обход включён» — ничего лишнего.
+            self.assertNotIn("user", url)
+            self.assertNotIn("secret", url)
+
+    def test_unknown_activity_is_simply_not_sent(self) -> None:
+        harness = _Harness(self, [_quiet()], activity=lambda: {"act": "", "run": None})
+
+        harness.run()
+
+        self.assertNotIn("act=", harness.requests[0][0])
+        self.assertNotIn("run=", harness.requests[0][0])
+
     def test_broken_helpers_do_not_stop_the_listener(self) -> None:
         def broken():
             raise RuntimeError("сбой")
 
-        harness = _Harness(self, [_quiet(), _news("21.1.7.119")], is_busy=broken, pending_report=broken)
+        harness = _Harness(
+            self, [_quiet(), _news("21.1.7.119")], is_busy=broken, pending_report=broken, activity=broken
+        )
 
         harness.run()
 

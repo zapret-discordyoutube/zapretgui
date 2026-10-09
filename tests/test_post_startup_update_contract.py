@@ -163,7 +163,8 @@ class _Feature:
         self.signalled.append(bool(signalled))
         return dict(self.result)
 
-    def create_release_watcher(self, *, on_release, on_queued):
+    def create_release_watcher(self, *, on_release, on_queued, is_bypass_running=None):
+        self.is_bypass_running = is_bypass_running
         self.on_release = on_release
         self.on_queued = on_queued
         self.watcher = Mock()

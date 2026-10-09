@@ -75,5 +75,41 @@ class BusyReasonTests(unittest.TestCase):
             self.assertEqual(busy.busy_reason(), "strategy_scan")
 
 
+class ActivityTests(unittest.TestCase):
+    def _shown(self, value):
+        from core.runtime import presence
+
+        patcher = patch.object(presence, "_window_shown", value)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        screen = patch.object(busy, "_notification_state", return_value=5)
+        screen.start()
+        self.addCleanup(screen.stop)
+
+    def test_open_window_and_tray_are_told_apart(self) -> None:
+        from core.runtime import presence
+
+        self._shown(None)
+        self.assertEqual(busy.activity(), "")  # окно ещё не показывалось: неизвестно
+
+        presence.note_window_shown(True)
+        self.assertEqual(busy.activity(), busy.ACTIVITY_WINDOW)
+        presence.note_window_shown(False)
+        self.assertEqual(busy.activity(), busy.ACTIVITY_TRAY)
+
+    def test_running_task_is_named_instead_of_the_window(self) -> None:
+        self._shown(True)
+
+        with long_tasks.long_task("blockcheck"):
+            self.assertEqual(busy.activity(), "blockcheck")
+
+    def test_bypass_state_is_told_only_when_it_is_known(self) -> None:
+        from updater import commands
+
+        self.assertEqual(commands._told_activity(lambda: "tray", None), {"act": "tray"})
+        self.assertEqual(commands._told_activity(lambda: "tray", lambda: True), {"act": "tray", "run": "1"})
+        self.assertEqual(commands._told_activity(lambda: "window", lambda: False), {"act": "window", "run": "0"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -317,6 +317,7 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         notify=deps.notify,
         set_status=deps.set_status,
         idle_tasks=idle_tasks,
+        ui_state_store=getattr(deps, "ui_state_store", None),
     )
     request_installation_repair = getattr(deps, "request_installation_repair", None)
     if callable(request_installation_repair):

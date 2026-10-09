@@ -93,11 +93,15 @@ def run_startup_update_check(*, signalled: bool = False) -> dict:
     return check_for_update_sync(signalled=bool(signalled))
 
 
-def create_release_watcher(*, on_release, on_queued):
-    """Слушатель сервера, который ведёт очередь обновлений своего канала."""
+def create_release_watcher(*, on_release, on_queued, is_bypass_running=None):
+    """Слушатель сервера, который ведёт очередь обновлений своего канала.
+
+    ``is_bypass_running`` — включён ли сейчас обход (читается из любого
+    потока): программа называет это серверу вместе со своим занятием.
+    """
     from config.build_info import APP_VERSION, CHANNEL
 
-    from updater.busy import busy_reason
+    from updater.busy import activity, busy_reason
     from updater.release import outcome
     from updater.release.watch import ReleaseWatcher
 
@@ -113,9 +117,17 @@ def create_release_watcher(*, on_release, on_queued):
         on_queued=on_queued,
         is_enabled=is_auto_update_enabled,
         is_busy=lambda: bool(busy_reason()),
+        activity=lambda: _told_activity(activity, is_bypass_running),
         pending_report=outcome.pending_report,
         report_delivered=outcome.report_delivered,
     )
+
+
+def _told_activity(activity, is_bypass_running) -> dict:
+    told = {"act": activity()}
+    if is_bypass_running is not None:
+        told["run"] = "1" if is_bypass_running() else "0"
+    return told
 
 
 def check_installation_integrity(*, deep: bool = False):

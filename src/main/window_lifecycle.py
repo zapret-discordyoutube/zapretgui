@@ -164,6 +164,15 @@ class WindowLifecycleMixin:
             return
         super().showMinimized()
 
+    def _note_window_presence(self) -> None:
+        """Отмечает, видно ли окно: это читают фоновые потоки, не трогая Qt."""
+        try:
+            from core.runtime.presence import note_window_shown
+
+            note_window_shown(bool(self.isVisible()) and not bool(self.isMinimized()))
+        except Exception:
+            pass
+
     def changeEvent(self, event):
         event_type = event.type()
 
@@ -180,6 +189,7 @@ class WindowLifecycleMixin:
                 log(f"Не удалось сбросить состояние ввода при смене активности окна: {e}", "DEBUG")
 
         if event_type == QEvent.Type.WindowStateChange:
+            self._note_window_presence()
             geometry_runtime = self._get_window_geometry_runtime()
             if geometry_runtime is not None:
                 geometry_runtime.on_window_state_change()
@@ -195,6 +205,7 @@ class WindowLifecycleMixin:
         super().changeEvent(event)
 
     def hideEvent(self, event):
+        self._note_window_presence()
         try:
             self.release_input_interaction_states()
         except Exception as e:
@@ -236,6 +247,7 @@ class WindowLifecycleMixin:
     def showEvent(self, event):
         """Первый показ окна."""
         super().showEvent(event)
+        self._note_window_presence()
 
         startup_state = self._get_startup_state()
         if startup_state is not None and not startup_state.ttff_logged:

@@ -57,4 +57,25 @@ def busy_reason() -> str:
     return ""
 
 
-__all__ = ["BUSY_FULLSCREEN", "busy_reason", "fullscreen_app_active"]
+ACTIVITY_WINDOW = "window"
+ACTIVITY_TRAY = "tray"
+
+
+def activity() -> str:
+    """Чем занята программа: дело, которое нельзя обрывать, либо «окно открыто» / «в трее».
+
+    Это слово уходит серверу вместе с вопросом о новой версии: на сайте
+    показан общий счёт, чем заняты программы. Пустая строка — неизвестно.
+    """
+    from core.runtime.presence import window_shown
+
+    reason = busy_reason()
+    if reason:
+        return reason
+    shown = window_shown()
+    if shown is None:
+        return ""
+    return ACTIVITY_WINDOW if shown else ACTIVITY_TRAY
+
+
+__all__ = ["ACTIVITY_TRAY", "ACTIVITY_WINDOW", "BUSY_FULLSCREEN", "activity", "busy_reason", "fullscreen_app_active"]

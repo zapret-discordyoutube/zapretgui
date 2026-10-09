@@ -20,6 +20,9 @@ from __future__ import annotations
 кончилось прошлое обновление (``updater.release.outcome``). Если человек
 занят — игра на весь экран, идёт проверка сети — слушатель говорит об этом
 серверу (``busy=1``), и тот разрешения не выдаёт: оно не пропадёт зря.
+Заодно программа называет, чем занята (``act``: окно открыто, в трее, игра,
+проверка) и включён ли обход (``run``): сервер считает это общим числом,
+как и версии, — адресов и имён в вопросе нет.
 
 Ответ несёт только номер версии и запускает обычную проверку
 (``resolver.lookup_latest_release``): адрес, размер и SHA-256 установщика
@@ -119,6 +122,7 @@ class ReleaseWatcher:
         on_queued: Callable[[str], None] = lambda _version: None,
         is_enabled: Callable[[], bool] = lambda: True,
         is_busy: Callable[[], bool] = lambda: False,
+        activity: Callable[[], dict] = dict,
         pending_report: Callable[[], dict] = dict,
         report_delivered: Callable[[dict], None] = lambda _report: None,
         endpoints: Callable[[], tuple[WaitEndpoint, ...]] = wait_endpoints,
@@ -131,6 +135,7 @@ class ReleaseWatcher:
         self._on_queued = on_queued
         self._is_enabled = is_enabled
         self._is_busy = is_busy
+        self._activity = activity
         self._pending_report = pending_report
         self._report_delivered = report_delivered
         # О какой версии уже сказано в журнале «ждём своей ступени».
@@ -286,6 +291,9 @@ class ReleaseWatcher:
             params["hold"] = str(BUSY_HOLD_SECONDS)
         if busy:
             params["busy"] = "1"
+        told = self._call(self._activity, {})
+        if isinstance(told, dict):
+            params.update({key: str(told[key]) for key in ("act", "run") if told.get(key) not in (None, "")})
         report = self._call(self._pending_report, {})
         report = {str(key): str(value) for key, value in report.items()} if isinstance(report, dict) else {}
         params.update(report)

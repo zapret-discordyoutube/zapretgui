@@ -75,6 +75,7 @@ def install_update_check(
     notify,
     set_status,
     idle_tasks,
+    ui_state_store=None,
 ) -> None:
     update_bridge = _UpdateCheckBridge(QCoreApplication.instance())
     check_token: int | None = None
@@ -431,12 +432,19 @@ def install_update_check(
             watcher = updater_feature.create_release_watcher(
                 on_release=lambda version: update_bridge.release_signalled.emit(str(version or "")),
                 on_queued=lambda version: update_bridge.release_queued.emit(str(version or "")),
+                is_bypass_running=_bypass_probe(),
             )
             watcher.start()
             release_watcher = watcher
         except Exception as exc:
             # Без сервера с очередью программа проверяет обновления сама.
             log(f"Слушатель новых версий не запущен: {exc}", "WARNING")
+
+    def _bypass_probe():
+        """Включён ли обход: снимок состояния читается из любого потока."""
+        if ui_state_store is None:
+            return None
+        return lambda: bool(ui_state_store.snapshot().launch_running)
 
     def _server_queue_reachable() -> bool:
         watcher = release_watcher
