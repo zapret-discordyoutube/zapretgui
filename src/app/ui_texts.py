@@ -3563,6 +3563,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "v{current}  →  v{target}   ·   программа откроется сама",
         "en": "v{current}  →  v{target}   ·   the app will reopen by itself",
     },
+    "update_dialog.restart.compact.title": {
+        "ru": "Обновляем Zapret",
+        "en": "Updating Zapret",
+    },
+    "update_dialog.restart.compact.subtitle_template": {
+        "ru": "Ставим версию {version}",
+        "en": "Installing version {version}",
+    },
     "update_dialog.restart.stage.closing": {
         "ru": "Закрываем старую версию",
         "en": "Closing the old version",

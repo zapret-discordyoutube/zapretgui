@@ -252,6 +252,47 @@ class SplashSpecTests(unittest.TestCase):
         self.assertEqual(hidden.statuses, ("Done", "In progress", "Waiting"))
 
 
+    def test_automatic_update_gets_small_card_in_the_middle_of_the_app(self) -> None:
+        """Обновление без вопроса показывает маленькую карточку, а не окно в пол-экрана."""
+        from PyQt6.QtWidgets import QWidget
+
+        from updater.ui.restart_splash_spec import COMPACT_HEIGHT, COMPACT_WIDTH, build_restart_splash_spec
+
+        host = QWidget()
+        host.setGeometry(200, 100, 1000, 800)
+        host.show()
+        self.addCleanup(host.deleteLater)
+
+        spec = build_restart_splash_spec(
+            host, dialog_widget=None, current_version="1.9", target_version="2.0", language="ru", compact=True
+        )
+
+        self.assertEqual(spec.layout, "compact")
+        self.assertEqual((spec.width, spec.height), (COMPACT_WIDTH, COMPACT_HEIGHT))
+        frame = host.frameGeometry()
+        self.assertEqual(spec.x, frame.x() + (frame.width() - COMPACT_WIDTH) // 2)
+        self.assertEqual(spec.y, frame.y() + (frame.height() - COMPACT_HEIGHT) // 2)
+        self.assertEqual((spec.title, spec.subtitle), ("Обновляем Zapret", "Ставим версию 2.0"))
+        # Этапы и фразы — те же, что у большого окна.
+        self.assertEqual(len(spec.stages), 3)
+        self.assertTrue(spec.jokes)
+        payload = spec.to_payload(logo_path="", shown_path="", ready_path="", log_path="")
+        self.assertEqual(payload["layout"], "compact")
+
+        english = build_restart_splash_spec(
+            host, dialog_widget=None, current_version="1.9", target_version="2.0", language="en", compact=True
+        )
+        self.assertEqual((english.title, english.subtitle), ("Updating Zapret", "Installing version 2.0"))
+
+        # По кнопке «Обновить» окно прежнее.
+        full = build_restart_splash_spec(
+            host, dialog_widget=None, current_version="1.9", target_version="2.0", language="ru"
+        )
+        self.assertEqual(full.layout, "full")
+        self.assertGreaterEqual(full.width, 720)
+        self.assertEqual(_spec().to_payload(logo_path="", shown_path="", ready_path="", log_path="")["layout"], "full")
+
+
 class SplashScriptContractTests(unittest.TestCase):
     """Правила скрипта, которые на Linux можно проверить только по тексту."""
 
@@ -322,6 +363,25 @@ class SplashScriptContractTests(unittest.TestCase):
             script,
         )
 
+    def test_script_draws_small_card_for_compact_layout(self) -> None:
+        script = render_splash_script()
+
+        self.assertIn("$compact = ([string]$spec.layout -eq 'compact')", script)
+        self.assertIn("function Draw-FrameCompact", script)
+        # И окно, и проверочный кадр рисуются через общий выбор вида.
+        self.assertIn("if ($compact) { Draw-FrameCompact $g $width $height } else { Draw-Frame $g $width $height }", script)
+        self.assertEqual(script.count("Draw-Window $"), 2)
+        # Макет карточки рассчитан на те же размеры, что отдаёт программа.
+        from updater.ui.restart_splash_spec import COMPACT_HEIGHT, COMPACT_WIDTH
+
+        self.assertIn(f"$bounds.Width / ({COMPACT_WIDTH}.0 * $screenScale)", script)
+        self.assertIn(f"$bounds.Height / ({COMPACT_HEIGHT}.0 * $screenScale)", script)
+        # Полоса карточки идёт по тому же ходу, что и большая: только вперёд.
+        compact = script[script.index("function Draw-FrameCompact"):script.index("function Draw-Window")]
+        self.assertIn("$S.Fill", compact)
+        # Смена этапа не обрывает фразу: в карточке они сменяются по времени.
+        self.assertIn("if (-not $compact) { Next-Joke }", script)
+
     def test_script_takes_nothing_from_install_folder(self) -> None:
         # Ничего не берёт из каталога установки: он как раз заменяется.
         self.assertNotIn("_internal", SPLASH_SCRIPT_TEMPLATE)
@@ -344,6 +404,28 @@ class PageSplashTests(unittest.TestCase):
         with patch("updater.ui.page.run_update_setting_write"):
             page._request_install_update()
 
+        page._install_service.start.assert_called_once_with("21.1.5.80", splash=spec, start_in_tray=False)
+        # По кнопке «Обновить» — окно на месте окна обновления.
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": False})
+
+    def test_automatic_install_asks_for_small_card(self) -> None:
+        from app.feature_facades.updater import UpdaterFeature
+        from test_update_check_coordinator import UpdateCheckCoordinatorTests
+
+        case = UpdateCheckCoordinatorTests()
+        page = case._page(UpdaterFeature())
+        token = page._updater_feature.begin_update_check(source="manual")
+        page._updater_feature.finish_update_check(dict(case._FOUND), source="manual", token=token)
+        page._apply_check_snapshot(page._updater_feature.current_update_check_snapshot())
+        page._install_service.start.return_value = True
+        spec = _spec(layout="compact")
+        page._build_restart_splash_spec = Mock(return_value=spec)
+        page._host_window_shown = Mock(return_value=True)
+
+        with patch("updater.ui.page.run_update_setting_write"):
+            self.assertTrue(page._start_install(automatic=True))
+
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": True})
         page._install_service.start.assert_called_once_with("21.1.5.80", splash=spec, start_in_tray=False)
 
 

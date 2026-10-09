@@ -112,6 +112,25 @@ class RestartSplashWindowsTests(unittest.TestCase):
             )
             self.assertGreater(snapshot.stat().st_size, 1000, stage)
 
+    def test_snapshot_draws_small_card(self) -> None:
+        """Маленькая карточка автоматического обновления рисуется на каждом этапе."""
+        payload = json.loads(self.spec_path.read_text(encoding="utf-8"))
+        payload.update(layout="compact", width=460, height=190)
+        self.spec_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        for stage in ("prepared", "launched", "succeeded"):
+            snapshot = self.dir / f"compact_{stage}.png"
+            command = build_splash_command(script_path=self.script, spec_path=self.spec_path, state_path=self.state)
+            subprocess.run(
+                list(command) + ["-SnapshotPath", str(snapshot), "-SnapshotState", stage, "-SnapshotAfterMs", "600"],
+                timeout=30,
+                check=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self.assertGreater(snapshot.stat().st_size, 1000, stage)
+            log_text = (self.dir / "splash.log").read_text(encoding="utf-8", errors="replace")
+            self.assertNotIn("Ошибка отрисовки", log_text)
+            self.assertNotIn("Ошибка таймера", log_text)
+
 
 if __name__ == "__main__":
     unittest.main()

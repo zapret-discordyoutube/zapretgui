@@ -151,6 +151,8 @@ if ($null -ne $logo) {
 }
 
 $stages = @($spec.texts.stages)
+# Маленькая карточка: её показывает обновление, которое программа ставит сама.
+$compact = ([string]$spec.layout -eq 'compact')
 $jokes = @($spec.jokes | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
 
 # Изменяемое состояние живёт в таблице: обработчики событий WinForms видят её
@@ -232,7 +234,8 @@ function Set-Stage([int]$stage) {
     $S.Stage = $stage
     $S.StageSince = $now
     if ($stage -ge 2 -and $S.SucceededAt -lt 0) { $S.SucceededAt = $S.StageSince }
-    Next-Joke
+    # В маленькой карточке фразы сменяются только по времени: смена этапа не обрывает чтение.
+    if (-not $compact) { Next-Joke }
 }
 
 function Read-HandoffState {
@@ -931,6 +934,93 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     $fg.Dispose(); $muted.Dispose()
 }
 
+# Маленькая карточка: логотип с заголовком, фраза, тонкая полоса и строка
+# этапа. Числа макета — те же, что у размеров окна в restart_splash_spec.py
+# (460×190 логических пикселей).
+$wrapped = New-Object System.Drawing.StringFormat
+$wrapped.FormatFlags = [System.Drawing.StringFormatFlags]::LineLimit
+$wrapped.Trimming = [System.Drawing.StringTrimming]::EllipsisWord
+
+function Draw-FrameCompact([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $k = [single]($g.DpiX / 96.0 * $M)
+    $now = $S.Clock.Elapsed.TotalSeconds
+    $S.Frames += 1
+
+    $base = $C.Card
+    $S.Base = $base
+    $g.Clear($base)
+    $borderPen = New-Object System.Drawing.Pen((Mix-Color $base $C.Foreground 0.12), [single]1)
+    $g.DrawRectangle($borderPen, 0, 0, $width - 1, $height - 1)
+    $borderPen.Dispose()
+
+    $pad = [single](24 * $k)
+    $top = [single](22 * $k)
+    $logoSide = [single](40 * $k)
+    $inner = [single]($width - 2 * $pad)
+    $fg = New-Object System.Drawing.SolidBrush($C.Foreground)
+    $muted = New-Object System.Drawing.SolidBrush($C.Muted)
+
+    # Логотип, справа от него заголовок и версия — вместе по высоте логотипа.
+    $textLeft = $pad
+    if ($null -ne $logo) {
+        $g.DrawImage($logo, (New-Object System.Drawing.RectangleF($pad, $top, $logoSide, $logoSide)))
+        $textLeft = [single]($pad + $logoSide + 14 * $k)
+    }
+    $titleHeight = $F.CTitle.GetHeight($g)
+    $smallHeight = $F.CSmall.GetHeight($g)
+    $headTop = [single]($top + ($logoSide - $titleHeight - $smallHeight) / 2)
+    $headWidth = [single]($width - $pad - $textLeft)
+    $g.DrawString([string]$spec.texts.title, $F.CTitle, $fg, (New-Object System.Drawing.RectangleF($textLeft, $headTop, $headWidth, ($titleHeight + 2 * $k))), $oneLine)
+    $g.DrawString([string]$spec.texts.subtitle, $F.CSmall, $muted, (New-Object System.Drawing.RectangleF($textLeft, ($headTop + $titleHeight), $headWidth, ($smallHeight + 2 * $k))), $oneLine)
+
+    # Фраза — до двух строк: прежняя тает, новая проявляется.
+    $phraseTop = [single]($top + $logoSide + 18 * $k)
+    $phraseHeight = [single](44 * $k)
+    $swap = Ease-Out (($now - $S.JokeAt) / 0.4)
+    $phraseRect = New-Object System.Drawing.RectangleF($pad, $phraseTop, $inner, $phraseHeight)
+    if ($swap -lt 0.5 -and $S.PrevJoke) {
+        $b = New-Object System.Drawing.SolidBrush((With-Alpha $C.Foreground (1 - 2 * $swap)))
+        $g.DrawString($S.PrevJoke, $F.CBody, $b, $phraseRect, $wrapped)
+        $b.Dispose()
+    } elseif ($S.Joke) {
+        $shown = if ($S.PrevJoke) { 2 * $swap - 1 } else { 1.0 }
+        $b = New-Object System.Drawing.SolidBrush((With-Alpha $C.Foreground $shown))
+        $g.DrawString($S.Joke, $F.CBody, $b, $phraseRect, $wrapped)
+        $b.Dispose()
+    }
+
+    # Тонкая полоса хода: идёт только вперёд (см. Target-Fill).
+    $barTop = [single]($phraseTop + $phraseHeight + 14 * $k)
+    $barHeight = [single]([Math]::Max(3.0, 4.0 * $k))
+    $share = [Math]::Max(0.0, [Math]::Min(1.0, $S.Fill))
+    $trackPath = New-RoundedPath (New-Object System.Drawing.RectangleF($pad, $barTop, $inner, $barHeight)) ([single]($barHeight / 2))
+    $trackBrush = New-Object System.Drawing.SolidBrush($C.Track)
+    $g.FillPath($trackBrush, $trackPath)
+    $trackBrush.Dispose(); $trackPath.Dispose()
+    $fillWidth = [single]([Math]::Max([double]$barHeight, $inner * $share))
+    $fillPath = New-RoundedPath (New-Object System.Drawing.RectangleF($pad, $barTop, $fillWidth, $barHeight)) ([single]($barHeight / 2))
+    $fillBrush = New-Object System.Drawing.SolidBrush($C.Accent)
+    $g.FillPath($fillBrush, $fillPath)
+    $fillBrush.Dispose(); $fillPath.Dispose()
+
+    # Строка этапа; пока копируются файлы — ещё и их счёт.
+    $stageIndex = [int][Math]::Max(0.0, [Math]::Min([double]($stages.Count - 1), [double]$S.Stage))
+    $status = if ($stages.Count -gt 0) { [string]$stages[$stageIndex] } else { '' }
+    if ($S.Stage -eq 1 -and $S.InstallStarted -and -not $S.InstallSucceeded -and $S.Expected -gt 0) {
+        $done = [int][Math]::Min([double]$S.FilesDone, [double]$S.Expected)
+        $status += '  ·  ' + ([string]$spec.texts.files_template).Replace('{done}', [string]$done).Replace('{total}', [string]$S.Expected)
+    }
+    $g.DrawString($status, $F.CSmall, $muted, (New-Object System.Drawing.RectangleF($pad, ($barTop + $barHeight + 10 * $k), $inner, ($smallHeight + 2 * $k))), $oneLine)
+    $fg.Dispose(); $muted.Dispose()
+}
+
+function Draw-Window([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
+    if ($compact) { Draw-FrameCompact $g $width $height } else { Draw-Frame $g $width $height }
+}
+
 $form = New-Object System.Windows.Forms.Form
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
@@ -938,7 +1028,7 @@ $form.ShowInTaskbar = $true
 # Поверх всех — только пока старая программа на экране (см. Watch-OldApp).
 $form.TopMost = (-not $S.Snapshot)
 $form.Text = [string]$spec.texts.window_title
-$form.BackColor = $C.Background
+$form.BackColor = if ($compact) { $C.Card } else { $C.Background }
 # Прозрачность — только украшение: где её нет (удалённый сеанс, служба),
 # окно просто появляется сразу, а закрытие работает как обычно.
 function Set-FormOpacity([double]$value) {
@@ -963,8 +1053,10 @@ foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
 if (-not $visible -or $bounds.Width -lt 200 -or $bounds.Height -lt 150) {
     # Место окна обновления за пределами экранов: по центру основного.
     $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $w = [int][Math]::Min([Math]::Max([double]$bounds.Width, 720.0), $area.Width - 40.0)
-    $h = [int][Math]::Min([Math]::Max([double]$bounds.Height, 460.0), $area.Height - 40.0)
+    $minWidth = if ($compact) { 460.0 } else { 720.0 }
+    $minHeight = if ($compact) { 190.0 } else { 460.0 }
+    $w = [int][Math]::Min([Math]::Max([double]$bounds.Width, $minWidth), $area.Width - 40.0)
+    $h = [int][Math]::Min([Math]::Max([double]$bounds.Height, $minHeight), $area.Height - 40.0)
     $bounds = New-Object System.Drawing.Rectangle(($area.X + ($area.Width - $w) / 2), ($area.Y + ($area.Height - $h) / 2), $w, $h)
 }
 $form.Bounds = $bounds
@@ -978,6 +1070,10 @@ try {
     $probe.Dispose()
 } catch { }
 $M = [Math]::Max(0.6, [Math]::Min(1.4, [Math]::Min($bounds.Width / (1040.0 * $screenScale), $bounds.Height / (660.0 * $screenScale))))
+if ($compact) {
+    # Маленькая карточка рассчитана на 460×190 и масштабируется так же.
+    $M = [Math]::Max(0.6, [Math]::Min(2.5, [Math]::Min($bounds.Width / (460.0 * $screenScale), $bounds.Height / (190.0 * $screenScale))))
+}
 $fontFamily = [string]$spec.font_family
 if ([string]::IsNullOrWhiteSpace($fontFamily)) { $fontFamily = 'Segoe UI' }
 # Полужирное начертание Windows 11 — отдельное семейство; где его нет, берётся жирное.
@@ -998,6 +1094,10 @@ $F = @{
     Stage  = New-Object System.Drawing.Font($fontFamily, [single](12 * $M))
     StageB = New-Object System.Drawing.Font($boldFamily, [single](12 * $M), $boldStyle)
     Small  = New-Object System.Drawing.Font($fontFamily, [single](9 * $M))
+    # Маленькая карточка.
+    CTitle = New-Object System.Drawing.Font($boldFamily, [single](14 * $M), $boldStyle)
+    CBody  = New-Object System.Drawing.Font($fontFamily, [single](10.5 * $M))
+    CSmall = New-Object System.Drawing.Font($fontFamily, [single](9 * $M))
 }
 try {
     $buffered = [System.Windows.Forms.Control].GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'NonPublic,Instance')
@@ -1010,7 +1110,7 @@ if ($null -ne $logo) {
 $form.Add_Paint({
     param($sender, $e)
     try {
-        Draw-Frame $e.Graphics $form.ClientSize.Width $form.ClientSize.Height
+        Draw-Window $e.Graphics $form.ClientSize.Width $form.ClientSize.Height
     } catch {
         $S.TickErrors += 1
         if ($S.TickErrors -le 5) { Write-Line "Ошибка отрисовки: $($_.Exception.Message)" }
@@ -1048,7 +1148,9 @@ $timer.Add_Tick({
     try {
         $now = $S.Clock.Elapsed.TotalSeconds
         if ($now - $S.LastPoll -ge 0.25) { $S.LastPoll = $now; Poll-State }
-        if ($now - $S.JokeAt -ge 2.8) { Next-Joke }
+        # В маленькой карточке фраза — главное на экране: ей дают дочитаться.
+        $jokeEvery = if ($compact) { 4.2 } else { 2.8 }
+        if ($now - $S.JokeAt -ge $jokeEvery) { Next-Joke }
         $dt = [Math]::Max(0.0, [Math]::Min(0.1, $now - $S.LastTick))
         $S.LastTick = $now
         # Сглаживание по времени, а не по кадрам, и только вперёд: полоса
@@ -1092,7 +1194,7 @@ $timer.Add_Tick({
             $timer.Stop()
             $bitmap = New-Object System.Drawing.Bitmap($form.ClientSize.Width, $form.ClientSize.Height)
             $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-            Draw-Frame $graphics $bitmap.Width $bitmap.Height
+            Draw-Window $graphics $bitmap.Width $bitmap.Height
             $graphics.Dispose()
             $bitmap.Save($SnapshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
             $bitmap.Dispose()

@@ -61,6 +61,10 @@ class RestartSplashSpec:
     colors: dict = field(default_factory=dict)
     font_family: str = "Segoe UI"
     logo_png: bytes = b""
+    # «full» — окно на месте окна обновления: этапы карточками, кольцо хода.
+    # «compact» — маленькая карточка: логотип, фраза, полоса и строка этапа.
+    # Её показывает обновление, которое программа ставит сама, без вопроса.
+    layout: str = "full"
 
     def to_payload(
         self,
@@ -89,6 +93,7 @@ class RestartSplashSpec:
             "jokes": [str(item) for item in self.jokes if str(item or "").strip()],
             "colors": {str(key): str(value) for key, value in dict(self.colors).items()},
             "font_family": str(self.font_family or "Segoe UI"),
+            "layout": "compact" if self.layout == "compact" else "full",
             "logo_path": str(logo_path),
             "shown_path": str(shown_path),
             "ready_path": str(ready_path),

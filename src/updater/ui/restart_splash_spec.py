@@ -27,6 +27,10 @@ _DARK_CARD = QColor("#323232")
 _LIGHT_PAGE = QColor("#f9f9f9")
 _LIGHT_CARD = QColor("#ffffff")
 _LOGO_SIDE = 128
+# Маленькая карточка автоматического обновления (логические пиксели). Высота
+# рассчитана на две строки фразы; скрипт окна рисует макет в этих же числах.
+COMPACT_WIDTH = 460
+COMPACT_HEIGHT = 190
 
 
 def _solid(value: str, over: QColor, fallback: str) -> str:
@@ -111,6 +115,17 @@ def _place(dialog_widget: QWidget | None, host: QWidget) -> QRect:
     )
 
 
+def _place_compact(host: QWidget) -> QRect:
+    """Маленькая карточка — по центру окна программы."""
+    frame = host.frameGeometry()
+    return QRect(
+        frame.x() + (frame.width() - COMPACT_WIDTH) // 2,
+        frame.y() + (frame.height() - COMPACT_HEIGHT) // 2,
+        COMPACT_WIDTH,
+        COMPACT_HEIGHT,
+    )
+
+
 def build_restart_splash_spec(
     host: QWidget,
     *,
@@ -118,24 +133,34 @@ def build_restart_splash_spec(
     current_version: str,
     target_version: str,
     language: str,
+    compact: bool = False,
 ) -> RestartSplashSpec:
+    """``compact`` — программа ставит обновление сама: вместо окна на месте
+    окна обновления показывается маленькая карточка по центру программы."""
     from ui.theme import get_theme_tokens
 
     def t(key: str, default: str) -> str:
         return plans.update_flow_text(language, f"restart.{key}", default)
 
-    rect = _place(dialog_widget, host)
+    rect = _place_compact(host) if compact else _place(dialog_widget, host)
     screen = host.screen() or QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
     x, y, width, height = to_physical_rect(rect, screen=screen)
+    if compact:
+        title = t("compact.title", "Обновляем Zapret")
+        subtitle = t("compact.subtitle_template", "Ставим версию {version}").format(version=target_version)
+    else:
+        title = t("title_template", "Обновляем Zapret до v{version}").format(version=target_version)
+        subtitle = t("subtitle_template", "v{current}  →  v{target}   ·   программа откроется сама").format(
+            current=current_version, target=target_version
+        )
     return RestartSplashSpec(
         x=x,
         y=y,
         width=width,
         height=height,
-        title=t("title_template", "Обновляем Zapret до v{version}").format(version=target_version),
-        subtitle=t("subtitle_template", "v{current}  →  v{target}   ·   программа откроется сама").format(
-            current=current_version, target=target_version
-        ),
+        layout="compact" if compact else "full",
+        title=title,
+        subtitle=subtitle,
         stages=(
             t("stage.closing", "Закрываем старую версию"),
             t("stage.installing_template", "Устанавливаем v{version}").format(version=target_version),
@@ -157,4 +182,4 @@ def build_restart_splash_spec(
     )
 
 
-__all__ = ["build_restart_splash_spec", "splash_colors", "to_physical_rect"]
+__all__ = ["COMPACT_HEIGHT", "COMPACT_WIDTH", "build_restart_splash_spec", "splash_colors", "to_physical_rect"]

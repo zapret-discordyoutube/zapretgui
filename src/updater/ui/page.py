@@ -353,7 +353,9 @@ class ServersPage(BasePage):
         if self._check_service.is_busy:
             return False
         in_tray = automatic and not self._host_window_shown()
-        splash = None if in_tray else self._build_restart_splash_spec(offer)
+        # Сама, без вопроса — маленькая карточка; по кнопке «Обновить» — окно
+        # на месте окна обновления.
+        splash = None if in_tray else self._build_restart_splash_spec(offer, compact=automatic)
         if not self._install_service.start(offer.version, splash=splash, start_in_tray=in_tray):
             return False
         # Новая версия покажет «Что нового» из сохранённого текста, без сети.
@@ -380,7 +382,7 @@ class ServersPage(BasePage):
         self._flow.start_download()
         return True
 
-    def _build_restart_splash_spec(self, offer):
+    def _build_restart_splash_spec(self, offer, *, compact: bool = False):
         """Окно-продолжение встанет на место окна обновления, пока версия меняется."""
         try:
             from updater.ui.restart_splash_spec import build_restart_splash_spec
@@ -392,6 +394,7 @@ class ServersPage(BasePage):
                 current_version=offer.current_version,
                 target_version=offer.version,
                 language=self._ui_language,
+                compact=compact,
             )
         except Exception as exc:
             # Без окна-продолжения обновление всё равно пройдёт.
