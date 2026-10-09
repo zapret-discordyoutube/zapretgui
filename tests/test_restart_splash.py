@@ -457,6 +457,17 @@ class PageSplashTests(unittest.TestCase):
         self.assertIsNotNone(page._install_service.start.call_args.kwargs["splash"])
         self.assertTrue(page._install_service.start.call_args.kwargs["start_in_tray"])
 
+    def test_update_from_tray_ends_calmly_not_as_cancelled(self) -> None:
+        script = render_splash_script()
+
+        gone = script[script.index("# Запись исчезла."):script.index("# Запись исчезла.") + 800]
+        # Новая версия в трее окна не показывает и убирает запись за собой:
+        # после успешной установки это конец обновления, а не отмена.
+        self.assertIn("if ($S.InstallSucceeded) {", gone)
+        self.assertIn("Start-Closing $false 'новая версия открылась и убрала запись'", gone)
+        self.assertIn("Start-Closing $true 'обновление отменено'", gone)
+        self.assertLess(gone.index("$S.InstallSucceeded"), gone.index("обновление отменено"))
+
     def test_small_card_is_rounded_and_alive(self) -> None:
         script = render_splash_script()
 
