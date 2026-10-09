@@ -6,6 +6,7 @@ from pathlib import Path
 from .proxy_domains import (
     get_dns_profiles,
     get_service_domain_ip_rows,
+    service_has_proxy_profiles,
 )
 from .ipv6_detection import is_ipv6_address, is_ipv6_available
 from .adobe_domains import ADOBE_DOMAINS
@@ -617,7 +618,7 @@ class HostsManager:
             return False
 
         # Посредник, заблокированный провайдером, не открыл бы сервис, а сломал его.
-        dead = unreachable_relays(selected_rows)
+        dead = unreachable_relays(self._new_relay_rows(service_dns))
         if dead:
             self.set_status(
                 f"Сервер-посредник {', '.join(dead)} не отвечает из вашей сети — похоже, его блокирует провайдер. "
@@ -627,6 +628,30 @@ class HostsManager:
             return False
 
         return self.apply_domain_ip_rows(selected_rows)
+
+    def _new_relay_rows(self, service_dns: dict[str, str]) -> list[tuple[str, str]]:
+        """Строки, по которым стоит проверить посредник перед записью.
+
+        Берутся только сервисы с DNS-профилем: у сервисов «Напрямую» в hosts стоит
+        настоящий адрес сайта, а он в России как раз закрыт и без обхода не
+        отвечает — посредником его считать нельзя. Адрес, который уже записан в
+        hosts, не проверяется: иначе молчащий посредник запретил бы любую правку,
+        в том числе выключение его же сервисов.
+        """
+        proxy_selection = {
+            name: profile
+            for name, profile in (service_dns or {}).items()
+            if isinstance(name, str) and service_has_proxy_profiles(name)
+        }
+        if not proxy_selection:
+            return []
+        rows, _requested = _build_service_selection_rows(proxy_selection)
+        content = safe_read_hosts_file()
+        written = {
+            str(ip).strip().casefold()
+            for _domain, ip in _iter_managed_hosts_block_rows((content or "").splitlines(keepends=True))
+        }
+        return [(domain, ip) for domain, ip in rows if str(ip).strip().casefold() not in written]
 
     def refresh_applied_service_selection(
         self,
