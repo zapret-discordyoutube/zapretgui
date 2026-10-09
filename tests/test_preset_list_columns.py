@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem
+from PyQt6.QtTest import QTest
 
 from ui.presets_menu.common import (
     PRESET_COLUMN_MAX_COUNT,
@@ -203,12 +204,37 @@ class PresetListColumnsTests(unittest.TestCase):
         self.delegate._emit_pending_activation()
         self.assertEqual(self.actions, [("activate", "a2.txt")])
 
+    def _double_click(self, row: int) -> None:
+        """Те же события, что присылает система: щелчок, второе нажатие, отпускание."""
+        viewport, pos = self.view.viewport(), self._rect(row).center()
+        QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=pos)
+        QTest.mouseDClick(viewport, Qt.MouseButton.LeftButton, pos=pos)
+        QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=pos)
+
     def test_double_click_opens_the_preset_without_activating_it(self) -> None:
+        # Второе нажатие приходит отдельным событием, а не вторым щелчком.
         self._show(WIDE)
-        self._click(2)
-        self._click(2)
+        self._double_click(2)
+        QApplication.processEvents()
         self.assertEqual(self.actions, [("open", "a2.txt")])
         self.assertFalse(self.delegate._activation_timer.isActive())
+
+    def test_single_click_waits_the_whole_system_double_click_time(self) -> None:
+        self._show(WIDE)
+        self._click(2)
+        wait = self.delegate._activation_timer.remainingTime()
+        self.delegate._activation_timer.stop()
+        # Иначе неторопливый двойной щелчок успевал включить пресет, и
+        # страница открывалась только с третьего раза.
+        self.assertGreaterEqual(wait, QApplication.doubleClickInterval() - 5)
+
+    def test_click_right_after_a_double_click_is_a_new_click(self) -> None:
+        self._show(WIDE)
+        self._double_click(2)
+        QTest.mouseClick(self.view.viewport(), Qt.MouseButton.LeftButton, pos=self._rect(3).center())
+        self.delegate._activation_timer.stop()
+        self.delegate._emit_pending_activation()
+        self.assertEqual(self.actions, [("open", "a2.txt"), ("activate", "a3.txt")])
 
     def test_shift_click_opens_the_preset_without_activating_it(self) -> None:
         self._show(WIDE)

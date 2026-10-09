@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QEvent, QModelIndex, QRect, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QEvent, QModelIndex, QRect, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFontMetrics, QHelpEvent, QLinearGradient, QMouseEvent, QPainter, QPen, QTransform
 from PyQt6.QtWidgets import QApplication, QListView, QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
@@ -57,8 +57,9 @@ class PresetListDelegate(QStyledItemDelegate):
 
     _PENDING_SHAKE_ROTATIONS = (0, -8, 8, -6, 6, -4, 4, -2, 0)
     _PENDING_SHAKE_INTERVAL_MS = 50
-    # Сколько щелчок ждёт второго, прежде чем включить пресет.
-    _DOUBLE_CLICK_WAIT_MS = 300
+    # Запас к системному времени двойного щелчка: одиночный щелчок включает
+    # пресет только когда второй уже точно не придёт.
+    _DOUBLE_CLICK_MARGIN_MS = 30
 
     def __init__(self, view: QListView, *, language_scope: str = "winws2", help_name_role: str = "name"):
         super().__init__(view)
@@ -79,6 +80,8 @@ class PresetListDelegate(QStyledItemDelegate):
         self._pending_shake_timer = QTimer(self)
         self._pending_shake_timer.timeout.connect(self._advance_pending_shake)
         self._pending_activation = ""
+        self._press_timer = QElapsedTimer()
+        self._skip_release = False
         self._activation_timer = QTimer(self)
         self._activation_timer.setSingleShot(True)
         self._activation_timer.timeout.connect(self._emit_pending_activation)
@@ -244,19 +247,41 @@ class PresetListDelegate(QStyledItemDelegate):
 
         if kind != "preset":
             return False
-        if event.type() != QEvent.Type.MouseButtonRelease:
+        if not isinstance(event, QMouseEvent) or event.button() != Qt.MouseButton.LeftButton:
             return False
-        if not isinstance(event, QMouseEvent):
+        event_type = event.type()
+        if event_type == QEvent.Type.MouseButtonPress:
+            self._skip_release = False
+            self._press_timer.start()
             return False
-        if event.button() != Qt.MouseButton.LeftButton:
+        if event_type not in (QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick):
             return False
 
         item_id = str(index.data(PresetListModel.FileNameRole) or "")
         if not item_id:
             return False
 
-        set_current_index_if_changed(self._view, index)
         action = self._action_at(option.rect, event.position().toPoint())
+        if event_type == QEvent.Type.MouseButtonDblClick:
+            # Второе нажатие двойного щелчка система присылает отдельным
+            # событием. По нему и открываем страницу пресета: посмотреть
+            # текст — не то же самое, что запустить.
+            self._skip_release = False
+            if action:
+                return False
+            self._skip_release = True
+            self._cancel_pending_activation()
+            self._clear_pending_destructive(update=False)
+            set_current_index_if_changed(self._view, index)
+            self.action_triggered.emit("open", item_id)
+            return True
+
+        if self._skip_release:
+            # Отпускание кнопки после двойного щелчка — уже не новый щелчок.
+            self._skip_release = False
+            return True
+
+        set_current_index_if_changed(self._view, index)
 
         if action:
             self._cancel_pending_activation()
@@ -264,18 +289,19 @@ class PresetListDelegate(QStyledItemDelegate):
             return True
 
         self._clear_pending_destructive(update=False)
-        second_click = self._activation_timer.isActive() and self._pending_activation == item_id
-        if second_click or event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            # Двойной щелчок и Shift+щелчок открывают страницу пресета и не
-            # включают его: посмотреть текст — не то же самое, что запустить.
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            # Shift+щелчок открывает страницу пресета и не включает его.
             self._cancel_pending_activation()
             self.action_triggered.emit("open", item_id)
             return True
 
         # Обычный щелчок включает пресет не сразу: сначала ждём, не придёт ли
-        # второй, иначе двойной щелчок заодно перезапускал бы обход.
+        # второй, иначе двойной щелчок заодно перезапускал бы обход. Система
+        # отсчитывает двойной щелчок от первого нажатия — ждём столько же.
         self._pending_activation = item_id
-        self._activation_timer.start(min(self._DOUBLE_CLICK_WAIT_MS, QApplication.doubleClickInterval()))
+        since_press = self._press_timer.elapsed() if self._press_timer.isValid() else 0
+        wait = QApplication.doubleClickInterval() - since_press + self._DOUBLE_CLICK_MARGIN_MS
+        self._activation_timer.start(max(self._DOUBLE_CLICK_MARGIN_MS, wait))
         return True
 
     def _cancel_pending_activation(self) -> None:
