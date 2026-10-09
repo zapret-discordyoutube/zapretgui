@@ -85,8 +85,11 @@ def _news(version: str) -> _Response:
     return _Response({"channel": "dev", "version": version, "changed": True})
 
 
-def _queued(version: str) -> _Response:
-    return _Response({"channel": "dev", "version": version, "changed": False, "queued": True})
+def _queued(version: str, ticket: int = 0) -> _Response:
+    payload = {"channel": "dev", "version": version, "changed": False, "queued": True}
+    if ticket:
+        payload["ticket"] = ticket
+    return _Response(payload)
 
 
 class ReleaseWatcherTests(unittest.TestCase):
@@ -130,6 +133,41 @@ class ReleaseWatcherTests(unittest.TestCase):
         self.assertEqual(harness.watcher.queued_version, "")
         # В очереди программа по-прежнему спрашивает про свою версию.
         self.assertIn("known=21.1.7.118", harness.requests[2][0])
+
+    def test_queue_ticket_is_kept_and_named_in_next_questions(self) -> None:
+        harness = _Harness(
+            self,
+            [_queued("21.1.7.119", ticket=1791570000), _queued("21.1.7.119", ticket=1791579999), _news("21.1.7.119"), _quiet("21.1.7.119")],
+        )
+
+        harness.run()
+
+        urls = [url for url, _verify in harness.requests]
+        self.assertNotIn("ticket=", urls[0])
+        # Талон — время первой постановки: программа держится за него и не
+        # берёт новый, который сервер назвал позже.
+        self.assertIn("ticket=1791570000", urls[1])
+        self.assertIn("ticket=1791570000", urls[2])
+        # Разрешение получено: талон больше не нужен.
+        self.assertNotIn("ticket=", urls[3])
+
+    def test_ticket_of_one_version_is_not_used_for_the_next(self) -> None:
+        harness = _Harness(
+            self,
+            [_queued("21.1.7.119", ticket=1791570000), _queued("21.1.7.120", ticket=1791571111), _quiet()],
+        )
+
+        harness.run()
+
+        self.assertIn("ticket=1791571111", harness.requests[2][0])
+        self.assertEqual(harness.queued, ["21.1.7.119", "21.1.7.120"])
+
+    def test_garbage_ticket_from_server_is_ignored(self) -> None:
+        harness = _Harness(self, [_Response({"version": "21.1.7.119", "changed": False, "queued": True, "ticket": "мусор"}), _quiet()])
+
+        harness.run()
+
+        self.assertNotIn("ticket=", harness.requests[1][0])
 
     def test_watcher_tells_whether_the_server_queue_is_reachable(self) -> None:
         harness = _Harness(self, [_quiet()])

@@ -9,8 +9,10 @@ from __future__ import annotations
 Сигнал — это ещё и разрешение. Пользователей у проекта около миллиона, и если
 бы все программы пошли за установщиком разом, сервер встал бы. Поэтому
 очередь на скачивание ведёт сервер: «можно обновляться» он говорит программам
-по одной, с заданной скоростью, а остальным отвечает «версия есть, вы в
-очереди» (``queued``). Сама программа без этого разрешения ничего не ставит.
+в меру своего канала, а остальным отвечает «версия есть, вы в очереди»
+(``queued``). Сама программа без этого разрешения ничего не ставит. Место в
+очереди не теряется: сервер выдаёт «талон» (время постановки), и программа
+называет его в следующих вопросах.
 
 Ответ несёт только номер версии и запускает обычную проверку
 (``resolver.lookup_latest_release``): адрес, размер и SHA-256 установщика
@@ -124,6 +126,8 @@ class ReleaseWatcher:
         self._reachable: bool | None = None
         self._probed = threading.Event()
         self._queued_version = ""
+        # Талон очереди: время, когда сервер поставил программу в очередь.
+        self._ticket = 0
 
     @property
     def known_version(self) -> str:
@@ -253,6 +257,10 @@ class ReleaseWatcher:
         params = {"channel": self._channel, "known": self._known}
         if probe:
             params["hold"] = "0"
+        if self._ticket:
+            # С талоном программа стоит по времени первой постановки, а не
+            # уходит в конец очереди при каждом новом вопросе.
+            params["ticket"] = str(self._ticket)
         response = session.get(
             f"{endpoint.url}?{urlencode(params)}",
             timeout=(CONNECT_TIMEOUT_SECONDS, PROBE_READ_TIMEOUT_SECONDS if probe else READ_TIMEOUT_SECONDS),
@@ -285,13 +293,27 @@ class ReleaseWatcher:
             # об одной версии разрешение приходит один раз.
             self._known = version
             self._queued_version = ""
+            self._ticket = 0
             log(f"Сервер разрешил обновиться до v{version}", UPDATE_LOG_LEVEL)
             self._notify(self._on_release, version)
             return True
         if answer.get("queued"):
             if self._queued_version != version:
+                # Очередь у каждой версии своя: талон прежней не годится.
+                self._ticket = 0
+            if not self._ticket:
+                try:
+                    self._ticket = max(int(answer.get("ticket") or 0), 0)
+                except (TypeError, ValueError):
+                    self._ticket = 0
+            if self._queued_version != version:
                 self._queued_version = version
-                log(f"Вышла версия v{version}: ждём очереди на скачивание", UPDATE_LOG_LEVEL)
+                try:
+                    wait = max(int(answer.get("eta") or 0), 0)
+                except (TypeError, ValueError):
+                    wait = 0
+                about = f", примерно {max(wait // 60, 1)} мин" if wait else ""
+                log(f"Вышла версия v{version}: ждём очереди на скачивание{about}", UPDATE_LOG_LEVEL)
                 self._notify(self._on_queued, version)
         return False
 
