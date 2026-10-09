@@ -983,12 +983,16 @@ function Draw-FrameCompact([System.Drawing.Graphics]$g, [int]$width, [int]$heigh
     $base = $C.Card
     $S.Base = $base
     $g.Clear($base)
-    $borderPen = New-Object System.Drawing.Pen((Mix-Color $base $C.Foreground 0.12), [single]1)
-    $g.DrawRectangle($borderPen, 0, 0, $width - 1, $height - 1)
-    $borderPen.Dispose()
+    # Тонкая кромка по скруглённому краю карточки (сам край режет $form.Region).
+    $borderPen = New-Object System.Drawing.Pen((Mix-Color $base $C.Foreground 0.14), [single]1)
+    $edge = New-RoundedPath (New-Object System.Drawing.RectangleF(0.5, 0.5, ($width - 1.5), ($height - 1.5))) ([single]$S.Corner)
+    $g.DrawPath($borderPen, $edge)
+    $borderPen.Dispose(); $edge.Dispose()
 
     $pad = [single](24 * $k)
-    $top = [single](22 * $k)
+    # Карточка живая: содержимое едва заметно покачивается, как на волне.
+    $sway = [single](1.4 * $k * [Math]::Sin($now * 1.5))
+    $top = [single](22 * $k + $sway)
     $logoSide = [single](40 * $k)
     $inner = [single]($width - 2 * $pad)
     $fg = New-Object System.Drawing.SolidBrush($C.Foreground)
@@ -997,7 +1001,15 @@ function Draw-FrameCompact([System.Drawing.Graphics]$g, [int]$width, [int]$heigh
     # Логотип, справа от него заголовок и версия — вместе по высоте логотипа.
     $textLeft = $pad
     if ($null -ne $logo) {
-        $g.DrawImage($logo, (New-Object System.Drawing.RectangleF($pad, $top, $logoSide, $logoSide)))
+        # Логотип-вертушка, как в большом окне: угол копит таймер ($S.Spin) —
+        # спокойно всегда, быстрее, пока полоса растёт. Плюс лёгкое «дыхание».
+        $breath = [single](1 + 0.03 * [Math]::Sin($now * 2.2))
+        $side = [single]($logoSide * $breath)
+        $state = $g.Save()
+        $g.TranslateTransform(($pad + $logoSide / 2), ($top + $logoSide / 2))
+        $g.RotateTransform([single]$S.Spin)
+        $g.DrawImage($logo, (New-Object System.Drawing.RectangleF((-$side / 2), (-$side / 2), $side, $side)))
+        $g.Restore($state)
         $textLeft = [single]($pad + $logoSide + 14 * $k)
     }
     $titleHeight = $F.CTitle.GetHeight($g)
@@ -1035,7 +1047,39 @@ function Draw-FrameCompact([System.Drawing.Graphics]$g, [int]$width, [int]$heigh
     $fillPath = New-RoundedPath (New-Object System.Drawing.RectangleF($pad, $barTop, $fillWidth, $barHeight)) ([single]($barHeight / 2))
     $fillBrush = New-Object System.Drawing.SolidBrush($C.Accent)
     $g.FillPath($fillBrush, $fillPath)
-    $fillBrush.Dispose(); $fillPath.Dispose()
+    $fillBrush.Dispose()
+    # Движение полосы видно и при стоящих процентах: по залитой части раз за
+    # разом проходит блик с разгоном и торможением, а по непройденной бежит
+    # неяркий огонёк — работа идёт.
+    $glintWidth = [single]([Math]::Max(18.0 * $k, $fillWidth * 0.35))
+    $glintAt = Ease-InOut (($now % 1.7) / 1.7)
+    $glintLeft = [single]($pad - $glintWidth + ($fillWidth + $glintWidth) * $glintAt)
+    $clip = $g.Clip
+    $g.SetClip($fillPath)
+    $glintBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+        (New-Object System.Drawing.RectangleF(($glintLeft - 1), $barTop, ($glintWidth + 2), $barHeight)),
+        (With-Alpha ([System.Drawing.Color]::White) 0.0), (With-Alpha ([System.Drawing.Color]::White) 0.55),
+        [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
+    $glintBrush.SetBlendTriangularShape([single]0.5)
+    $g.FillRectangle($glintBrush, $glintLeft, $barTop, $glintWidth, $barHeight)
+    $glintBrush.Dispose()
+    $g.Clip = $clip
+    $fillPath.Dispose()
+    $rest = [single]($inner - $fillWidth)
+    if ($rest -gt 24 * $k -and -not $S.Closing) {
+        $scoutWidth = [single](14 * $k)
+        $scoutAt = Ease-InOut ((($now + 0.6) % 2.2) / 2.2)
+        $scoutLeft = [single]($pad + $fillWidth + ($rest - $scoutWidth) * $scoutAt)
+        $scoutPath = New-RoundedPath (New-Object System.Drawing.RectangleF($scoutLeft, $barTop, $scoutWidth, $barHeight)) ([single]($barHeight / 2))
+        $scoutBrush = New-Object System.Drawing.SolidBrush((With-Alpha $C.Accent (0.5 * [Math]::Sin([Math]::PI * $scoutAt))))
+        $g.FillPath($scoutBrush, $scoutPath)
+        $scoutBrush.Dispose(); $scoutPath.Dispose()
+    }
+    # Светлая бусина на переднем крае полосы слегка пульсирует.
+    $beadSize = [single]($barHeight * (1.9 + 0.35 * [Math]::Sin($now * 4.0)))
+    $beadBrush = New-Object System.Drawing.SolidBrush((Mix-Color $C.Accent ([System.Drawing.Color]::White) 0.45))
+    $g.FillEllipse($beadBrush, ($pad + $fillWidth - $beadSize / 2), ($barTop + $barHeight / 2 - $beadSize / 2), $beadSize, $beadSize)
+    $beadBrush.Dispose()
 
     # Строка этапа; пока копируются файлы — ещё и их счёт.
     $stageIndex = [int][Math]::Max(0.0, [Math]::Min([double]($stages.Count - 1), [double]$S.Stage))
@@ -1120,6 +1164,18 @@ $M = [Math]::Max(0.6, [Math]::Min(1.4, [Math]::Min($bounds.Width / (1040.0 * $sc
 if ($compact) {
     # Маленькая карточка рассчитана на 460×190 и масштабируется так же.
     $M = [Math]::Max(0.6, [Math]::Min(2.5, [Math]::Min($bounds.Width / (460.0 * $screenScale), $bounds.Height / (190.0 * $screenScale))))
+}
+# Скруглённые углы. Windows 11 скругляет окно сама (см. Add_Shown); в
+# Windows 10 такого нет, и окно выходило с прямыми углами — там край режет
+# область окна той же формы.
+$S.Corner = [double](10.0 * $screenScale * $(if ($compact) { $M } else { 1.0 }))
+$S.RoundedBySystem = ([Environment]::OSVersion.Version.Build -ge 22000)
+if (-not $S.RoundedBySystem -and -not $S.Snapshot) {
+    try {
+        $shape = New-RoundedPath (New-Object System.Drawing.RectangleF(0, 0, $bounds.Width, $bounds.Height)) ([single]$S.Corner)
+        $form.Region = New-Object System.Drawing.Region($shape)
+        $shape.Dispose()
+    } catch { Write-Line "Без скруглённых углов: $($_.Exception.Message)" }
 }
 $fontFamily = [string]$spec.font_family
 if ([string]::IsNullOrWhiteSpace($fontFamily)) { $fontFamily = 'Segoe UI' }

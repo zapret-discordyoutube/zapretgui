@@ -415,7 +415,7 @@ class PageSplashTests(unittest.TestCase):
 
         page._install_service.start.assert_called_once_with("21.1.5.80", splash=spec, start_in_tray=False)
         # По кнопке «Обновить» — окно на месте окна обновления.
-        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"take_focus": True})
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": False})
 
     def _automatic_install(self, *, shown: bool, in_use: bool):
         from app.feature_facades.updater import UpdaterFeature
@@ -438,25 +438,40 @@ class PageSplashTests(unittest.TestCase):
     def test_automatic_install_shows_the_big_window_to_a_person_who_is_in_the_app(self) -> None:
         page = self._automatic_install(shown=True, in_use=True)
 
-        # Окно обновления одно — большое: его видят все, и при автообновлении тоже.
-        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"take_focus": True})
+        # Программа перезапускается у человека на глазах — пусть видит всё окно.
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": False})
         self.assertFalse(page._install_service.start.call_args.kwargs["start_in_tray"])
 
-    def test_automatic_install_does_not_grab_the_keyboard_from_another_program(self) -> None:
-        # Окно программы открыто, но человек в другом окне: большое окно
-        # появляется, а клавиатуру у его программы не выхватывает.
+    def test_automatic_install_shows_the_small_card_when_the_person_is_elsewhere(self) -> None:
+        # Окно программы открыто, но человек в другом окне: карточка в углу экрана.
         page = self._automatic_install(shown=True, in_use=False)
 
-        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"take_focus": False})
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": True})
         self.assertFalse(page._install_service.start.call_args.kwargs["start_in_tray"])
 
-    def test_automatic_install_from_tray_also_shows_the_window(self) -> None:
+    def test_automatic_install_from_tray_also_shows_the_small_card(self) -> None:
         page = self._automatic_install(shown=False, in_use=False)
 
         # Раньше из трея обновление шло совсем без окон.
-        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"take_focus": False})
+        self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": True})
         self.assertIsNotNone(page._install_service.start.call_args.kwargs["splash"])
         self.assertTrue(page._install_service.start.call_args.kwargs["start_in_tray"])
+
+    def test_small_card_is_rounded_and_alive(self) -> None:
+        script = render_splash_script()
+
+        card = script[script.index("function Draw-FrameCompact"):script.index("function Draw-Window")]
+        # Скруглённая кромка вместо прямоугольной рамки.
+        self.assertIn("$g.DrawPath($borderPen, $edge)", card)
+        self.assertNotIn("$g.DrawRectangle($borderPen", card)
+        # Медоед вертится, содержимое покачивается, по полосе идёт блик и бежит огонёк.
+        self.assertIn("$g.RotateTransform([single]$S.Spin)", card)
+        self.assertIn("$sway = [single](1.4 * $k * [Math]::Sin($now * 1.5))", card)
+        self.assertIn("$glintAt = Ease-InOut (($now % 1.7) / 1.7)", card)
+        self.assertIn("$scoutAt", card)
+        # В Windows 10 система углы не скругляет: край режет область окна.
+        self.assertIn("$S.RoundedBySystem = ([Environment]::OSVersion.Version.Build -ge 22000)", script)
+        self.assertIn("$form.Region = New-Object System.Drawing.Region($shape)", script)
 
     def test_update_window_stays_on_top_until_the_end(self) -> None:
         script = render_splash_script()

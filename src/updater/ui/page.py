@@ -349,11 +349,14 @@ class ServersPage(BasePage):
         """Начинает скачивание и установку. False — установка не началась.
 
         ``automatic`` — программа ставит находку сама, без кнопки «Обновить».
-        Окно обновления одно и то же — большое, его видят все (решение
-        владельца: не прятать его и при автообновлении). Разница лишь в
-        фокусе: если человек сейчас не в программе (она в трее или он в
-        другом окне), окно появляется, но клавиатуру не выхватывает. Из трея
-        новая версия откроется тоже в трее.
+        Какое окно при этом показать, зависит от того, где сейчас человек
+        (решение владельца, 2026-10-10):
+
+        * он в окне программы — большое окно, как по кнопке «Обновить»:
+          программа перезапускается у него на глазах, пусть видит всё;
+        * программа в трее, свёрнута или он в другом окне — маленькая
+          скруглённая карточка в правом нижнем углу экрана, поверх всех окон
+          и без захвата фокуса. Из трея новая версия откроется тоже в трее.
         """
         offer = self._flow.offer
         if self._cleanup_in_progress or offer is None:
@@ -361,8 +364,8 @@ class ServersPage(BasePage):
         if self._check_service.is_busy:
             return False
         in_tray = automatic and not self._host_window_shown()
-        take_focus = not automatic or self._host_window_in_use()
-        splash = self._build_restart_splash_spec(offer, take_focus=take_focus)
+        compact = automatic and not self._host_window_in_use()
+        splash = self._build_restart_splash_spec(offer, compact=compact)
         if not self._install_service.start(offer.version, splash=splash, start_in_tray=in_tray):
             return False
         # Новая версия покажет «Что нового» из сохранённого текста, без сети.
