@@ -447,7 +447,9 @@ class PageSplashTests(unittest.TestCase):
         page = self._automatic_install(shown=True, in_use=False)
 
         self.assertEqual(page._build_restart_splash_spec.call_args.kwargs, {"compact": True})
-        self.assertFalse(page._install_service.start.call_args.kwargs["start_in_tray"])
+        # Как в Zapret KVN: новая версия уходит в трей и не выскакивает
+        # поверх программы, в которой человек сейчас работает.
+        self.assertTrue(page._install_service.start.call_args.kwargs["start_in_tray"])
 
     def test_automatic_install_from_tray_also_shows_the_small_card(self) -> None:
         page = self._automatic_install(shown=False, in_use=False)

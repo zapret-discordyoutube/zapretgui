@@ -343,6 +343,8 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         page = self._page(feature)
         page._install_service.start.return_value = True
         page._host_window_shown.return_value = window_shown
+        # «Человек сейчас в окне программы» — в этих тестах то же, что «окно открыто».
+        page._host_window_in_use.return_value = window_shown
         page._updater_feature = Mock(wraps=feature)
         token = feature.begin_update_check(source=source)
         feature.finish_update_check(
