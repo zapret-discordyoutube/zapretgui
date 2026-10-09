@@ -99,6 +99,28 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(page._result_cards.accessibleName(), "Результаты BlockCheck: пока нет результатов")
         self.assertEqual(page._summary_panel.level, "idle")
 
+    def test_help_link_stands_in_the_title_row(self) -> None:
+        from PyQt6.QtCore import QUrl
+
+        page = _make_page()
+        self.addCleanup(page.deleteLater)
+
+        # Ссылка на инструкцию стоит в ряду заголовка и ведёт на статью о подборе стратегии.
+        self.assertEqual(page.layout.indexOf(page._title_header), 0)
+        self.assertIs(page.title_label.parentWidget(), page._title_header)
+        self.assertEqual(
+            page._help_button.getUrl(),
+            QUrl("https://wiki.zapret.moe/Zapret2/find-game-strategy"),
+        )
+        self.assertEqual(page._help_button.accessibleName(), "Как это б#&^ь работает?")
+        self.assertIn("инструкцию", page._help_button.accessibleDescription())
+
+        # На вложенном экране заголовок не нужен: вместе с ним уходит и ссылка.
+        page._set_page_header_visible(False)
+        self.assertTrue(page._title_header.isHidden())
+        page._set_page_header_visible(True)
+        self.assertFalse(page._title_header.isHidden())
+
     def test_hidden_progress_bars_do_not_animate(self) -> None:
         # IndeterminateProgressBar по умолчанию запускает бесконечную анимацию
         # в конструкторе, и она крутится 60 раз в секунду у скрытой полосы.

@@ -61,6 +61,8 @@ from qfluentwidgets import (
 )
 
 from ui.widgets.flat_section import FlatSection
+from ui.widgets.title_help_link import add_title_help_link
+from config.urls import BLOCKCHECK_INFO_URL
 from ui.fluent_widgets import SettingsCard, InfoBarHelper, set_tooltip
 from log.log import log
 
@@ -311,6 +313,17 @@ class BlockcheckPage(BasePage):
     def _build_ui(self):
         total_started_at = time.perf_counter()
         section_started_at = time.perf_counter()
+        # Ссылка на инструкцию стоит в одном ряду с заголовком страницы.
+        self._title_header = None
+        self._help_button = None
+        header = add_title_help_link(
+            self,
+            BLOCKCHECK_INFO_URL,
+            tooltip="Открыть инструкцию: как подобрать стратегию",
+            description="Открывает в браузере инструкцию о том, как подобрать стратегию.",
+        )
+        if header is not None:
+            self._title_header, self._help_button = header
         self._tabs_pivot = SegmentedWidget(self)
         self._tabs_pivot.addItem(
             self.TAB_BLOCKCHECK,
@@ -956,9 +969,10 @@ class BlockcheckPage(BasePage):
 
     def _set_page_header_visible(self, visible: bool) -> None:
         """На подстранице первой идёт строка пути: название и описание раздела там лишние."""
-        for label in (self.title_label, self.subtitle_label):
-            if label is not None:
-                label.setVisible(visible)
+        # Заголовок стоит в ряду со ссылкой на инструкцию: прячется весь ряд.
+        for widget in (self._title_header or self.title_label, self.subtitle_label):
+            if widget is not None:
+                widget.setVisible(visible)
 
     def _close_card_detail(self) -> None:
         if self._detail_view is None or self._detail_view.isHidden():

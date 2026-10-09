@@ -157,7 +157,8 @@ class PastCheckOnScreenTests(unittest.TestCase):
         self.assertFalse(view.isHidden())
         self.assertEqual(feature.asked, ["C:/logs/run.log"])
         self.assertTrue(page._tabs_pivot.isHidden())
-        self.assertTrue(page.title_label.isHidden())
+        # Заголовок стоит в ряду со ссылкой на инструкцию: прячется весь ряд.
+        self.assertTrue(page._title_header.isHidden())
         self.assertEqual(view.title(), "Проверка 07.10 23:00 · Полная проверка")
         self.assertTrue(view.note_label.isHidden())
         self.assertEqual([card.card.key for card in view.cards.cards()], ["site:youtube"])

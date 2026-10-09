@@ -11,7 +11,6 @@ from qfluentwidgets import (
     CheckBox,
     ComboBox,
     FluentIcon,
-    HyperlinkButton,
     ProgressBar,
     PushButton,
     SearchLineEdit,
@@ -23,6 +22,7 @@ from config.urls import WINWS_LOG_ANALYZER_INFO_URL
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.widgets.fun import FunTicker
+from ui.widgets.title_help_link import add_title_help_link
 
 CONNECTION_COLUMNS = [
     "Хост",
@@ -50,39 +50,16 @@ PACKET_COLUMNS = [
 
 PACKETS_PLACEHOLDER_TITLE = "Пакеты: выберите соединение в таблице выше"
 
-_HELP_BUTTON_TEXT = "Как это б#&^ь работает?"
-
-
 def _build_title_header(page, ui: SimpleNamespace) -> None:
     """Ставит ссылку на инструкцию справа от стандартного заголовка страницы."""
-    title_index = page.layout.indexOf(page.title_label)
-    if title_index < 0:
-        return
-
-    page.layout.removeWidget(page.title_label)
-    ui.title_header = QWidget(page.content)
-    ui.title_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    title_layout = QHBoxLayout(ui.title_header)
-    title_layout.setContentsMargins(0, 0, 0, 0)
-    title_layout.setSpacing(12)
-    title_layout.addWidget(page.title_label, 0, Qt.AlignmentFlag.AlignVCenter)
-    title_layout.addStretch(1)
-
-    # В тексте QPushButton двойной && рисуется как один обычный символ &.
-    ui.help_button = HyperlinkButton(
-        FluentIcon.HELP,
+    header = add_title_help_link(
+        page,
         WINWS_LOG_ANALYZER_INFO_URL,
-        _HELP_BUTTON_TEXT.replace("&", "&&"),
-        ui.title_header,
-    )
-    set_tooltip(ui.help_button, "Открыть инструкцию к анализатору логов winws2")
-    set_control_accessibility(
-        ui.help_button,
-        name=_HELP_BUTTON_TEXT,
+        tooltip="Открыть инструкцию к анализатору логов winws2",
         description="Открывает в браузере инструкцию к анализатору логов winws2.",
     )
-    title_layout.addWidget(ui.help_button, 0, Qt.AlignmentFlag.AlignVCenter)
-    page.layout.insertWidget(title_index, ui.title_header)
+    if header is not None:
+        ui.title_header, ui.help_button = header
 
 
 def _configure_table(table: TableWidget, columns: list[str], *, min_height: int) -> None:
