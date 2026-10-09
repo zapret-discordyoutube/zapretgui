@@ -188,7 +188,9 @@ class PostStartupUpdateWindowTests(unittest.TestCase):
 
     _FOUND = {"has_update": True, "version": "9.9.9", "release_notes": "новое", "error": None}
 
-    def _run(self, feature: _Feature, *, idle_tasks=None, queued_tasks=None, timers=None, notify=None):
+    def _run(
+        self, feature: _Feature, *, idle_tasks=None, queued_tasks=None, timers=None, notify=None, window_shown=None
+    ):
         from main import post_startup_update
 
         # Патчи живут до конца теста: фоновую проверку тест запускает позже.
@@ -208,6 +210,8 @@ class PostStartupUpdateWindowTests(unittest.TestCase):
             ensure_page=Mock(),
             show_whats_new=Mock(return_value=True),
         )
+        if window_shown is not None:
+            host.is_window_shown = Mock(return_value=window_shown)
         for item in (
             patch.object(post_startup_update, "bind_startup_gate", side_effect=lambda _signal, callback, **_kwargs: callback()),
             patch.object(post_startup_update, "schedule_after", side_effect=(timers or _Timers()).schedule),
@@ -412,6 +416,24 @@ class BackgroundUpdateCheckTests(unittest.TestCase):
         # Только проверка по разрешению сервера вправе ставить без вопроса.
         self.assertEqual(feature.signalled, [False, True])
         host.ensure_page.assert_called_once_with(PageName.SERVERS)
+
+    def test_program_started_in_tray_knows_its_window_is_hidden(self) -> None:
+        from core.runtime import presence
+
+        for shown in (False, True):
+            # Окно ни разу не показывалось и само о себе ничего не отметило.
+            with self.subTest(shown=shown), patch.object(presence, "_window_shown", None):
+                self._run(_Feature(self._CLEAN), window_shown=shown)
+
+                self.assertIs(presence.window_shown(), shown)
+
+    def test_window_that_already_spoke_for_itself_is_not_overruled(self) -> None:
+        from core.runtime import presence
+
+        with patch.object(presence, "_window_shown", True):
+            self._run(_Feature(self._CLEAN), window_shown=False)
+
+            self.assertIs(presence.window_shown(), True)
 
     def test_permission_waits_while_the_person_is_busy(self) -> None:
         from app.page_names import PageName

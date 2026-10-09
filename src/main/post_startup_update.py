@@ -426,8 +426,21 @@ def install_update_check(
 
     update_bridge.release_queued.connect(_on_release_queued)
 
+    def _note_window_presence() -> None:
+        """Программа запущена сразу в трей: окно ни разу не показывалось и само
+        о себе ничего не отметило. Говорим за него, иначе она промолчала бы,
+        чем занята."""
+        try:
+            from core.runtime import presence
+
+            if presence.window_shown() is None:
+                presence.note_window_shown(bool(startup_host.is_window_shown()))
+        except Exception:
+            pass
+
     def _start_release_watcher() -> None:
         nonlocal release_watcher
+        _note_window_presence()
         try:
             watcher = updater_feature.create_release_watcher(
                 on_release=lambda version: update_bridge.release_signalled.emit(str(version or "")),

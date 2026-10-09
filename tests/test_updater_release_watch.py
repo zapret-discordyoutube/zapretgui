@@ -114,8 +114,10 @@ class ReleaseWatcherTests(unittest.TestCase):
         self.assertNotIn(watch.QUICK_ANSWER_PAUSE_SECONDS, harness.pauses)
 
     def test_busy_program_says_so_and_asks_shorter(self) -> None:
-        busy = [True, True, False]
-        harness = _Harness(self, [_quiet(), _quiet(), _quiet()], is_busy=lambda: busy.pop(0) if busy else False)
+        busy = [True, True, True, False]
+        harness = _Harness(
+            self, [_quiet(), _quiet(), _quiet(), _quiet()], is_busy=lambda: busy.pop(0) if busy else False
+        )
 
         harness.run()
 
@@ -124,9 +126,10 @@ class ReleaseWatcherTests(unittest.TestCase):
         self.assertIn("hold=0", urls[0])
         # Занятая программа переспрашивает раз в минуту: освободится — узнает быстро.
         self.assertIn("busy=1", urls[1])
-        self.assertIn(f"hold={watch.BUSY_HOLD_SECONDS}", urls[1])
-        self.assertNotIn("busy=", urls[2])
-        self.assertNotIn("hold=", urls[2])
+        self.assertIn("busy=1", urls[2])
+        self.assertIn(f"hold={watch.BUSY_HOLD_SECONDS}", urls[2])
+        self.assertNotIn("busy=", urls[3])
+        self.assertNotIn("hold=", urls[3])
 
     def test_update_outcome_is_reported_until_the_server_hears_it(self) -> None:
         pending = [{"prev": "21.1.7.117", "took": "24"}]
@@ -198,7 +201,9 @@ class ReleaseWatcherTests(unittest.TestCase):
         urls = [url for url, _verify in harness.requests]
         # Проба сразу показывает, что служба на месте; дальше — долгие вопросы.
         self.assertIn("hold=0", urls[0])
-        self.assertNotIn("hold=", urls[1])
+        # Сразу после запуска состояние программы быстро меняется: первый
+        # долгий вопрос короче обычного, дальше — в полный срок.
+        self.assertIn(f"hold={watch.WARMUP_HOLD_SECONDS}", urls[1])
         self.assertNotIn("hold=", urls[2])
         self.assertIn("known=21.1.7.118", urls[0])
         self.assertIn("channel=dev", urls[0])
@@ -330,7 +335,7 @@ class ReleaseWatcherTests(unittest.TestCase):
         self.assertTrue(urls[0].startswith(FORGEJO.url))
         # На зеркале — проба и один полный вопрос с ожиданием…
         self.assertTrue(urls[1].startswith(MIRROR.url) and "hold=0" in urls[1])
-        self.assertTrue(urls[2].startswith(MIRROR.url) and "hold=" not in urls[2])
+        self.assertTrue(urls[2].startswith(MIRROR.url) and "hold=0" not in urls[2])
         # …после чего слушатель снова пробует Forgejo.
         self.assertTrue(urls[3].startswith(FORGEJO.url) and "hold=0" in urls[3])
         # Сертификат зеркала самоподписанный, у Forgejo — проверяется.

@@ -65,6 +65,12 @@ READ_TIMEOUT_SECONDS = 330
 # Занятая программа спрашивает короче: освободилась — и через минуту уже
 # просит разрешение по-настоящему.
 BUSY_HOLD_SECONDS = 60
+# Вместе с вопросом программа называет своё занятие, и сервер помнит его,
+# пока держит вопрос. В первые минуты после запуска оно быстро меняется
+# (обход ещё запускается, окно уходит в трей), поэтому программа спрашивает
+# короче — иначе на сайте несколько минут висело бы состояние первых секунд.
+WARMUP_SECONDS = 120.0
+WARMUP_HOLD_SECONDS = 45
 # Честный ответ «новостей нет» приходит не раньше срока ожидания сервера.
 # Быстрый пустой ответ — признак неисправности (чужой прокси, старый сервер):
 # без паузы слушатель завалил бы сервер запросами.
@@ -140,6 +146,7 @@ class ReleaseWatcher:
         self._report_delivered = report_delivered
         # О какой версии уже сказано в журнале «ждём своей ступени».
         self._held_version = ""
+        self._started_at: float | None = None
         self._endpoints = endpoints
         self._session_factory = session_factory
         self._clock = clock
@@ -285,8 +292,12 @@ class ReleaseWatcher:
     def _ask(self, session, endpoint: WaitEndpoint, *, probe: bool) -> dict:
         params = {"channel": self._channel, "known": self._known}
         busy = bool(self._call(self._is_busy, False))
+        if self._started_at is None:
+            self._started_at = self._clock()
         if probe:
             params["hold"] = "0"
+        elif self._clock() - self._started_at < WARMUP_SECONDS:
+            params["hold"] = str(WARMUP_HOLD_SECONDS)
         elif busy:
             params["hold"] = str(BUSY_HOLD_SECONDS)
         if busy:
