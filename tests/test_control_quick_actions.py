@@ -41,10 +41,10 @@ class QuickActionsTests(unittest.TestCase):
             tr_fn=_tr("ru"),
             text_prefix="page.winws2_control",
             on_open_onboarding_tour=lambda: self.calls.append("tour"),
-            on_open_connection_test=lambda: self.calls.append("test"),
             on_open_internet_cleanup=lambda: self.calls.append("internet_cleanup"),
             on_open_folder=lambda: self.calls.append("folder"),
             on_open_docs=lambda: self.calls.append("docs"),
+            on_open_git=lambda: self.calls.append("git"),
             parent=self.host,
         )
         layout = QVBoxLayout(self.host)
@@ -53,25 +53,42 @@ class QuickActionsTests(unittest.TestCase):
 
     def _tiles(self) -> list[ActionTile]:
         w = self.widgets
-        return [w.tour_card, w.test_card, w.internet_cleanup_card, w.folder_card, w.docs_card]
+        return [w.tour_card, w.internet_cleanup_card, w.folder_card, w.docs_card, w.git_card]
 
     def test_every_tile_runs_its_own_action(self) -> None:
         for tile in self._tiles():
             tile.click()
 
-        self.assertEqual(self.calls, ["tour", "test", "internet_cleanup", "folder", "docs"])
+        self.assertEqual(self.calls, ["tour", "internet_cleanup", "folder", "docs", "git"])
 
     def test_tiles_are_buttons_for_keyboard_and_screen_reader(self) -> None:
-        tile = self.widgets.test_card
+        tile = self.widgets.git_card
 
         self.assertEqual(tile.focusPolicy(), Qt.FocusPolicy.StrongFocus)
-        self.assertEqual(tile.accessibleName(), "Открыть тест соединения")
-        self.assertEqual(tile.property("screenReaderStateText"), "Открыть тест соединения")
-        self.assertIn("Проверить доступность сети", tile.accessibleDescription())
+        self.assertEqual(tile.title(), "Исходный код")
+        self.assertEqual(tile.accessibleName(), "Открыть сайт git.zapret.moe")
+        self.assertEqual(tile.property("screenReaderStateText"), "Открыть сайт git.zapret.moe")
+        self.assertIn("git.zapret.moe: код и выпуски", tile.accessibleDescription())
         self.assertIn("Enter или Пробел", tile.accessibleDescription())
 
         tile.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier))
-        self.assertEqual(self.calls, ["test"])
+        self.assertEqual(self.calls, ["git"])
+
+    def test_git_tile_stands_right_after_the_wiki_tile(self) -> None:
+        # Два сайта проекта — вики и git — стоят рядом и в одном ряду, и после переноса.
+        self.host.resize(1200, 600)
+        self.host.show()
+        QApplication.processEvents()
+        docs, git = self.widgets.docs_card, self.widgets.git_card
+        self.assertEqual(git.y(), docs.y())
+        self.assertEqual(git.x(), docs.x() + docs.width() + 12)
+
+        self.host.resize(820, 700)
+        QApplication.processEvents()
+        self.assertEqual(self.widgets.grid.columns(), 3)
+        self.assertEqual(git.y(), docs.y())
+        self.assertGreater(docs.y(), self.widgets.folder_card.y())
+        self.assertEqual(git.x(), docs.x() + docs.width() + 12)
 
     def test_busy_tile_fades_and_ignores_clicks(self) -> None:
         tile = self.widgets.internet_cleanup_card
@@ -95,16 +112,18 @@ class QuickActionsTests(unittest.TestCase):
             text_prefix="page.winws2_control",
             title_label=w.title_label,
             tour_card=w.tour_card,
-            test_card=w.test_card,
             internet_cleanup_card=w.internet_cleanup_card,
             folder_card=w.folder_card,
             docs_card=w.docs_card,
+            git_card=w.git_card,
         )
 
         self.assertEqual(w.title_label.text(), "Quick actions")
         self.assertEqual(w.tour_card.title(), "How to use the app")
         self.assertEqual(w.tour_card.accessibleName(), "Show the guided tour")
-        self.assertEqual(w.test_card.title(), tr_catalog("page.winws2_control.button.connection_test", language="en"))
+        self.assertEqual(w.docs_card.title(), tr_catalog("page.winws2_control.button.documentation", language="en"))
+        self.assertEqual(w.git_card.title(), "Source code")
+        self.assertEqual(w.git_card.accessibleName(), "Open the git.zapret.moe site")
 
     def test_five_tiles_stand_in_one_row_and_wrap_three_plus_two(self) -> None:
         self.host.resize(1200, 600)
@@ -117,8 +136,8 @@ class QuickActionsTests(unittest.TestCase):
         self.host.resize(820, 700)
         QApplication.processEvents()
         self.assertEqual(grid.columns(), 3)
-        self.assertEqual(self.widgets.folder_card.x(), self.widgets.tour_card.x())
-        self.assertEqual(self.widgets.folder_card.width(), self.widgets.tour_card.width())
+        self.assertEqual(self.widgets.docs_card.x(), self.widgets.tour_card.x())
+        self.assertEqual(self.widgets.docs_card.width(), self.widgets.tour_card.width())
 
     def test_narrow_tile_grows_taller_for_wrapped_text(self) -> None:
         tile = self.widgets.internet_cleanup_card
@@ -161,8 +180,8 @@ class QuickActionsTests(unittest.TestCase):
     def test_specs_use_mode_texts_for_both_pages(self) -> None:
         for prefix in ("page.winws1_control", "page.winws2_control"):
             specs = {spec.key: spec for spec in quick_action_specs(prefix)}
-            self.assertEqual(list(specs), ["tour", "test", "internet_cleanup", "folder", "docs"])
-            self.assertTrue(specs["test"].title[0].startswith(prefix))
+            self.assertEqual(list(specs), ["tour", "internet_cleanup", "folder", "docs", "git"])
+            self.assertTrue(specs["docs"].title[0].startswith(prefix))
             self.assertTrue(specs["folder"].accessible_name[0].startswith(prefix))
 
 
@@ -276,10 +295,10 @@ class SettingsGroupsTests(unittest.TestCase):
         apply_profile_language(
             language="en",
             close_btn=close_btn,
-            test_card=None,
             internet_cleanup_card=None,
             folder_card=None,
             docs_card=None,
+            git_card=None,
             additional_settings_notice=widgets.additional_settings_notice,
             fakes_card=None,
             program_settings_card=widgets.program_settings_card,

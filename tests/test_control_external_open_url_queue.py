@@ -39,6 +39,25 @@ class ControlExternalOpenUrlQueueTests(unittest.TestCase):
         self.assertNotIn("self._external_open_url_pending = []", ensure_source)
         self.assertNotIn("self._external_open_url_start_scheduled = False", ensure_source)
 
+    def test_git_tile_opens_the_project_git_site_through_the_worker(self) -> None:
+        # Плитка «Исходный код» общая для страниц Zapret 1 и Zapret 2: действие живёт в общей части.
+        from presets.ui.control.zapret1.page import Zapret1ModeControlPage
+        from presets.ui.control.zapret2.page import Zapret2ModeControlPage
+
+        for page_cls in (Zapret1ModeControlPage, Zapret2ModeControlPage):
+            self.assertIs(page_cls._open_git, ControlPageActionMixin._open_git)
+
+        page = _Page()
+        page._external_open_url_runtime = _Runtime(running=False)
+        page._external_open_url_pending = []
+        page.create_external_open_url_worker = Mock()
+
+        _Page._open_git(page)
+
+        # Браузер запускает фоновая задача, а не поток окна.
+        page.create_external_open_url_worker.assert_called_once_with(0, url="https://git.zapret.moe/")
+        self.assertEqual(page._external_open_url_runtime.started, [page.create_external_open_url_worker.return_value])
+
     def test_external_open_url_keeps_all_pending_requests(self) -> None:
         page = _Page()
         page._external_open_url_runtime = _Runtime(running=True)

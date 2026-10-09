@@ -56,10 +56,10 @@ def apply_profile_language(
     *,
     language: str,
     close_btn,
-    test_card,
     internet_cleanup_card,
     folder_card,
     docs_card,
+    git_card,
     tour_card=None,
     quick_actions_title=None,
     windows_settings_card=None,
@@ -141,10 +141,10 @@ def apply_profile_language(
         text_prefix="page.winws2_control",
         title_label=quick_actions_title,
         tour_card=tour_card,
-        test_card=test_card,
         internet_cleanup_card=internet_cleanup_card,
         folder_card=folder_card,
         docs_card=docs_card,
+        git_card=git_card,
     )
 
     if fakes_card is not None:

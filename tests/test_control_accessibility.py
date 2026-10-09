@@ -133,10 +133,10 @@ def _language_refresh_kwargs() -> dict[str, object]:
         "max_block_toggle": _ToggleTarget(),
         "state_media_block_toggle": _ToggleTarget(),
         "tour_card": _TileTarget(),
-        "test_card": _TileTarget(),
         "internet_cleanup_card": _TileTarget(),
         "folder_card": _TileTarget(),
         "docs_card": _TileTarget(),
+        "git_card": _TileTarget(),
         "additional_settings_card": _CardTarget(),
         "additional_settings_notice": _TitleLabel(),
         "discord_restart_toggle": _ToggleTarget(),
@@ -349,15 +349,16 @@ class ControlAccessibilityTests(unittest.TestCase):
         )
 
         self.assertEqual(kwargs["tour_card"].accessible_name, "Показать обучающий тур")
-        self.assertEqual(kwargs["test_card"].accessible_name, "Открыть тест соединения")
         self.assertEqual(kwargs["internet_cleanup_card"].accessible_name, "Сбросить сеть Windows")
         self.assertEqual(kwargs["folder_card"].accessible_name, "Открыть папку программы")
         self.assertEqual(kwargs["docs_card"].accessible_name, "Открыть документацию")
-        self.assertEqual(kwargs["test_card"].title, "Тест соединения")
+        self.assertEqual(kwargs["git_card"].accessible_name, "Открыть сайт git.zapret.moe")
         self.assertEqual(kwargs["internet_cleanup_card"].title, "Сбросить сеть Windows")
         self.assertIn("перезагрузка", kwargs["internet_cleanup_card"].content)
         self.assertEqual(kwargs["folder_card"].title, "Открыть папку")
         self.assertEqual(kwargs["docs_card"].title, "Документация")
+        self.assertEqual(kwargs["git_card"].title, "Исходный код")
+        self.assertIn("git.zapret.moe", kwargs["git_card"].content)
 
     def test_winws2_language_refresh_updates_control_button_screen_reader_names(self) -> None:
         from presets.ui.control.zapret2.runtime_helpers import apply_profile_language
@@ -384,15 +385,16 @@ class ControlAccessibilityTests(unittest.TestCase):
         )
 
         self.assertEqual(kwargs["tour_card"].accessible_name, "Показать обучающий тур")
-        self.assertEqual(kwargs["test_card"].accessible_name, "Открыть тест соединения")
         self.assertEqual(kwargs["internet_cleanup_card"].accessible_name, "Сбросить сеть Windows")
         self.assertEqual(kwargs["folder_card"].accessible_name, "Открыть папку программы")
         self.assertEqual(kwargs["docs_card"].accessible_name, "Открыть документацию")
-        self.assertEqual(kwargs["test_card"].title, "Тест соединения")
+        self.assertEqual(kwargs["git_card"].accessible_name, "Открыть сайт git.zapret.moe")
         self.assertEqual(kwargs["internet_cleanup_card"].title, "Сбросить сеть Windows")
         self.assertIn("перезагрузка", kwargs["internet_cleanup_card"].content)
         self.assertEqual(kwargs["folder_card"].title, "Открыть папку")
         self.assertEqual(kwargs["docs_card"].title, "Документация")
+        self.assertEqual(kwargs["git_card"].title, "Исходный код")
+        self.assertIn("git.zapret.moe", kwargs["git_card"].content)
 
 
 if __name__ == "__main__":

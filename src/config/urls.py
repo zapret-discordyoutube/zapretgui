@@ -9,6 +9,7 @@ FILTER_INFO_URL = "https://wiki.zapret.moe/Zapret2/filter"  # URL об усло�
 WINWS_LOG_ANALYZER_INFO_URL = "https://wiki.zapret.moe/Zapret2/log-analyzer"  # URL об анализаторе логов winws2
 BLOCKCHECK_INFO_URL = "https://wiki.zapret.moe/Zapret2/find-game-strategy"  # URL о подборе стратегии (страница BlockCheck)
 ANDROID_URL = "https://wiki.zapret.moe/Zapret/android"  # URL инструкции для Android
+GIT_SITE_URL = "https://git.zapret.moe/"  # Git-сайт проекта: исходный код и выпуски программ
 ZAPRET_DNS_SITE_URL = "https://dns.zapret.moe/"  # Сайт своего DNS-сервера проекта: состояние и список сервисов
 # Статьи вики к шагам обучающего тура (ключ — шаг из ui.onboarding.steps).
 # Шаги без подходящей статьи здесь не указаны — у них нет кнопки «Подробнее в вики».

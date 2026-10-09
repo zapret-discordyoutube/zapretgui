@@ -71,7 +71,6 @@ class ControlPageDependencyBoundaryTests(unittest.TestCase):
             external_actions_feature=external_actions,
             set_status=Mock(),
             request_exit=Mock(),
-            open_connection_test=Mock(),
             open_folder=Mock(),
             show_page=Mock(),
             start_onboarding_tour=start_onboarding_tour,

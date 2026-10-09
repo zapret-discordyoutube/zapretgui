@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QTimer
 
-from ui.navigation.search import route_search_result, update_titlebar_search_width
+from ui.navigation.search import update_titlebar_search_width
 from app.page_names import PageName
 from ui.window_ui_session import get_window_ui_session
 
@@ -83,10 +83,6 @@ def refresh_titlebar_layout(window) -> None:
         pass
 
 
-def route_window_search_result(window, page_name: PageName, tab_key: str = "") -> bool:
-    return route_search_result(window, page_name, tab_key)
-
-
 def persist_window_geometry(window) -> None:
     # Сворачивание в трей — обычное действие пользователя: снимок геометрии
     # берётся сразу, а запись в settings.sqlite3 делает фоновый поток.
@@ -145,7 +141,6 @@ __all__ = [
     "refresh_titlebar_layout",
     "release_input_interaction_states",
     "request_exit",
-    "route_window_search_result",
     "send_page_command",
     "show_page",
     "show_window",

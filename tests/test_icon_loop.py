@@ -162,10 +162,10 @@ class HomePageIconLoopTests(unittest.TestCase):
             tr_fn=lambda _key, default: default,
             text_prefix="page.winws2_control",
             on_open_onboarding_tour=noop,
-            on_open_connection_test=noop,
             on_open_internet_cleanup=noop,
             on_open_folder=noop,
             on_open_docs=noop,
+            on_open_git=noop,
             parent=content,
         )
         conductor = icon_loop_conductor(content)
@@ -175,6 +175,7 @@ class HomePageIconLoopTests(unittest.TestCase):
         self.assertIn(summary.preset_item._icon_label, icons)
         self.assertNotIn(summary.premium_item._icon_label, icons)
         self.assertIn(actions.docs_card.icon_widget(), icons)
+        self.assertIn(actions.git_card.icon_widget(), icons)
 
 
 if __name__ == "__main__":

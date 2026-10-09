@@ -78,7 +78,6 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         remember_tray_close_mode,
         set_status,
         request_exit,
-        open_connection_test,
         open_folder,
         open_presets,
         open_preset_setup,
@@ -108,7 +107,6 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._remember_tray_close_mode = remember_tray_close_mode
         self._set_status_callback = set_status
         self._request_exit_callback = request_exit
-        self._open_connection_test_callback = open_connection_test
         self._open_folder_callback = open_folder
         self._open_presets_callback = open_presets
         self._open_preset_setup_callback = open_preset_setup
@@ -148,10 +146,10 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         # Последнее, что пришло для блока настроек: применяется, когда блок собран.
         self._program_settings_snapshot = None
         self._additional_settings_plan = None
-        self.test_card = None
         self.internet_cleanup_card = None
         self.folder_card = None
         self.docs_card = None
+        self.git_card = None
         self._build_ui()
         self._bind_launch_control()
         self.bind_ui_state_store(ui_state_store)
@@ -220,10 +218,10 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             text_prefix="page.winws1_control",
             on_open_onboarding_tour=self._start_onboarding_tour,
-            on_open_connection_test=self._open_connection_test,
             on_open_internet_cleanup=self._on_internet_cleanup_clicked,
             on_open_folder=self._open_folder,
             on_open_docs=self._open_docs,
+            on_open_git=self._open_git,
             parent=self.content,
         )
         self.quick_actions_title = quick_actions.title_label
@@ -231,10 +229,10 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.add_widget(self.quick_actions_title)
         self.add_spacing(12)
         self.onboarding_tour_card = quick_actions.tour_card
-        self.test_card = quick_actions.test_card
         self.internet_cleanup_card = quick_actions.internet_cleanup_card
         self.folder_card = quick_actions.folder_card
         self.docs_card = quick_actions.docs_card
+        self.git_card = quick_actions.git_card
         self.add_widget(self.quick_actions_grid)
 
         self._add_settings_blocks()
@@ -989,10 +987,10 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             defender_toggle=self.defender_toggle,
             max_block_toggle=self.max_block_toggle,
             state_media_block_toggle=self.state_media_block_toggle,
-            test_card=self.test_card,
             internet_cleanup_card=self.internet_cleanup_card,
             folder_card=self.folder_card,
             docs_card=self.docs_card,
+            git_card=self.git_card,
             tour_card=self.onboarding_tour_card,
             quick_actions_title=self.quick_actions_title,
             windows_settings_card=self.windows_settings_card,

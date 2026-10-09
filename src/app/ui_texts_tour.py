@@ -31,20 +31,20 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
         "ru": (
             "Плитки под сводкой — то, что нужно чаще всего:\n"
             "• «Как пользоваться программой» — эта экскурсия;\n"
-            "• «Тест соединения» — открывает BlockCheck: проверку, какие сайты открываются;\n"
             "• «Сбросить сеть Windows» — сбрасывает TCP/IP, кэш DNS, прокси и Winsock, если интернет ведёт себя "
             "странно. После этого понадобится перезагрузка;\n"
             "• «Открыть папку» — папка программы с пресетами, списками и логами;\n"
-            "• «Документация» — вики с подробными инструкциями."
+            "• «Документация» — вики с подробными инструкциями;\n"
+            "• «Исходный код» — сайт git.zapret.moe: код программы и все её выпуски."
         ),
         "en": (
             "The tiles under the summary are what you need most often:\n"
             "• How to use the app — this tour;\n"
-            "• Connection test — opens BlockCheck, which checks which sites open;\n"
             "• Reset Windows network — resets TCP/IP, the DNS cache, proxy and Winsock when the connection "
             "behaves oddly. A reboot is needed afterwards;\n"
             "• Open folder — the app folder with presets, lists and logs;\n"
-            "• Documentation — the wiki with detailed guides."
+            "• Documentation — the wiki with detailed guides;\n"
+            "• Source code — the git.zapret.moe site: the app's code and all its releases."
         ),
     },
     "onboarding.step.windows_settings.title": {"ru": "Windows и блокировки", "en": "Windows and blocks"},

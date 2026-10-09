@@ -1129,10 +1129,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
 
         self.assertNotIn("from ui.window_adapter import", top_level)
         self.assertNotIn("from ui.page_actions import", top_level)
-        self.assertIn(
-            "from ui.window_adapter import route_window_search_result, show_page",
-            inspect.getsource(window_actions.WindowActionsMixin.open_connection_test),
-        )
 
     def test_window_runtime_setup_binds_open_folder_worker_factory(self) -> None:
         import inspect
@@ -2163,7 +2159,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             set_status=Mock(),
             window_notification_center=SimpleNamespace(notify=Mock()),
             request_exit=Mock(),
-            open_connection_test=Mock(),
             open_folder=Mock(),
         )
         appearance_actions = SimpleNamespace(

@@ -103,10 +103,14 @@ class ControlPageActionMixin:
             return getattr(self, "onboarding_tour_card", None)
         return None
 
-    def _open_connection_test(self) -> None:
-        handler = getattr(self, "_open_connection_test_callback", None)
-        if callable(handler):
-            handler()
+    def _open_git(self) -> None:
+        from config.urls import GIT_SITE_URL
+
+        self._request_external_open_url(
+            GIT_SITE_URL,
+            error_title="Исходный код",
+            error_default="Не удалось открыть сайт git.zapret.moe: {error}",
+        )
 
     def _open_folder(self) -> None:
         handler = getattr(self, "_open_folder_callback", None)

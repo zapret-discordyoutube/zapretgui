@@ -137,18 +137,3 @@ class WindowActionsMixin:
     @_open_folder_start_scheduled.setter
     def _open_folder_start_scheduled(self, value: bool) -> None:
         self._open_folder_state_obj().start_scheduled = bool(value)
-
-    def open_connection_test(self) -> None:
-        """Переключает на вкладку диагностики соединений."""
-        try:
-            from app.page_names import PageName
-            from ui.page_actions import request_blockcheck_diagnostics_focus
-            from ui.window_adapter import route_window_search_result, show_page
-
-            if show_page(self, PageName.BLOCKCHECK):
-                route_window_search_result(self, PageName.BLOCKCHECK, "diagnostics")
-                request_blockcheck_diagnostics_focus(self)
-                log("Открыта вкладка диагностики в BlockCheck", "INFO")
-        except Exception as e:
-            log(f"Ошибка при открытии вкладки тестирования: {e}", "❌ ERROR")
-            self.set_status(f"Ошибка: {e}")

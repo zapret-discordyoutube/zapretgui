@@ -345,9 +345,17 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Добавляет базовый список государственных новостных сайтов в hosts",
         "en": "Adds a basic list of state news sites to hosts",
     },
-    "page.control.button.connection_test": {
-        "ru": "Тест соединения",
-        "en": "Connection Test",
+    "page.control.git.title": {
+        "ru": "Исходный код",
+        "en": "Source code",
+    },
+    "page.control.git.desc": {
+        "ru": "Открыть git.zapret.moe: код и выпуски программ проекта",
+        "en": "Open git.zapret.moe: the project's code and releases",
+    },
+    "page.control.git.accessible_name": {
+        "ru": "Открыть сайт git.zapret.moe",
+        "en": "Open the git.zapret.moe site",
     },
     "page.control.button.open_folder": {
         "ru": "Открыть папку",
@@ -456,14 +464,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.winws1_control.advanced.debug_log.desc": {
         "ru": "Записывает логи winws в папку logs",
         "en": "Writes winws logs to the logs folder",
-    },
-    "page.winws1_control.button.connection_test": {
-        "ru": "Тест соединения",
-        "en": "Connection test",
-    },
-    "page.winws1_control.button.connection_test.desc": {
-        "ru": "Проверить доступность сети и состояние обхода",
-        "en": "Check network reachability and bypass state",
     },
     "page.winws1_control.button.open_folder": {
         "ru": "Открыть папку",
@@ -4363,10 +4363,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.winws2_control.advanced.warning": {
         "ru": "Эти параметры лучше менять, только если уверены в результате",
         "en": "Better change these only if you are sure of the result",
-    },
-    "page.winws2_control.button.connection_test": {
-        "ru": "Тест соединения",
-        "en": "Connection Test",
     },
     "page.winws2_control.button.open_folder": {
         "ru": "Открыть папку",

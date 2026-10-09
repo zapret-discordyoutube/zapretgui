@@ -9,7 +9,6 @@ class WindowPageActions:
     set_status: Callable[..., Any]
     notify: Callable[..., Any]
     request_exit: Callable[..., Any]
-    open_connection_test: Callable[..., Any]
     open_folder: Callable[..., Any]
     show_page: Callable[..., Any]
     show_active_mode_control_page: Callable[..., Any]
@@ -137,7 +136,6 @@ def build_window_page_actions(*, window, appearance_actions) -> WindowPageAction
         set_status=window.set_status,
         notify=window.window_notification_center.notify,
         request_exit=window.request_exit,
-        open_connection_test=window.open_connection_test,
         open_folder=window.open_folder,
         show_page=lambda page_name, *, allow_internal=False: show_page(
             window,

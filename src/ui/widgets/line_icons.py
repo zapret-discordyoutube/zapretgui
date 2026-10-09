@@ -172,30 +172,6 @@ def _tour(painter: QPainter, fill: QColor, t: float) -> None:
     painter.restore()
 
 
-def _wifi(painter: QPainter, fill: QColor, t: float) -> None:
-    # Три дуги сигнала и точка. В жесте дуги загораются по очереди снизу вверх.
-    _ = fill
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    pen = QPen(painter.pen())
-    base = QColor(pen.color())
-    center = QPointF(12.0, 18.4)
-    for index, radius in enumerate((4.6, 8.6, 12.6)):
-        if t > 0.0:
-            # Пока жест идёт, дуга сначала гаснет, а потом зажигается в свою очередь.
-            lit = max(1.0 - _ease(t / 0.12), _ease((t - 0.14 - 0.18 * index) / 0.25))
-            color = QColor(base)
-            color.setAlphaF(base.alphaF() * (0.25 + 0.75 * lit))
-            pen.setColor(color)
-            painter.setPen(pen)
-        box = QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2)
-        # Углы в 1/16 градуса: дуга в 90° с вершиной наверху.
-        painter.drawArc(box, 45 * 16, 90 * 16)
-    pen.setColor(base)
-    painter.setPen(pen)
-    painter.setBrush(base)
-    painter.drawEllipse(center, 1.1 + 0.6 * _bump(t, 0.0, 0.3), 1.1 + 0.6 * _bump(t, 0.0, 0.3))
-
-
 def _network_reset(painter: QPainter, fill: QColor, t: float) -> None:
     # Круговая стрелка вокруг узла сети. В жесте стрелка делает полный оборот.
     painter.setBrush(fill)
@@ -244,21 +220,49 @@ def _book(painter: QPainter, fill: QColor, t: float) -> None:
         painter.drawPath(leaf)
 
 
+def _git(painter: QPainter, fill: QColor, t: float) -> None:
+    # Ветка git: ствол из двух узлов и ответвление к третьему. В жесте
+    # ответвление «отрастает» от ствола заново, а его узел в конце подпрыгивает.
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawLine(QPointF(7.0, 8.0), QPointF(7.0, 16.0))
+    branch = QPainterPath()
+    branch.moveTo(7.0, 16.0)
+    branch.cubicTo(7.0, 12.6, 17.0, 14.6, 17.0, 10.2)
+    grown = 1.0 if t <= 0.0 else _ease((t - 0.1) / 0.5)
+    if grown >= 1.0:
+        painter.drawPath(branch)
+    elif grown > 0.0:
+        part = QPainterPath()
+        part.moveTo(branch.pointAtPercent(0.0))
+        steps = 12
+        for step in range(1, steps + 1):
+            part.lineTo(branch.pointAtPercent(grown * step / steps))
+        painter.drawPath(part)
+    painter.setBrush(fill)
+    painter.drawEllipse(QPointF(7.0, 5.6), 2.4, 2.4)
+    painter.drawEllipse(QPointF(7.0, 18.4), 2.4, 2.4)
+    # Узел ответвления появляется, когда линия до него дошла.
+    node = 1.0 if t <= 0.0 else _ease((t - 0.5) / 0.2)
+    if node > 0.0:
+        radius = 2.4 * node + 0.9 * _bump(t, 0.6, 0.95)
+        painter.drawEllipse(QPointF(17.0, 7.8), radius, radius)
+
+
 _ICONS: dict[str, Callable[[QPainter, QColor, float], None]] = {
     "preset": _folder,
     "profiles": _profiles,
     "mode": _shield,
     "star": _star,
     "tour": _tour,
-    "connection_test": _wifi,
     "network_reset": _network_reset,
     "folder": _folder_open,
     "docs": _book,
+    "git": _git,
 }
 
 
 # Значки со своим коротким жестом; у звезды жест свой — блик (MotionIcon.twinkle).
-ANIMATED_LINE_ICONS = frozenset({"preset", "profiles", "mode", "tour", "connection_test", "network_reset", "folder", "docs"})
+ANIMATED_LINE_ICONS = frozenset({"preset", "profiles", "mode", "tour", "network_reset", "folder", "docs", "git"})
 
 
 def line_icon_names() -> tuple[str, ...]:
