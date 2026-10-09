@@ -112,10 +112,13 @@ class DnsProvidersCatalogTests(unittest.TestCase):
         for old, new in dns_providers.OUTDATED_DNS_ADDRESS_REPLACEMENTS.items():
             with self.subTest(old=old):
                 self.assertIsNone(find_provider_by_address(old))
-                self.assertEqual(find_provider_by_address(new)[1], "DNS-AI")
+                self.assertIn(find_provider_by_address(new)[1], {"DNS-AI", "Zapret DNS"})
                 # Адрес IPv4 меняется на IPv4, IPv6 — на IPv6: они лежат в разных списках адаптера.
                 self.assertEqual(":" in old, ":" in new)
         self.assertNotIn("87.228.47.200", doh_templates())
+        # Прежний адрес Zapret DNS закрыт в России по IP: он ведёт на новый адрес того же сервера.
+        self.assertEqual(dns_providers.OUTDATED_DNS_ADDRESS_REPLACEMENTS["144.31.82.230"], "83.217.211.149")
+        self.assertEqual(find_provider_by_address("83.217.211.149")[1], "Zapret DNS")
 
     def test_dns_sb_is_not_among_popular_servers(self) -> None:
         self.assertNotIn("Dns.SB", DNS_PROVIDERS["Популярные"])

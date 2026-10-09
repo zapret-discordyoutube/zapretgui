@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from threading import RLock
 
+from dns.reachability import unreachable_message
 from dns import winapi
 from dns.adapters import DnsAdapter, build_dns_adapters, is_dns_adapter
 from dns.custom_servers import custom_doh_templates
@@ -108,10 +109,18 @@ def apply_dns(guids: list[str], ipv4: list[str], ipv6: list[str]) -> DnsCommandR
     Пишем только адаптерам, которые сейчас есть на странице: Windows молча
     принимает любой GUID и заводит под него ветку реестра, поэтому
     исчезнувший адаптер надо отсечь до записи.
+
+    Сервер, который из сети пользователя не отвечает ни одним способом, не
+    ставится вовсе (dns.reachability): его мог заблокировать провайдер, и с
+    ним компьютер остался бы без DNS.
     """
     guids = list(dict.fromkeys(str(item or "").strip() for item in guids if str(item or "").strip()))
     names = {adapter.guid: adapter.name for adapter in load_state().adapters}
     templates = write_doh_templates()
+    blocked = unreachable_message(list(ipv4 or []), list(ipv6 or []), templates)
+    if blocked:
+        log(f"DNS: {blocked}", "WARNING")
+        return DnsCommandResult(success=False, message=blocked, affected_count=0, total_count=len(guids))
     errors: list[str] = []
     for guid in guids:
         if guid not in names:

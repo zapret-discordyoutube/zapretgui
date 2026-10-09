@@ -9,6 +9,7 @@ from .proxy_domains import (
 )
 from .ipv6_detection import is_ipv6_address, is_ipv6_available
 from .adobe_domains import ADOBE_DOMAINS
+from .relay_check import unreachable_relays
 from log.log import log
 
 
@@ -613,6 +614,16 @@ class HostsManager:
         if requested_any_profile and not selected_rows:
             self.set_status("Не найдено записей hosts для выбранных сервисов")
             log("apply_service_dns_selections: выбранные сервисы не дали записей hosts", "WARNING")
+            return False
+
+        # Посредник, заблокированный провайдером, не открыл бы сервис, а сломал его.
+        dead = unreachable_relays(selected_rows)
+        if dead:
+            self.set_status(
+                f"Сервер-посредник {', '.join(dead)} не отвечает из вашей сети — похоже, его блокирует провайдер. "
+                "Файл hosts не изменён. Выберите для этих сервисов другой профиль."
+            )
+            log(f"apply_service_dns_selections: посредник недоступен: {', '.join(dead)}", "WARNING")
             return False
 
         return self.apply_domain_ip_rows(selected_rows)

@@ -48,11 +48,27 @@ KNOWN = DnsState(
 
 
 class DnsRuntimeTests(unittest.TestCase):
+    reach = staticmethod(lambda ipv4, ipv6, templates=None: "")
+
+    def test_server_that_does_not_answer_is_not_applied(self) -> None:
+        """Заблокированный провайдером сервер не ставится: с ним не осталось бы DNS."""
+        fake = _FakeWinApi()
+        self.reach = lambda ipv4, ipv6, templates=None: "Сервер 144.31.82.230 не отвечает из вашей сети"
+
+        result = self._run(fake, runtime.apply_dns, [ETH, WIFI], ["144.31.82.230"], [])
+
+        self.assertFalse(result.success)
+        self.assertEqual((fake.writes, fake.flushes), ([], 0))
+        self.assertEqual((result.affected_count, result.total_count), (0, 2))
+        self.assertIn("не отвечает из вашей сети", result.message)
+
     def _run(self, fake: _FakeWinApi, func, *args, custom_servers=()):
         patchers = [
             *fake.patches(),
             patch.object(runtime, "load_state", return_value=KNOWN),
             patch.object(runtime, "load_custom_servers", return_value=list(custom_servers)),
+            # В сеть тесты не ходят: сервер считается отвечающим, если тест не говорит иного.
+            patch.object(runtime, "unreachable_message", self.reach),
         ]
         for item in patchers:
             item.start()

@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.09.3")
+        self.assertEqual(catalog.catalog_version, "2026.10.09.4")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -237,7 +237,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles(added), added)
 
     def test_zapret_dns_profile_leads_through_the_project_server(self) -> None:
-        """Свой сервер проекта: профиль стоит первым и ведёт главные имена через 144.31.82.230."""
+        """Свой сервер проекта: профиль стоит первым и ведёт главные имена через 83.217.211.149."""
         connection = sqlite3.connect(PRIVATE_DATABASE)
         try:
             first = dict(
@@ -256,9 +256,9 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(order[0], "zapret_dns")
         self.assertGreaterEqual(services, 80)
         for hostname in ("chatgpt.com", "claude.ai", "gemini.google.com", "open.spotify.com", "www.notion.so"):
-            self.assertEqual(first[hostname], "144.31.82.230", hostname)
+            self.assertEqual(first[hostname], "83.217.211.149", hostname)
         # Раздача Spotify идёт напрямую: у неё нет гео-ограничения.
-        self.assertNotEqual(first["image-cdn-fa.spotifycdn.com"], "144.31.82.230")
+        self.assertNotEqual(first["image-cdn-fa.spotifycdn.com"], "83.217.211.149")
         for service in ("ChatGPT & Sora (OpenAI)", "Claude", "Gemini AI", "Spotify", "Twitch", "Web Archive", "Weather.com"):
             self.assertEqual(self.proxy_domains.get_service_available_dns_profiles(service)[0], "zapret_dns", service)
         # Canva и Intel через сервер не открываются (проверено 2026-10-09): профиля у них нет.
