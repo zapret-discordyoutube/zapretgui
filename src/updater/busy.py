@@ -17,12 +17,19 @@ import sys
 BUSY_FULLSCREEN = "fullscreen"
 
 # Ответы Windows на вопрос «можно ли сейчас показывать уведомления»
-# (SHQueryUserNotificationState): окно на весь экран, игра Direct3D на весь
-# экран, режим презентации.
+# (SHQueryUserNotificationState).
 _QUNS_BUSY = 2
 _QUNS_RUNNING_D3D_FULL_SCREEN = 3
 _QUNS_PRESENTATION_MODE = 4
-_FULLSCREEN_STATES = (_QUNS_BUSY, _QUNS_RUNNING_D3D_FULL_SCREEN, _QUNS_PRESENTATION_MODE)
+# Игра Direct3D на весь экран и режим презентации — ответы однозначные.
+_SURE_STATES = (_QUNS_RUNNING_D3D_FULL_SCREEN, _QUNS_PRESENTATION_MODE)
+
+# Что стоит на переднем плане.
+FOREGROUND_FULL = "f"     # чужое окно закрывает весь экран
+FOREGROUND_PART = "p"     # окно занимает часть экрана
+FOREGROUND_SHELL = "s"    # рабочий стол или панель задач
+FOREGROUND_OWN = "o"      # окно самой программы
+_SHELL_CLASSES = ("Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd")
 
 
 def _notification_state() -> int:
@@ -40,9 +47,81 @@ def _notification_state() -> int:
         return 0
 
 
+def _foreground() -> str:
+    """Что на переднем плане: одна буква ``FOREGROUND_*`` либо пусто — не узнать."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import ctypes
+        import os
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        window = user32.GetForegroundWindow()
+        if not window:
+            return FOREGROUND_SHELL
+        name = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(window, name, 64)
+        if name.value in _SHELL_CLASSES:
+            return FOREGROUND_SHELL
+        owner = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
+        if owner.value == os.getpid():
+            return FOREGROUND_OWN
+
+        class _MonitorInfo(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT),
+                ("dwFlags", wintypes.DWORD),
+            ]
+
+        rect = wintypes.RECT()
+        info = _MonitorInfo()
+        info.cbSize = ctypes.sizeof(_MonitorInfo)
+        monitor = user32.MonitorFromWindow(window, 2)  # ближайший к окну экран
+        if not user32.GetWindowRect(window, ctypes.byref(rect)) or not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return ""
+        screen = info.rcMonitor
+        covers = (
+            rect.left <= screen.left and rect.top <= screen.top
+            and rect.right >= screen.right and rect.bottom >= screen.bottom
+        )
+        return FOREGROUND_FULL if covers else FOREGROUND_PART
+    except Exception:
+        return ""
+
+
+def is_fullscreen(state: int, foreground: str) -> bool:
+    """Занят ли экран игрой, видео или презентацией — по двум независимым признакам.
+
+    Игра Direct3D на весь экран и режим презентации — ответы Windows
+    однозначные. Ответ «экран занят» (2) расплывчат: его дают и невидимые
+    окна поверх экрана, и чужие оболочки. Ему программа верит, только если
+    окно на переднем плане и правда закрывает весь экран и это не рабочий
+    стол и не она сама. Иначе обновление откладывалось бы у людей, которые
+    ничем не заняты.
+    """
+    if state in _SURE_STATES:
+        return True
+    return state == _QUNS_BUSY and foreground == FOREGROUND_FULL
+
+
+def screen_state() -> str:
+    """Оба признака одной строкой, например ``2f`` или ``5p``: код ответа
+    Windows и что на переднем плане. Уходит серверу общим счётом — по нему
+    видно, насколько правилу «занят» можно верить."""
+    state = _notification_state()
+    return f"{state}{_foreground()}" if state else ""
+
+
 def fullscreen_app_active() -> bool:
     """На экране игра, видео или презентация во весь экран."""
-    return _notification_state() in _FULLSCREEN_STATES
+    state = _notification_state()
+    if state in _SURE_STATES:
+        return True
+    return state == _QUNS_BUSY and _foreground() == FOREGROUND_FULL
 
 
 def busy_reason() -> str:
@@ -78,4 +157,13 @@ def activity() -> str:
     return ACTIVITY_WINDOW if shown else ACTIVITY_TRAY
 
 
-__all__ = ["ACTIVITY_TRAY", "ACTIVITY_WINDOW", "BUSY_FULLSCREEN", "activity", "busy_reason", "fullscreen_app_active"]
+__all__ = [
+    "ACTIVITY_TRAY",
+    "ACTIVITY_WINDOW",
+    "BUSY_FULLSCREEN",
+    "activity",
+    "busy_reason",
+    "fullscreen_app_active",
+    "is_fullscreen",
+    "screen_state",
+]

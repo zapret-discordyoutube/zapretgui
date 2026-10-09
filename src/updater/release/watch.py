@@ -304,7 +304,7 @@ class ReleaseWatcher:
             params["busy"] = "1"
         told = self._call(self._activity, {})
         if isinstance(told, dict):
-            params.update({key: str(told[key]) for key in ("act", "run") if told.get(key) not in (None, "")})
+            params.update({key: str(told[key]) for key in ("act", "run", "scr") if told.get(key) not in (None, "")})
         report = self._call(self._pending_report, {})
         report = {str(key): str(value) for key, value in report.items()} if isinstance(report, dict) else {}
         params.update(report)

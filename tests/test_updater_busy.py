@@ -60,10 +60,39 @@ class BusyReasonTests(unittest.TestCase):
         with patch.object(busy, "_notification_state", return_value=5):
             self.assertEqual(busy.busy_reason(), "")
 
-    def test_fullscreen_game_video_and_presentation_mean_busy(self) -> None:
-        for state in (2, 3, 4):
-            with patch.object(busy, "_notification_state", return_value=state):
+    def test_game_and_presentation_mean_busy_whatever_is_in_front(self) -> None:
+        for state in (3, 4):
+            with patch.object(busy, "_notification_state", return_value=state), patch.object(
+                busy, "_foreground", return_value=busy.FOREGROUND_SHELL
+            ):
                 self.assertEqual(busy.busy_reason(), busy.BUSY_FULLSCREEN, state)
+
+    def test_vague_busy_answer_needs_a_real_fullscreen_window_in_front(self) -> None:
+        # Ответ Windows «экран занят» дают и невидимые окна поверх экрана:
+        # одного его мало, нужно чужое окно во весь экран на переднем плане.
+        expected = {
+            busy.FOREGROUND_FULL: busy.BUSY_FULLSCREEN,
+            busy.FOREGROUND_PART: "",
+            busy.FOREGROUND_SHELL: "",
+            busy.FOREGROUND_OWN: "",
+            "": "",
+        }
+        for foreground, reason in expected.items():
+            with patch.object(busy, "_notification_state", return_value=2), patch.object(
+                busy, "_foreground", return_value=foreground
+            ):
+                self.assertEqual(busy.busy_reason(), reason, foreground)
+
+    def test_raw_screen_state_is_told_as_code_and_foreground(self) -> None:
+        with patch.object(busy, "_notification_state", return_value=2), patch.object(
+            busy, "_foreground", return_value=busy.FOREGROUND_PART
+        ):
+            self.assertEqual(busy.screen_state(), "2p")
+        with patch.object(busy, "_notification_state", return_value=0):
+            self.assertEqual(busy.screen_state(), "")
+        self.assertTrue(busy.is_fullscreen(2, "f"))
+        self.assertFalse(busy.is_fullscreen(2, "s"))
+        self.assertFalse(busy.is_fullscreen(5, "f"))
 
     def test_locked_screen_and_quiet_hours_do_not_delay_the_update(self) -> None:
         for state in (0, 1, 6, 7):
@@ -106,9 +135,12 @@ class ActivityTests(unittest.TestCase):
     def test_bypass_state_is_told_only_when_it_is_known(self) -> None:
         from updater import commands
 
-        self.assertEqual(commands._told_activity(lambda: "tray", None), {"act": "tray"})
-        self.assertEqual(commands._told_activity(lambda: "tray", lambda: True), {"act": "tray", "run": "1"})
-        self.assertEqual(commands._told_activity(lambda: "window", lambda: False), {"act": "window", "run": "0"})
+        with patch.object(busy, "screen_state", return_value="5p"):
+            self.assertEqual(commands._told_activity(lambda: "tray", None), {"act": "tray", "scr": "5p"})
+            self.assertEqual(
+                commands._told_activity(lambda: "tray", lambda: True), {"act": "tray", "scr": "5p", "run": "1"}
+            )
+            self.assertEqual(commands._told_activity(lambda: "window", lambda: False)["run"], "0")
 
 
 if __name__ == "__main__":

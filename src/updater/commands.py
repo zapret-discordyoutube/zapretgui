@@ -124,7 +124,11 @@ def create_release_watcher(*, on_release, on_queued, is_bypass_running=None):
 
 
 def _told_activity(activity, is_bypass_running) -> dict:
-    told = {"act": activity()}
+    from updater.busy import screen_state
+
+    # scr — сырой ответ Windows о занятости экрана: по общему счёту видно,
+    # насколько верно правило «человек занят».
+    told = {"act": activity(), "scr": screen_state()}
     if is_bypass_running is not None:
         told["run"] = "1" if is_bypass_running() else "0"
     return told
