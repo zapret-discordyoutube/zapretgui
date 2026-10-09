@@ -9,6 +9,8 @@ class DnsPageDeps:
     dns_feature: object
     # Открыть страницу «Свой DNS»: без сервера — добавить новый, с записью сервера — изменить его.
     open_custom_server: Callable[..., object]
+    # Фоновая задача, которая открывает ссылку в браузере (сайт Zapret DNS с рекламной плитки).
+    create_open_url_worker: Callable[..., object]
 
 
 @dataclass(frozen=True, slots=True)

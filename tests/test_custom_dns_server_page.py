@@ -499,15 +499,22 @@ class CustomDnsServerRouteTests(unittest.TestCase):
         from ui.page_deps.system import build_custom_dns_server_page_kwargs, build_network_page_kwargs
 
         show_page = Mock()
-        feature, opener = object(), Mock()
+        feature, opener, external = object(), Mock(), Mock()
 
         custom = build_custom_dns_server_page_kwargs(page_name=PageName.NETWORK_CUSTOM_DNS, dns_feature=feature, show_page=show_page)
         custom["deps"].open_dns_page()
-        network = build_network_page_kwargs(page_name=PageName.NETWORK, dns_feature=feature, open_custom_dns_server=opener)
+        network = build_network_page_kwargs(
+            page_name=PageName.NETWORK,
+            dns_feature=feature,
+            external_actions_feature=external,
+            open_custom_dns_server=opener,
+        )
 
         show_page.assert_called_once_with(PageName.NETWORK)
         self.assertIs(custom["deps"].dns_feature, feature)
         self.assertIs(network["deps"].open_custom_server, opener)
+        # Странице нужна только задача «открыть ссылку», а не все внешние действия.
+        self.assertIs(network["deps"].create_open_url_worker, external.create_open_url_worker)
 
 
 if __name__ == "__main__":

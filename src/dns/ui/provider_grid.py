@@ -6,6 +6,11 @@
 замера скорости с цветной точкой. Выбранная плитка мягко подкрашена
 акцентом и отмечена галочкой, без рамок. Последняя плитка — «Свой DNS».
 
+Рекламная плитка (kind="promo") — такая же карточка, но широкая: занимает
+всё, что осталось в её строке. Это ссылка, а не сервер: щелчок ничего не
+применяет, а сообщает странице сигналом promo_clicked. Справа на ней стоят
+значки сервисов (DnsTile.icons), у названия — короткая метка (DnsTile.badge).
+
 Перед пояснением может стоять цветная пометка состояния сервера в России:
 красная «блокируется» или жёлтая «под угрозой» (DnsTile.status). У заголовка
 группы справа от счётчика — короткое пояснение ко всей группе (DnsTile.note).
@@ -47,6 +52,7 @@ from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
 
 
 ADD_TILE_KEY = "__add__"
+PROMO_TILE_KEY = "__promo__"
 
 # Комета проходит полный круг за это время, как бы быстро ни встал DNS.
 CHARGE_MS = 650
@@ -174,14 +180,16 @@ class GridTexts:
 
 @dataclass(frozen=True, slots=True)
 class DnsTile:
-    """Плитка сервера, плитка «Свой DNS» или заголовок группы.
+    """Плитка сервера, плитка «Свой DNS», рекламная плитка или заголовок группы.
 
-    kind: "provider" | "add" | "group".
+    kind: "provider" | "add" | "promo" | "group".
     status: "" — обычный сервер, "blocked" — в России блокируется,
     "at_risk" — может попасть под блокировку. У группы note — пояснение
     справа от её названия.
     latency: "" — не замеряли, "measuring" — идёт замер, "ok" — есть
     время в latency_ms, "timeout" — сервер не ответил.
+    У рекламной плитки badge — метка рядом с названием, icons — значки
+    сервисов справа: пары (имя значка, цвет); address — имя сайта-ссылки.
     """
 
     kind: str
@@ -203,10 +211,12 @@ class DnsTile:
     counter: str = ""
     tooltip: str = ""
     status: str = ""
+    badge: str = ""
+    icons: tuple[tuple[str, str], ...] = ()
 
     @property
     def clickable(self) -> bool:
-        return self.kind in ("provider", "add")
+        return self.kind in ("provider", "add", "promo")
 
 
 def badge_color(color: str, tokens, dark: bool) -> QColor:
@@ -248,6 +258,8 @@ def latency_text(tile: DnsTile, texts: GridTexts = GridTexts()) -> str:
 def tile_accessible_text(tile: DnsTile, texts: GridTexts = GridTexts()) -> str:
     if tile.kind == "add":
         return ", ".join(part for part in (tile.title or texts.add, tile.note) if part)
+    if tile.kind == "promo":
+        return ", ".join(part for part in (tile.title, tile.badge, tile.note, tile.address) if part)
     parts = [tile.title, texts.selected if tile.selected else texts.not_selected]
     if tile.pending:
         parts.append(texts.applying)
@@ -273,6 +285,7 @@ class DnsProviderGrid(QWidget):
 
     activated = pyqtSignal(str)
     add_clicked = pyqtSignal()
+    promo_clicked = pyqtSignal()
     context_menu_wanted = pyqtSignal(str, QPoint)
 
     TILE_MIN_WIDTH = 250
@@ -285,6 +298,10 @@ class DnsProviderGrid(QWidget):
     _BADGE = 38
     _ICON = 18
     _PAD = 14
+    # Рекламная плитка: значки сервисов справа, если после текста осталось место.
+    _PROMO_ICON_BOX = 30
+    _PROMO_ICON = 15
+    _PROMO_ICON_GAP = 8
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -451,6 +468,15 @@ class DnsProviderGrid(QWidget):
         y = 0
         column = 0
         for tile in self._tiles:
+            if tile.kind == "promo":
+                # Рекламная плитка забирает остаток строки, а если строка полна — целую новую.
+                if column >= columns:
+                    column = 0
+                    y += self.TILE_HEIGHT + self.GAP
+                left = column * (tile_width + self.GAP)
+                self._rects.append(QRect(left, y, width - left, self.TILE_HEIGHT))
+                column = columns
+                continue
             if tile.kind != "group":
                 if column >= columns:
                     column = 0
@@ -517,6 +543,8 @@ class DnsProviderGrid(QWidget):
                 self._paint_group(painter, rect, tile, tokens)
             elif tile.kind == "add":
                 self._paint_add_tile(painter, index, rect, tile, tokens, dark)
+            elif tile.kind == "promo":
+                self._paint_promo(painter, index, rect, tile, tokens, dark)
             else:
                 self._paint_provider(painter, index, rect, tile, tokens, dark)
         painter.end()
@@ -815,6 +843,100 @@ class DnsProviderGrid(QWidget):
         self._paint_text(painter, QRect(text_left, badge_center_y + 1, text_width, 18), tile.note, size=12, color=to_qcolor(tokens.fg_muted))
         painter.restore()
 
+    def _paint_promo(self, painter: QPainter, index: int, rect: QRect, tile: DnsTile, tokens, dark: bool) -> None:
+        """Рекламная плитка: значок, название с меткой, пояснение, имя сайта и значки сервисов."""
+        painter.save()
+        self._paint_card(painter, index, rect, tile, dark)
+        pad = self._PAD
+        color = badge_color(tile.color, tokens, dark)
+        painter.setClipPath(self._card_path(rect))
+        self._paint_badge(painter, rect.left() + pad + self._BADGE // 2, rect.top() + pad + self._BADGE // 2, tile, tokens, dark)
+        painter.setClipping(False)
+
+        text_left = rect.left() + pad + self._BADGE + 12
+        right = self._paint_promo_icons(painter, rect, text_left, tile, tokens, dark)
+
+        title_font = getFont(14, QFont.Weight.DemiBold)
+        title_metrics = QFontMetrics(title_font)
+        title_width = min(title_metrics.horizontalAdvance(tile.title) + 2, right - text_left)
+        painter.setFont(title_font)
+        painter.setPen(to_qcolor(tokens.fg))
+        title_rect = QRect(text_left, rect.top() + pad - 3, title_width, 22)
+        painter.drawText(
+            title_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            title_metrics.elidedText(tile.title, Qt.TextElideMode.ElideRight, title_rect.width()),
+        )
+        if tile.badge:
+            label_font = getFont(10, QFont.Weight.DemiBold)
+            label_width = QFontMetrics(label_font).horizontalAdvance(tile.badge) + 12
+            label_left = title_rect.right() + 9
+            if label_left + label_width <= right:
+                box = QRectF(label_left, title_rect.center().y() - 7.5, label_width, 16)
+                back = QColor(color)
+                back.setAlpha(46 if dark else 34)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(back)
+                painter.drawRoundedRect(box, 8, 8)
+                painter.setFont(label_font)
+                painter.setPen(color if dark else color.darker(170))
+                painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), tile.badge)
+        self._paint_text(
+            painter,
+            QRect(text_left, rect.top() + pad + 19, right - text_left, 18),
+            tile.note,
+            size=12,
+            color=to_qcolor(tokens.fg_muted),
+        )
+
+        # Нижняя строка — имя сайта цветом ссылки и стрелка «откроется в браузере».
+        link = QColor(themeColor())
+        address_font = QFont("Consolas")
+        address_font.setPixelSize(12)
+        address_font.setStyleHint(QFont.StyleHint.Monospace)
+        metrics = QFontMetrics(address_font)
+        footer = QRect(rect.left() + pad, rect.bottom() - pad - 17, right - rect.left() - pad, 18)
+        address_width = min(metrics.horizontalAdvance(tile.address) + 2, footer.width() - 18)
+        if tile.address and address_width > 12:
+            painter.setFont(address_font)
+            painter.setPen(link)
+            painter.drawText(
+                QRect(footer.left(), footer.top(), address_width, footer.height()),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                metrics.elidedText(tile.address, Qt.TextElideMode.ElideRight, address_width),
+            )
+            arrow = get_cached_qta_pixmap("fa5s.external-link-alt", color=link.name(), size=10)
+            painter.drawPixmap(footer.left() + address_width + 6, footer.center().y() - 5, arrow)
+        painter.restore()
+
+    def _paint_promo_icons(self, painter: QPainter, rect: QRect, text_left: int, tile: DnsTile, tokens, dark: bool) -> int:
+        """Значки сервисов у правого края; возвращает правую границу текста.
+
+        Текст важнее: значков рисуется столько, сколько помещается рядом с целым пояснением.
+        """
+        right = rect.right() - self._PAD
+        step = self._PROMO_ICON_BOX + self._PROMO_ICON_GAP
+        text_width = QFontMetrics(getFont(12)).horizontalAdvance(tile.note) + 4
+        room = right - text_left - text_width - 16
+        count = min(len(tile.icons), max(0, (room + self._PROMO_ICON_GAP) // step))
+        if count <= 0:
+            return right
+        half = self._PROMO_ICON_BOX / 2
+        left = right - count * step + self._PROMO_ICON_GAP
+        for position, (icon_name, icon_color) in enumerate(tile.icons[:count]):
+            color = badge_color(icon_color, tokens, dark)
+            center = QPointF(left + position * step + half, rect.center().y() + 0.5)
+            back = QColor(color)
+            back.setAlpha(46 if dark else 34)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(back)
+            painter.drawEllipse(center, half, half)
+            icon = profile_icon_pixmap(icon_name, color=color.name(), size=self._PROMO_ICON)
+            painter.drawPixmap(
+                int(center.x() - self._PROMO_ICON / 2), int(center.y() - self._PROMO_ICON / 2), icon
+            )
+        return left - 16
+
     @staticmethod
     def _paint_text(painter: QPainter, area: QRect, text: str, *, size: int, color: QColor, weight=QFont.Weight.Normal) -> None:
         if not text or area.width() <= 8:
@@ -851,6 +973,9 @@ class DnsProviderGrid(QWidget):
         tile = self._tiles[index]
         if tile.kind == "add":
             self.add_clicked.emit()
+            return
+        if tile.kind == "promo":
+            self.promo_clicked.emit()
             return
         self.activated.emit(tile.key)
 
@@ -989,6 +1114,7 @@ class DnsProviderGrid(QWidget):
 
 __all__ = [
     "ADD_TILE_KEY",
+    "PROMO_TILE_KEY",
     "DnsProviderGrid",
     "DnsTile",
     "GridTexts",

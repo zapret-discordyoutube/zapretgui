@@ -5,7 +5,9 @@
 адаптеры и действия (замерить скорость, сбросить кэш). Ниже — фильтр по
 группам и сетка плиток: щелчок по плитке сразу применяет DNS к отмеченным
 адаптерам. Первая плитка — «Автоматически»: она возвращает DNS роутера или
-провайдера.
+провайдера. Рядом с ней, пока показаны все группы, стоит широкая рекламная
+плитка своего сервера проекта «Zapret DNS»: она ничего не применяет, а
+открывает сайт сервера в браузере.
 
 Свои серверы пользователя приходят вместе с состоянием страницы
 (DnsState.custom_servers). Добавляет и правит их отдельная вложенная
@@ -24,11 +26,14 @@ from __future__ import annotations
 import re
 from textwrap import fill
 
+from urllib.parse import urlsplit
+
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QWidget
 from qfluentwidgets import CaptionLabel, InfoBar, InfoBarPosition, PushButton, RoundMenu, SegmentedWidget
 
 from app.ui_texts import tr as tr_catalog
+from config.urls import ZAPRET_DNS_SITE_URL
 from dns import page_plans as dns_page_plans
 from dns import custom_servers
 from dns.custom_servers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
@@ -40,7 +45,7 @@ from dns.dns_providers import (
     is_encrypted_only,
 )
 from dns.ui.now_panel import AdapterChip, DnsNowPanel, NowState
-from dns.ui.provider_grid import ADD_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts
+from dns.ui.provider_grid import ADD_TILE_KEY, PROMO_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts
 from log.log import log
 from ui.accessibility import set_control_accessibility
 from ui.latest_worker_lane import LatestWorkerLane
@@ -54,6 +59,17 @@ FILTER_ALL = "all"
 RECOMMENDED_PROVIDER = ("Безопасные", "Quad9")
 # Группа, которую экскурсия открывает как пример обхода гео-ограничений.
 ONBOARDING_AI_GROUP = "Для ИИ"
+# Свой сервер проекта: его значок и цвет берёт рекламная плитка рядом с «Автоматически».
+PROMO_PROVIDER = ("Для ИИ", "Zapret DNS")
+# Значки сервисов на рекламной плитке: то, что сервер открывает (имя значка, цвет).
+PROMO_SERVICE_ICONS = (
+    ("own:openai", "#10A37F"),
+    ("simple:claude", "#D97757"),
+    ("simple:googlegemini", "#8E75B2"),
+    ("simple:spotify", "#1ED760"),
+    ("own:grok", "#E6E6E6"),
+    ("simple:twitch", "#9146FF"),
+)
 
 # Группы из dns_providers → ключ перевода подписи.
 GROUP_TEXT_KEYS = {
@@ -115,6 +131,7 @@ class NetworkPage(BasePage):
         )
         self._dns = deps.dns_feature
         self._open_custom_server = deps.open_custom_server
+        self._create_open_url_worker = deps.create_open_url_worker
 
         # Свои серверы приходят с состоянием страницы; до загрузки видны серверы программы.
         self._custom_servers: list[dict] = []
@@ -175,6 +192,14 @@ class NetworkPage(BasePage):
             ),
             on_result=lambda _payload, result: self._on_custom_servers_changed(result),
             on_error=lambda _payload, error: self._info("warning", self._t("page.network.error.title", "Ошибка"), error),
+            log_fn=log,
+        )
+        self._site_lane = LatestWorkerLane(
+            name="dns_open_site",
+            create_worker=lambda request_id, url: self._create_open_url_worker(request_id, url=url, parent=self),
+            on_result=lambda url, result: self._on_site_opened(url, result),
+            on_error=lambda url, error: self._on_site_open_failed(url, error),
+            result_signal="loaded",
             log_fn=log,
         )
         self._isp_lane = LatestWorkerLane(
@@ -256,6 +281,7 @@ class NetworkPage(BasePage):
         self.grid = DnsProviderGrid(self.content)
         self.grid.activated.connect(self._choose_provider)
         self.grid.add_clicked.connect(lambda: self._open_custom_server(None))
+        self.grid.promo_clicked.connect(self._open_promo_site)
         self.grid.context_menu_wanted.connect(self._show_custom_server_menu)
         self.add_widget(self.grid)
 
@@ -361,6 +387,7 @@ class NetworkPage(BasePage):
             self._flush_lane,
             self._latency_lane,
             self._custom_lane,
+            self._site_lane,
             self._isp_lane,
         )
 
@@ -391,8 +418,10 @@ class NetworkPage(BasePage):
         if name == "now":
             return self.now_panel
         if name == "providers":
-            # Отбор групп и первая плитка «Автоматически»: вся сетка слишком велика.
-            return [self.filter_row, (self.grid, self.grid.tile_rect(AUTO_CHOICE))]
+            # Отбор групп и первая строка сетки — «Автоматически» и реклама Zapret DNS:
+            # вся сетка слишком велика.
+            first_row = self.grid.tile_rect(AUTO_CHOICE).united(self.grid.tile_rect(PROMO_TILE_KEY))
+            return [self.filter_row, (self.grid, first_row)]
         if name == "ai":
             return [self.filter_row, self.grid] if self._filter == ONBOARDING_AI_GROUP else None
         return None
@@ -595,6 +624,9 @@ class NetworkPage(BasePage):
             groups = [(name, items) for name, items in groups if name == self._filter]
 
         tiles: list[DnsTile] = [self._auto_tile(plan)]
+        promo = self._promo_tile()
+        if promo is not None:
+            tiles.append(promo)
         for group, items in groups:
             if self._filter == FILTER_ALL:
                 tiles.append(
@@ -719,6 +751,54 @@ class NetworkPage(BasePage):
                 "page.network.auto_tile.tooltip",
                 "DNS снова будет получаться автоматически от роутера или провайдера (DHCP). "
                 "Помогает, если после ручной настройки интернет работает нестабильно.",
+            ),
+        )
+
+    def _promo_tile(self) -> DnsTile | None:
+        """Реклама своего сервера проекта: ссылка на его сайт, DNS не меняет.
+
+        Стоит в первой строке, пока показаны все группы: заголовок первой группы
+        всё равно начинает новую строку, и место рядом с «Автоматически» пустует.
+        При отборе одной группы плитки идут сразу за «Автоматически» — рекламы нет.
+        """
+        group, name = PROMO_PROVIDER
+        data = self._providers.get(group, {}).get(name)
+        if self._filter != FILTER_ALL or not data:
+            return None
+        return DnsTile(
+            kind="promo",
+            key=PROMO_TILE_KEY,
+            title=name,
+            badge=self._t("page.network.promo.badge", "сервер проекта"),
+            note=self._t("page.network.promo.note", "Открывает ChatGPT, Claude, Gemini и Spotify без VPN"),
+            address=urlsplit(ZAPRET_DNS_SITE_URL).netloc,
+            icon_name=str(data.get("icon", "")),
+            color=str(data.get("color", "")),
+            icons=PROMO_SERVICE_ICONS,
+            tooltip=self._t(
+                "page.network.promo.tooltip",
+                "Откроется сайт сервера в браузере: работает ли он сейчас, какие сервисы открывает и как "
+                "проверить подключение.\nЧтобы включить сам сервер, нажмите плитку «Zapret DNS» в группе «Для ИИ».",
+            ),
+        )
+
+    def _open_promo_site(self) -> None:
+        """Сайт открывает фоновая задача: запуск браузера не должен задерживать окно."""
+        self._site_lane.request(ZAPRET_DNS_SITE_URL)
+
+    def _on_site_opened(self, url, result) -> None:
+        if not getattr(result, "ok", False):
+            self._on_site_open_failed(url, str(getattr(result, "error", "") or ""))
+
+    def _on_site_open_failed(self, url, error: str) -> None:
+        log(f"DNS: не удалось открыть сайт {url}: {error}", "WARNING")
+        self._info(
+            "warning",
+            self._t("page.network.promo.open_failed.title", "Не удалось открыть сайт"),
+            self._t(
+                "page.network.promo.open_failed.content",
+                "Откройте его в браузере сами: {url}",
+                url=str(url or ""),
             ),
         )
 

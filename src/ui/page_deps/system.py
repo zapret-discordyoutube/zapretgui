@@ -34,10 +34,16 @@ def build_dpi_settings_page_kwargs(
     }
 
 
-def build_network_page_kwargs(*, page_name: PageName, dns_feature, open_custom_dns_server) -> dict:
+def build_network_page_kwargs(
+    *, page_name: PageName, dns_feature, external_actions_feature, open_custom_dns_server
+) -> dict:
     _ = page_name
     return {
-        "deps": DnsPageDeps(dns_feature=dns_feature, open_custom_server=open_custom_dns_server),
+        "deps": DnsPageDeps(
+            dns_feature=dns_feature,
+            open_custom_server=open_custom_dns_server,
+            create_open_url_worker=external_actions_feature.create_open_url_worker,
+        ),
     }
 
 

@@ -219,7 +219,8 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
     "onboarding.step.dns_providers.body": {
         "ru": (
             "Нажмите на плитку — этот DNS сразу встанет на отмеченные адаптеры. «Автоматически» возвращает "
-            "тот, что выдаёт роутер или провайдер.\n\n"
+            "тот, что выдаёт роутер или провайдер. Широкая плитка рядом — «Zapret DNS», свой сервер "
+            "проекта: она ничего не меняет, а открывает сайт сервера. Включается он в группе «Для ИИ».\n\n"
             "Вкладки над плитками делят серверы на группы. «Шифрованные» — запросы шифрует встроенный "
             "dnscrypt-proxy, их не подменить. «Популярные» и «Безопасные» — известные публичные серверы. "
             "«Малоизвестные» реже попадают под блокировки. Не знаете, что выбрать, — возьмите Quad9 из "
@@ -227,7 +228,8 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
         ),
         "en": (
             "Click a tile and that DNS is set on the marked adapters right away. Automatic brings back "
-            "the one your router or provider gives.\n\n"
+            "the one your router or provider gives. The wide tile next to it is Zapret DNS, the project's "
+            "own server: it changes nothing and opens the server's site. You turn it on in the For AI group.\n\n"
             "The tabs above the tiles split servers into groups. Encrypted — requests are encrypted by "
             "the built-in dnscrypt-proxy and cannot be spoofed. Popular and Secure are well-known public "
             "servers. Lesser-known ones are blocked less often. If unsure, take Quad9 from Secure."

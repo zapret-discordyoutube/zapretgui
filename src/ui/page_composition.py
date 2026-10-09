@@ -132,7 +132,11 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
         features=("fakes", "external_actions"),
         actions=("show_page",),
     ),
-    PageName.NETWORK: PageDepsSpec(build_network_page_kwargs, features=("dns",), actions=("open_custom_dns_server",)),
+    PageName.NETWORK: PageDepsSpec(
+        build_network_page_kwargs,
+        features=("dns", "external_actions"),
+        actions=("open_custom_dns_server",),
+    ),
     PageName.NETWORK_CUSTOM_DNS: PageDepsSpec(
         build_custom_dns_server_page_kwargs,
         features=("dns",),

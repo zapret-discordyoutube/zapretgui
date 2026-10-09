@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication
 from dns.dns_providers import STATUS_AT_RISK, STATUS_BLOCKED
 from dns.ui.provider_grid import (
     ADD_TILE_KEY,
+    PROMO_TILE_KEY,
     DnsProviderGrid,
     DnsTile,
     GridTexts,
@@ -31,6 +32,25 @@ def _tiles() -> list[DnsTile]:
         DnsTile(kind="group", title="Свои DNS"),
         DnsTile(kind="provider", key="Дом", title="Дом", address="192.168.1.1", custom=True),
         DnsTile(kind="add", key=ADD_TILE_KEY, title="Свой DNS", note="Добавить свой адрес"),
+    ]
+
+
+def _promo_tiles() -> list[DnsTile]:
+    """Первая строка страницы: «Автоматически» и рекламная плитка, ниже — группа."""
+    return [
+        DnsTile(kind="provider", key="auto", title="Автоматически"),
+        DnsTile(
+            kind="promo",
+            key=PROMO_TILE_KEY,
+            title="Zapret DNS",
+            badge="сервер проекта",
+            note="Открывает ChatGPT без VPN",
+            address="dns.zapret.moe",
+            icon_name="fa5s.rocket",
+            color="#60CDFF",
+            icons=(("simple:claude", "#D97757"), ("simple:spotify", "#1ED760")),
+        ),
+        *_tiles(),
     ]
 
 
@@ -59,6 +79,62 @@ class DnsProviderGridTests(unittest.TestCase):
         self.assertEqual(cloudflare.top(), google.top())
         self.assertGreater(custom.top(), cloudflare.bottom())
         self.assertGreaterEqual(grid.height(), grid.tile_rect(ADD_TILE_KEY).bottom())
+
+    def test_promo_tile_takes_the_rest_of_its_row(self) -> None:
+        # ширина сетки → (столбцов, реклама в строке «Автоматически»)
+        for width, columns, same_row in ((1100, 4, True), (560, 2, True), (300, 1, False)):
+            with self.subTest(width=width):
+                grid = DnsProviderGrid()
+                self.addCleanup(grid.deleteLater)
+                grid.resize(width, 100)
+                grid.set_tiles(_promo_tiles())
+                auto, promo = grid.tile_rect("auto"), grid.tile_rect(PROMO_TILE_KEY)
+                usable = width - grid.SCROLLBAR_GUTTER
+
+                self.assertEqual(grid._columns, columns)
+                self.assertEqual(promo.right() + 1, usable)
+                if same_row:
+                    self.assertEqual(promo.top(), auto.top())
+                    self.assertEqual(promo.left(), auto.right() + 1 + grid.GAP)
+                else:
+                    # В один столбец рядом места нет: реклама уходит на свою строку во всю ширину.
+                    self.assertEqual((promo.left(), promo.top()), (0, auto.bottom() + 1 + grid.GAP))
+                # Следующая плитка сервера не попадает в строку рекламы.
+                self.assertGreater(grid.tile_rect("Cloudflare").top(), promo.bottom())
+                # Отрисовка не падает ни в широкой, ни в узкой плитке.
+                self.assertFalse(grid.grab().isNull())
+
+    def test_promo_tile_is_a_link_and_not_a_server(self) -> None:
+        grid = DnsProviderGrid()
+        self.addCleanup(grid.deleteLater)
+        grid.resize(1100, 100)
+        grid.set_tiles(_promo_tiles())
+        activated: list[str] = []
+        opened: list[bool] = []
+        grid.activated.connect(activated.append)
+        grid.promo_clicked.connect(lambda: opened.append(True))
+        point = QPointF(grid.tile_rect(PROMO_TILE_KEY).center())
+
+        for event_type, buttons in (
+            (QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
+            (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+        ):
+            event = QMouseEvent(event_type, point, point, Qt.MouseButton.LeftButton, buttons, Qt.KeyboardModifier.NoModifier)
+            (grid.mousePressEvent if event_type == QEvent.Type.MouseButtonPress else grid.mouseReleaseEvent)(event)
+        # С клавиатуры: от «Автоматически» вправо и Enter.
+        grid._set_cursor(0)
+        _key(grid, Qt.Key.Key_Right)
+        _key(grid, Qt.Key.Key_Return)
+
+        self.assertEqual(opened, [True, True])
+        self.assertEqual(activated, [])
+        # Диктор читает название, метку, пояснение и сайт — без слов «выбран / не выбран».
+        self.assertEqual(
+            grid.accessibleDescription(),
+            "Zapret DNS, сервер проекта, Открывает ChatGPT без VPN, dns.zapret.moe",
+        )
+        # Правая кнопка меню правки не зовёт: это не свой сервер.
+        self.assertFalse(grid._request_context_menu(1, QPoint(0, 0)))
 
     def test_keyboard_moves_between_tiles_and_activates(self) -> None:
         grid = self._grid()

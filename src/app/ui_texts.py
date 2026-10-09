@@ -1961,6 +1961,26 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "DNS снова будет получаться автоматически от роутера или провайдера (DHCP). Помогает, если после ручной настройки интернет работает нестабильно.",
         "en": "DNS will again be received automatically from your router or ISP (DHCP). Helps when the internet is unstable after manual setup.",
     },
+    "page.network.promo.badge": {
+        "ru": "сервер проекта",
+        "en": "project server",
+    },
+    "page.network.promo.note": {
+        "ru": "Открывает ChatGPT, Claude, Gemini и Spotify без VPN",
+        "en": "Opens ChatGPT, Claude, Gemini and Spotify without a VPN",
+    },
+    "page.network.promo.tooltip": {
+        "ru": "Откроется сайт сервера в браузере: работает ли он сейчас, какие сервисы открывает и как проверить подключение.\nЧтобы включить сам сервер, нажмите плитку «Zapret DNS» в группе «Для ИИ».",
+        "en": "Opens the server's site in your browser: whether it is up right now, which services it opens and how to check the connection.\nTo turn the server itself on, click the “Zapret DNS” tile in the “For AI” group.",
+    },
+    "page.network.promo.open_failed.title": {
+        "ru": "Не удалось открыть сайт",
+        "en": "Could not open the site",
+    },
+    "page.network.promo.open_failed.content": {
+        "ru": "Откройте его в браузере сами: {url}",
+        "en": "Open it in your browser yourself: {url}",
+    },
     "page.network.error.title": {
         "ru": "Ошибка",
         "en": "Error",

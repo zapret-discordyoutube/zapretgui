@@ -18,7 +18,9 @@ from dns.adapters import DnsAdapter
 from dns.dns_providers import DNS_PROVIDERS
 from dns.latency import DnsLatencyReport
 from dns.state import CustomServerResult, DnsState
-from dns.ui.page import AUTO_CHOICE
+from config.urls import ZAPRET_DNS_SITE_URL
+from dns.ui.page import AUTO_CHOICE, PROMO_PROVIDER
+from dns.ui.provider_grid import PROMO_TILE_KEY
 
 ETH = "{00000000-0000-0000-0000-000000000009}"
 WIFI = "{00000000-0000-0000-0000-000000000012}"
@@ -78,7 +80,14 @@ class DnsPageTests(unittest.TestCase):
 
         feature = _feature(state)
         self.open_custom_server = Mock()
-        page = NetworkPage(deps=SimpleNamespace(dns_feature=feature, open_custom_server=self.open_custom_server))
+        self.create_open_url_worker = Mock()
+        page = NetworkPage(
+            deps=SimpleNamespace(
+                dns_feature=feature,
+                open_custom_server=self.open_custom_server,
+                create_open_url_worker=self.create_open_url_worker,
+            )
+        )
         self.addCleanup(page.deleteLater)
         page.resize(1200, 900)
         for lane in page._lanes():
@@ -114,8 +123,10 @@ class DnsPageTests(unittest.TestCase):
 
         self.assertIs(filter_row, page.filter_row)
         self.assertIs(grid, page.grid)
-        self.assertEqual(rect, page.grid.tile_rect(AUTO_CHOICE))
-        self.assertFalse(rect.isEmpty())
+        # Подсвечена первая строка сетки: «Автоматически» вместе с рекламой Zapret DNS.
+        auto, promo = page.grid.tile_rect(AUTO_CHOICE), page.grid.tile_rect(PROMO_TILE_KEY)
+        self.assertFalse(auto.isEmpty() or promo.isEmpty())
+        self.assertEqual(rect, auto.united(promo))
         self.assertIs(page.onboarding_target("now"), page.now_panel)
         self.assertTrue(page.onboarding_open_subpage("custom_dns"))
         self.open_custom_server.assert_called_once_with(None)
@@ -185,7 +196,9 @@ class DnsPageTests(unittest.TestCase):
         from dns.ui.page import NetworkPage
 
         feature = _feature(None)
-        page = NetworkPage(deps=SimpleNamespace(dns_feature=feature, open_custom_server=Mock()))
+        page = NetworkPage(
+            deps=SimpleNamespace(dns_feature=feature, open_custom_server=Mock(), create_open_url_worker=Mock())
+        )
         self.addCleanup(page.deleteLater)
         page._load_lane.request = Mock()
 
@@ -481,6 +494,72 @@ class DnsPageTests(unittest.TestCase):
         page._set_filter("Свои DNS")
         self.assertEqual([(tile.kind, tile.key) for tile in page.grid.tiles()], [("provider", AUTO_CHOICE), ("add", "__add__")])
 
+    # ── реклама Zapret DNS ──────────────────────────────────
+
+    def test_promo_tile_fills_the_first_row_and_moves_no_server(self) -> None:
+        page = self._page()
+        grid = page.grid
+        # Страница не показана: ширину сетке задаём сами и раскладываем плитки заново.
+        grid.resize(1100, 100)
+        page._render()
+        auto, promo = grid.tile_rect(AUTO_CHOICE), grid.tile_rect(PROMO_TILE_KEY)
+
+        tile = grid.tiles()[1]
+        self.assertEqual((tile.kind, tile.key, tile.title), ("promo", PROMO_TILE_KEY, "Zapret DNS"))
+        # Значок и цвет — те же, что у плитки самого сервера в группе «Для ИИ».
+        server = DNS_PROVIDERS[PROMO_PROVIDER[0]][PROMO_PROVIDER[1]]
+        self.assertEqual((tile.icon_name, tile.color), (server["icon"], server["color"]))
+        self.assertEqual(tile.address, "dns.zapret.moe")
+        self.assertIn("Для ИИ", tile.tooltip)
+        self.assertTrue(tile.icons)
+        # Стоит в строке «Автоматически» и занимает всё, что в ней оставалось.
+        self.assertEqual(promo.top(), auto.top())
+        self.assertEqual(promo.left(), auto.right() + 1 + grid.GAP)
+        self.assertEqual(promo.right() + 1, grid.width() - grid.SCROLLBAR_GUTTER)
+        self.assertGreater(promo.width(), 2 * auto.width())
+        # Ни один сервер не сдвинулся: первая группа начинается там же, где и без рекламы.
+        with_promo = [(rect.left(), rect.top()) for rect in grid._rects[2:]]
+        grid.set_tiles([item for item in grid.tiles() if item.kind != "promo"])
+        self.assertEqual([(rect.left(), rect.top()) for rect in grid._rects[1:]], with_promo)
+
+    def test_promo_tile_is_shown_only_while_all_groups_are_visible(self) -> None:
+        page = self._page()
+
+        for key in ("Для ИИ", "Популярные", "Свои DNS"):
+            with self.subTest(filter=key):
+                page._set_filter(key)
+                self.assertIsNone(page.grid.tile(PROMO_TILE_KEY))
+
+        page._set_filter("all")
+        self.assertIsNotNone(page.grid.tile(PROMO_TILE_KEY))
+
+    def test_promo_tile_opens_the_site_in_background_and_changes_no_dns(self) -> None:
+        page = self._page()
+
+        page.grid.promo_clicked.emit()
+
+        page._site_lane.request.assert_called_once_with(ZAPRET_DNS_SITE_URL)
+        page._apply_lane.request.assert_not_called()
+        self.assertIsNone(page._pending_choice)
+        # Задачу создаёт узкая зависимость страницы: ей передаётся сама ссылка.
+        worker = page._site_lane._create_worker(7, ZAPRET_DNS_SITE_URL)
+        self.create_open_url_worker.assert_called_once_with(7, url="https://dns.zapret.moe/", parent=page)
+        self.assertIs(worker, self.create_open_url_worker.return_value)
+
+    def test_failed_site_opening_shows_the_address_to_open_by_hand(self) -> None:
+        page = self._page()
+
+        page._site_lane._on_result(ZAPRET_DNS_SITE_URL, SimpleNamespace(ok=True))
+        self.info_bar.warning.assert_not_called()
+
+        page._site_lane._on_result(ZAPRET_DNS_SITE_URL, SimpleNamespace(ok=False, error="нет браузера"))
+        page._site_lane._on_error(ZAPRET_DNS_SITE_URL, "поток упал")
+
+        self.assertEqual(self.info_bar.warning.call_count, 2)
+        for call in self.info_bar.warning.call_args_list:
+            self.assertEqual(call.kwargs["title"], "Не удалось открыть сайт")
+            self.assertIn("https://dns.zapret.moe/", call.kwargs["content"])
+
     # ── замер скорости ──────────────────────────────────────
 
     def test_latency_measurement_marks_tiles_and_fastest_server(self) -> None:
@@ -711,7 +790,10 @@ class DnsPageTests(unittest.TestCase):
         self.assertEqual(page.now_panel.measure_button.text(), "Measure speed")
         self.assertEqual(page.now_panel.title_label.text(), "Adapters use different DNS")
         self.assertEqual(page.grid.tiles()[0].title, "Automatic")
-        self.assertEqual(page.grid.tiles()[1].title, "Encrypted")
+        promo = page.grid.tile(PROMO_TILE_KEY)
+        self.assertEqual((promo.title, promo.badge), ("Zapret DNS", "project server"))
+        self.assertIn("without a VPN", promo.note)
+        self.assertEqual(page.grid.tiles()[2].title, "Encrypted")
         self.assertEqual(page.now_panel.flush_button.text(), "Flush DNS cache")
 
     def test_cleanup_closes_every_lane(self) -> None:
@@ -722,6 +804,7 @@ class DnsPageTests(unittest.TestCase):
             page._flush_lane,
             page._latency_lane,
             page._custom_lane,
+            page._site_lane,
             page._isp_lane,
         ]
         for lane in lanes:
