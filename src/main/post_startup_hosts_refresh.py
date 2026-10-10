@@ -27,7 +27,9 @@ def install_hosts_applied_selection_refresh(
             log(f"Обновление адресов hosts при запуске не выполнено: {exc}", "WARNING")
             return
         changed = bool(getattr(result, "changed", False))
-        log_startup_metric("StartupHostsAppliedSelectionRefreshFinished", f"changed={changed}")
+        # Причина нужна в журнале поддержки: по «changed=False» не понять, почему старые адреса остались.
+        reason = str(getattr(result, "message", "") or "причина не названа")
+        log_startup_metric("StartupHostsAppliedSelectionRefreshFinished", f"changed={changed} ({reason})")
 
     def _start_hosts_applied_selection_refresh() -> None:
         if not is_startup_host_alive(startup_host):

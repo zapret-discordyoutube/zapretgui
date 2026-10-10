@@ -240,6 +240,29 @@ class StartupAddressRefreshInstallTests(unittest.TestCase):
         self.assertEqual(queued, [("hosts", "HostsAppliedSelectionRefresh")])
         self.assertEqual(calls, ["refresh"])
 
+    def test_hosts_refresh_logs_why_nothing_changed(self) -> None:
+        import importlib
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        module = importlib.import_module("main.post_startup_hosts_refresh")
+        metrics: list[tuple[str, str]] = []
+        feature = SimpleNamespace(
+            refresh_applied_selection=lambda: SimpleNamespace(changed=False, message="выбор сервисов не сохранён")
+        )
+        host = SimpleNamespace(startup_interactive_ready=None, startup_state=SimpleNamespace(interactive_logged=True))
+        with (
+            patch.object(module, "enqueue_subsystem_task", side_effect=lambda _queue, _name, target: target()),
+            patch.object(module, "bind_startup_gate", side_effect=lambda _signal, cb, is_ready: cb()),
+            patch.object(module, "is_startup_host_alive", return_value=True),
+        ):
+            module.install_hosts_applied_selection_refresh(
+                host, hosts_feature=feature, log_startup_metric=lambda name, text: metrics.append((name, text))
+            )
+        self.assertEqual(
+            metrics, [("StartupHostsAppliedSelectionRefreshFinished", "changed=False (выбор сервисов не сохранён)")]
+        )
+
     def test_dns_migration_runs_in_dns_queue(self) -> None:
         calls: list[str] = []
 
