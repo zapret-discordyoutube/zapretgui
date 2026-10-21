@@ -606,8 +606,20 @@ def _matrix_cell(run: Run) -> Callable[[str, str], selectivity.Cell]:
     """Одна ячейка таблицы: приветствие TLS 1.3 и первый пакет QUIC с этим именем на этом адресе."""
 
     def cell(name: str, ip: str) -> selectivity.Cell:
-        hello = block_cause.tls_hello(ip, name or None, cancel=run.probe_cancel, version=block_cause.TLS_1_3)
-        quic_ms = quic_probe.quic_hello(ip, name or None, cancel=run.probe_cancel)
+        # TLS и QUIC идут одновременно, и сроки короче обычных: таблица сравнивает десятки сочетаний, и при
+        # блокировке каждое молчание стоит целого срока. Два пакета QUIC оставлены: одно молчание UDP ничего не доказывает.
+        quic_future = run.submit(
+            quic_probe.quic_hello,
+            ip,
+            name or None,
+            attempts=2,
+            timeout=selectivity.QUIC_TIMEOUT_S,
+            cancel=run.probe_cancel,
+        )
+        hello = block_cause.tls_hello(
+            ip, name or None, cancel=run.probe_cancel, version=block_cause.TLS_1_3, timeout=selectivity.TLS_TIMEOUT_S
+        )
+        quic_ms = quic_future.result()
         if hello.answered:
             tls = selectivity.ANSWERED
         elif hello.kind in (block_cause.HELLO_RESET, block_cause.HELLO_TIMEOUT):

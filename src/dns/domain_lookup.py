@@ -85,6 +85,8 @@ SOURCE_LIMIT = "limit"
 SOURCE_SKIPPED = "skipped"
 
 RUN_DEADLINE_S = 40.0
+# Сколько общего срока возвращается, когда проверка сайта построила таблицу избирательности.
+SELECTIVITY_BUDGET_S = 8.0
 DNS_TIMEOUT_S = 2.0
 PING_COUNT = 4
 PING_TIMEOUT_MS = 2000
@@ -1132,6 +1134,10 @@ def run_domain_lookup(
 
         if primary_ip and not run.halted():
             report = _browser_stage(run, report, publish)
+            if (report.site or {}).get("selectivity"):
+                # Таблица избирательности шла внутри проверки сайта и съела часть общего срока: возвращаем её,
+                # иначе пинг, путь и сертификаты останутся без времени.
+                run.extend(SELECTIVITY_BUDGET_S)
             opened = opened_address(report.site)
             if opened and opened != report.primary_ip:
                 # Пинг, путь, сертификат и сеть — по адресу, на котором сайт открылся: иначе отчёт описывает один

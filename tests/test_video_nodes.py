@@ -68,17 +68,17 @@ class DiscoverTests(unittest.TestCase):
 
 
 class PlayerHostsTests(unittest.TestCase):
-    """Страница ролика: один сбой одного адреса не значит, что YouTube не открывается."""
+    """Страница ролика: адреса пробуются сразу, первый нашедший узлы побеждает, сбой одного адреса ничего не доказывает."""
 
     def _run(self):
         return SimpleNamespace(dns_cancelled=lambda: False, probe_cancel=None)
 
-    def test_second_address_and_second_video_are_tried(self) -> None:
+    def test_a_working_address_wins_while_others_fail(self) -> None:
         calls: list[tuple[str, str]] = []
 
         def fetch(_run, _host, ip, path, **kwargs):
             calls.append((ip, path))
-            if (ip, path) == ("2.2.2.2", vn._WATCH_PAGES[1]):
+            if ip == "2.2.2.2" and path == vn._WATCH_PAGES[0]:
                 kwargs["body_done"](b'..."serverAbrStreamingUrl":"https://rr1---sn-aaa.googlevideo.com/videoplayback?x=1"...')
             return SimpleNamespace(ok=(ip == "2.2.2.2"), kind="timeout", status=None)
 
@@ -92,8 +92,24 @@ class PlayerHostsTests(unittest.TestCase):
 
         self.assertEqual(hosts, ("rr1---sn-aaa.googlevideo.com",))
         self.assertEqual(failure, "")
-        self.assertEqual(calls[0][0], "1.1.1.1")
-        self.assertEqual(calls[-1], ("2.2.2.2", vn._WATCH_PAGES[1]))
+        self.assertIn(("2.2.2.2", vn._WATCH_PAGES[0]), calls)
+
+    def test_attempts_run_at_the_same_time_not_one_after_another(self) -> None:
+        import time
+
+        def slow_fetch(*_args, **_kwargs):
+            time.sleep(0.3)
+            return SimpleNamespace(ok=False, kind="timeout", status=None)
+
+        started = time.monotonic()
+        with (
+            patch.object(vn.net_access, "browser_ipv4", return_value=("1.1.1.1", "2.2.2.2", "3.3.3.3")),
+            patch.object(vn.net_access, "fetch", side_effect=slow_fetch),
+        ):
+            vn._player_hosts(self._run())
+
+        # Четыре попытки по 0,3 с подряд дали бы 1,2 с.
+        self.assertLess(time.monotonic() - started, 0.9)
 
     def test_failure_names_the_real_reason_and_the_address(self) -> None:
         reset = SimpleNamespace(ok=False, kind="reset", status=None)
@@ -109,10 +125,30 @@ class PlayerHostsTests(unittest.TestCase):
 
     def test_cancelled_run_is_not_reported_as_a_closed_page(self) -> None:
         run = SimpleNamespace(dns_cancelled=lambda: True, probe_cancel=None)
-        with patch.object(vn.net_access, "browser_ipv4", return_value=("1.1.1.1",)):
+        with (
+            patch.object(vn.net_access, "browser_ipv4", return_value=("1.1.1.1",)),
+            patch.object(vn.net_access, "fetch", return_value=SimpleNamespace(ok=False, kind="cancelled", status=None)),
+        ):
             _hosts, failure, _probe = vn._player_hosts(run)
 
         self.assertIn("проверка остановлена", failure)
+
+    def test_redirector_and_page_are_asked_at_the_same_time(self) -> None:
+        import time
+
+        def slow(_run):
+            time.sleep(0.3)
+            return MAPPED
+
+        def slow_player(_run):
+            time.sleep(0.3)
+            return PLAYER, "", ("", "")
+
+        started = time.monotonic()
+        nodes = vn.discover(object(), player=slow_player, mapped=slow)
+
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertEqual(nodes.hosts, (*PLAYER, MAPPED))
 
 
 class MappedHostTests(unittest.TestCase):

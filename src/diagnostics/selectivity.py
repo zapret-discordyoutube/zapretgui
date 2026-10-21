@@ -29,6 +29,8 @@ __all__ = [
     "SCOPE_NAME",
     "SCOPE_NODE",
     "SCOPE_NONE",
+    "QUIC_TIMEOUT_S",
+    "TLS_TIMEOUT_S",
     "Cell",
     "Finding",
     "MatrixFacts",
@@ -43,6 +45,9 @@ CONTROL_NAME = "example.com"
 # Меньше проб, чем сочетаний: таблица не должна превращаться в нагрузку на сеть.
 MAX_NAMES = 5
 MAX_ADDRESSES = 6
+# Сроки одной ячейки: короче обычных проб, потому что ячеек много и они идут одновременно.
+TLS_TIMEOUT_S = 2.5
+QUIC_TIMEOUT_S = 1.0
 
 ANSWERED = "answered"
 CUT = "cut"

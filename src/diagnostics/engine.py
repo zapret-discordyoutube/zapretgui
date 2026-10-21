@@ -880,8 +880,10 @@ def check_site(host: str, *, should_stop: ShouldStop | None = None, emit: Emit |
         report = report_text.services_report(services, verdicts, collected)
         # Сайт может открываться, а поток к нему — придерживаться или обрываться по имени (так «крутит
         # загрузку» видео). Соединение этого не покажет: нужен замер потока с именем сайта и видеосервера.
-        names = sections.check_name_speed(run, collected, services)
+        # Таблица избирательности идёт раньше замера потока: при блокировке замер всё равно нечего мерить,
+        # а таблица как раз и объясняет, кто и где мешает.
         sections.annotate_selectivity(run, report, collected, services)
+        names = sections.check_name_speed(run, collected, services)
         registry_index = registry_wait(REGISTRY_WAIT_S, run.probe_cancel)
         if run.stopped():
             raise _Stopped()

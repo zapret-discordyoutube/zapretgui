@@ -15,7 +15,9 @@ YouTube выбирает кэш Google для ролика по адресу т�
 
 from __future__ import annotations
 
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -43,7 +45,7 @@ SOURCE_REDIRECTOR = "redirector"
 _WATCH_PAGES = ("/watch?v=dQw4w9WgXcQ&hl=en", "/watch?v=58HsQ3Nlknw&hl=en")
 # Сколько адресов YouTube пробуется, пока страница не откроется, и общий срок поиска узла.
 _PAGE_ADDRESSES = 3
-_DISCOVERY_TOTAL_S = 14.0
+_DISCOVERY_TOTAL_S = 8.0
 _WATCH_PAGE_MAX_BYTES = 2_000_000
 # Сколько ещё читать страницу после имён узлов, пока не встретится адрес замера скорости.
 _PROBE_URL_WAIT_BYTES = 60_000
@@ -131,22 +133,22 @@ def _mapped_host(run) -> str:
     return ""
 
 
-def _player_hosts(run) -> tuple[tuple[str, ...], str, tuple[str, str]]:
-    """Узлы со страницы ролика и адрес замера скорости. (узлы, почему страницы нет — пусто, если она была, замер)."""
-    from blockcheck.googlevideo_discovery import (
-        extract_googlevideo_hosts,
-        extract_probe_url,
-    )
+def _read_page(run, ip: str, path: str, stop: threading.Event) -> tuple[tuple[str, ...], tuple[str, str], bool, object]:
+    """Одна страница ролика по одному адресу YouTube. (узлы, адрес замера, вышел срок чтения, итог запроса).
+
+    ``stop`` ставит тот, кто уже нашёл узлы: остальные попытки обрывают чтение.
+    """
+    from blockcheck.googlevideo_discovery import extract_googlevideo_hosts, extract_probe_url
 
     found: list[str] = []
     probe: list[tuple[str, str]] = []
-    # Когда начали читать страницу и вышел ли срок чтения.
     reading: list[float] = []
     late: list[bool] = []
-
     seen_at: list[int] = []
 
     def _done(body: bytes) -> bool:
+        if stop.is_set() and not found:
+            return True
         if b"googlevideo" in body:
             text = body.decode("utf-8", errors="ignore")
             hosts = extract_googlevideo_hosts(text)
@@ -166,31 +168,53 @@ def _player_hosts(run) -> tuple[tuple[str, ...], str, tuple[str, str]]:
             return True
         return False
 
-    # Адрес YouTube — тот, которым воспользовался бы браузер; если на нём страница не открылась, пробуются
-    # следующие адреса и второй ролик: один сбой одного адреса не доказывает, что YouTube не открывается.
-    failure = "страница YouTube не открылась: адрес YouTube не определился"
+    # Имя видеосервера ищется в самой странице: её нужно распаковать.
+    page = dict(timeout=DISCOVERY_TIMEOUT, read_limit=_WATCH_PAGE_MAX_BYTES, body_done=_done, decode_body=True)
+    result = net_access.fetch(run, YOUTUBE_HOST, ip, path, **page)
+    return tuple(found), (probe[0] if probe else ("", "")), bool(late), result
+
+
+def _player_hosts(run) -> tuple[tuple[str, ...], str, tuple[str, str]]:
+    """Узлы со страницы ролика и адрес замера скорости. (узлы, почему страницы нет — пусто, если она была, замер).
+
+    Адрес YouTube — тот, которым воспользовался бы браузер. Первый ролик пробуется на нескольких адресах сразу,
+    второй — на первом: один сбой одного адреса не доказывает, что YouTube не открывается, а ждать адреса по
+    очереди при блокировке значило бы тратить срок всей проверки. Кто первым нашёл узлы, тот и побеждает.
+    """
+    addresses = list(net_access.browser_ipv4(run, YOUTUBE_HOST))[:_PAGE_ADDRESSES]
+    attempts = [(ip, _WATCH_PAGES[0]) for ip in addresses]
+    if addresses and len(_WATCH_PAGES) > 1:
+        attempts.append((addresses[0], _WATCH_PAGES[1]))
+    if not attempts:
+        return (), "страница YouTube не открылась: адрес YouTube не определился", ("", "")
+    stop = threading.Event()
+    failure = "страница YouTube не открылась"
     named_nothing = False
-    started = time.monotonic()
-    for ip in net_access.browser_ipv4(run, YOUTUBE_HOST)[:_PAGE_ADDRESSES]:
-        for path in _WATCH_PAGES:
+    pool = ThreadPoolExecutor(max_workers=len(attempts), thread_name_prefix="video-page")
+    try:
+        futures = {pool.submit(_read_page, run, ip, path, stop): ip for ip, path in attempts}
+        deadline = time.monotonic() + _DISCOVERY_TOTAL_S
+        pending = set(futures)
+        while pending and time.monotonic() < deadline:
             if run.dns_cancelled():
                 return (), "проверка остановлена до того, как страница YouTube открылась", ("", "")
-            if time.monotonic() - started >= _DISCOVERY_TOTAL_S:
-                return (), failure, ("", "")
-            reading.clear()
-            late.clear()
-            seen_at.clear()
-            # Имя видеосервера ищется в самой странице: её нужно распаковать.
-            page = dict(timeout=DISCOVERY_TIMEOUT, read_limit=_WATCH_PAGE_MAX_BYTES, body_done=_done, decode_body=True)
-            result = net_access.fetch(run, YOUTUBE_HOST, ip, path, **page)
-            if found:
-                return tuple(found), "", (probe[0] if probe else ("", ""))
-            if late:
-                failure = "страница YouTube грузилась слишком медленно"
-            elif result.ok:
-                named_nothing = True
-            else:
-                failure = f"страница YouTube не открылась ({page_failure_reason(result)}, адрес {ip})"
+            done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+            for future in done:
+                try:
+                    hosts, probe, late, result = future.result()
+                except Exception:
+                    continue
+                if hosts:
+                    return hosts, "", probe
+                if late:
+                    failure = "страница YouTube грузилась слишком медленно"
+                elif getattr(result, "ok", False):
+                    named_nothing = True
+                else:
+                    failure = f"страница YouTube не открылась ({page_failure_reason(result)}, адрес {futures[future]})"
+    finally:
+        stop.set()
+        pool.shutdown(wait=False, cancel_futures=True)
     if named_nothing:
         return (), "YouTube не назвал видеосервер", ("", "")
     return (), failure, ("", "")
@@ -217,8 +241,12 @@ def page_failure_reason(result) -> str:
 
 def discover(run, *, player: Callable | None = None, mapped: Callable | None = None) -> VideoNodes:
     """Узлы, которые YouTube отдаёт этой сети. ``player`` и ``mapped`` — подмена источников для тестов."""
-    mapped_host = (mapped or _mapped_host)(run)
-    hosts, failure, *rest = (player or _player_hosts)(run)
+    # Редиректор и страница ролика независимы: спрашиваются одновременно, а не друг за другом.
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="video-nodes") as pool:
+        mapped_future = pool.submit(mapped or _mapped_host, run)
+        player_future = pool.submit(player or _player_hosts, run)
+        mapped_host = mapped_future.result()
+        hosts, failure, *rest = player_future.result()
     return combine(hosts, mapped_host, page_failure=failure, goodput=rest[0] if rest else ("", ""))
 
 
