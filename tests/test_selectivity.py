@@ -134,6 +134,7 @@ class AnnotateTests(unittest.TestCase):
             quic=SimpleNamespace(code=quic) if quic else None,
             cause=None,
             unstable="",
+            tried=(),
         )
 
     def _run(self):
@@ -170,6 +171,39 @@ class AnnotateTests(unittest.TestCase):
         self.assertIn("Таблица: имя × адрес (исход TLS и QUIC)", titles)
         text = "\n".join(service_view.render_text(service_view.service_sections(report[0])))
         self.assertIn("www.youtube.com: www.youtube.com 10.0.0.1 → TLS ответ, QUIC обрыв", text)
+
+
+class MixedAddressesTests(unittest.TestCase):
+    def test_reset_on_some_addresses_only_gets_the_table_with_those_addresses(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from diagnostics import block_cause, quic_probe, sections
+
+        probe = SimpleNamespace(
+            host="www.youtube.com",
+            reach=SimpleNamespace(ip="10.0.0.3"),
+            target=SimpleNamespace(main=True),
+            quic=SimpleNamespace(code="ok"),
+            cause=None,
+            unstable="",
+            tried=(("10.0.0.1", "reset"), ("10.0.0.3", "ok")),
+        )
+        run = SimpleNamespace(submit=_submit, dns_cancelled=lambda: False, probe_cancel=None)
+        report = [{"key": "youtube"}]
+
+        def hello(ip, name, **_kw):
+            if ip == "10.0.0.1" and name == "www.youtube.com":
+                return block_cause.HelloResult(block_cause.HELLO_RESET)
+            return block_cause.HelloResult(block_cause.HELLO_OK, "", 20.0)
+
+        with patch.object(block_cause, "tls_hello", hello), patch.object(quic_probe, "quic_hello", lambda *a, **k: 30.0):
+            sections.annotate_selectivity(run, report, {"youtube": [probe]}, {"youtube": SimpleNamespace(control=False)})
+
+        data = report[0]["selectivity"]
+        self.assertEqual({item["ip"] for item in data["addresses"]}, {"10.0.0.1", "10.0.0.3"})
+        scopes = {(item["protocol"], item["scope"]) for item in data["findings"]}
+        self.assertIn(("tls", "node"), scopes)
 
 
 if __name__ == "__main__":

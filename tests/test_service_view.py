@@ -155,6 +155,34 @@ class SelectivityTests(unittest.TestCase):
         self.assertIn("Избирательность: чем адреса сервиса отличаются", titles)
 
 
+class ReportRegressionTests(unittest.TestCase):
+    """Случаи из реального отчёта youtube.com: узел без QUIC не «мешает», а разошедшиеся адреса видны."""
+
+    def test_node_that_never_answers_quic_is_not_listed_as_blocked(self) -> None:
+        service = _service(
+            targets=[
+                _target(quic="ok", quic_text="отвечает"),
+                _target(host="rr4.googlevideo.com", main=False, quic="silent", quic_text="не отвечает ни с каким именем"),
+            ]
+        )
+
+        self.assertIsNone(view.selectivity_section(service))
+
+    def test_addresses_that_disagree_are_a_warning_with_the_reason(self) -> None:
+        tried = [{"address": "1.1.1.1", "result": "reset"}, {"address": "3.3.3.3", "result": "ok"}]
+        row = next(row for row in view.target_rows(_target(tried=tried)) if row.title == "Какие адреса пробовали")
+
+        self.assertEqual(row.level, "warn")
+        self.assertIn("1.1.1.1 не пустили", row.text)
+        self.assertIn("3.3.3.3 пустил", row.text)
+
+    def test_consistent_addresses_stay_a_reference(self) -> None:
+        tried = [{"address": "1.1.1.1", "result": "ok"}, {"address": "2.2.2.2", "result": "ok"}]
+        row = next(row for row in view.target_rows(_target(tried=tried)) if row.title == "Какие адреса пробовали")
+
+        self.assertEqual(row.level, "info")
+
+
 class SectionsTests(unittest.TestCase):
     STEPS = [
         {"key": "dns", "title": "DNS", "level": "ok", "text": "совпал", "confidence": "high"},

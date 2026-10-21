@@ -42,7 +42,7 @@ __all__ = [
 CONTROL_NAME = "example.com"
 # Меньше проб, чем сочетаний: таблица не должна превращаться в нагрузку на сеть.
 MAX_NAMES = 5
-MAX_ADDRESSES = 4
+MAX_ADDRESSES = 6
 
 ANSWERED = "answered"
 CUT = "cut"

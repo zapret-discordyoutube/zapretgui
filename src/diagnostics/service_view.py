@@ -194,7 +194,18 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
     tried = list(item.get("tried") or ())
     if len(tried) > 1 or (tried and not item.get("ok")):
         words = ", ".join(f"{step.get('address', '')} — {_TRIED_WORDS.get(str(step.get('result')), 'сбой')}" for step in tried)
-        rows.append(ViewRow(INFO, "Какие адреса пробовали", words))
+        opened = [step for step in tried if step.get("result") == "ok"]
+        broken = [step for step in tried if step.get("result") != "ok"]
+        if opened and broken:
+            words += (
+                f". Адреса {', '.join(str(step.get('address', '')) for step in broken)} не пустили соединение с именем сайта, "
+                f"а {', '.join(str(step.get('address', '')) for step in opened)} пустил: результат зависит от адреса. "
+                "Браузер перебирает адреса и в итоге открывает сайт, но часть попыток уходит впустую, а программы, "
+                "которые берут первый адрес, могут не открыть его. Подробное сравнение имён и адресов с контролями — в таблице ниже"
+            )
+            rows.append(ViewRow(WARN, "Какие адреса пробовали", words))
+        else:
+            rows.append(ViewRow(INFO, "Какие адреса пробовали", words))
     if item.get("unstable"):
         rows.append(ViewRow(WARN, "Открывается через раз", str(item["unstable"])))
     elif item.get("rechecked") == "opened":
@@ -269,7 +280,8 @@ def blocker_rows(item: dict) -> tuple[ViewRow, ...]:
 
 # Слои, по которым сравниваются адреса одного сервиса: (название, ключ, значения «плохо» и «хорошо», слова).
 _COMPARED_LAYERS = (
-    ("QUIC (UDP 443)", "quic", {"blocked_by_name": "пакеты теряются", "silent": "молчит"}, {"ok": "отвечает"}),
+    # «Молчит» не сравнивается: сервер, не отвечающий на QUIC ни с каким именем (кэш провайдера), его просто не поддерживает.
+    ("QUIC (UDP 443)", "quic", {"blocked_by_name": "пакеты теряются"}, {"ok": "отвечает"}),
     ("Объём загрузки", "volume", {"cut": "замирает"}, {"ok": "без обрыва"}),
     ("DNS", "dns_state", {"spoofed": "адрес подменён"}, {"ok": "совпал с эталоном"}),
 )

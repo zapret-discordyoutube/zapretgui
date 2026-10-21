@@ -1132,6 +1132,11 @@ def run_domain_lookup(
 
         if primary_ip and not run.halted():
             report = _browser_stage(run, report, publish)
+            opened = opened_address(report.site)
+            if opened and opened != report.primary_ip:
+                # Пинг, путь, сертификат и сеть — по адресу, на котором сайт открылся: иначе отчёт описывает один
+                # адрес, а сайт открыт на другом. Остальные адреса остаются в строке «Какие адреса пробовали».
+                report = publish(replace(report, primary_ip=opened))
         if not run.halted():
             if kind == KIND_DOMAIN:
                 report = _resolve_stage(run, report, rest, publish, canary=True)
@@ -1205,6 +1210,15 @@ def _inspect_quic(domain: str, ip: str, max_ttl: int, cancel: SocketCancel) -> t
     if verdict is None or verdict.code != QUIC_BLOCKED_BY_NAME:
         return verdict, None
     return verdict, locate_filter(ip, domain, max_ttl=max_ttl, cancel=cancel)
+
+
+def opened_address(site: dict | None) -> str:
+    """Адрес, на котором главный адрес сайта открылся. Пусто — сайт не открылся или адрес неизвестен."""
+    for item in (site or {}).get("targets") or ():
+        if item.get("main") and item.get("ok") and item.get("address"):
+            address = str(item["address"])
+            return address if ":" not in address else ""
+    return ""
 
 
 def _check_site(domain: str, should_stop: Callable[[], bool]) -> dict | None:

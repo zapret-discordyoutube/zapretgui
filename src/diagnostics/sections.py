@@ -629,10 +629,19 @@ def annotate_selectivity(run: Run, report: list[dict], collected: dict[str, list
             continue
         quic_codes = [probe.quic.code if probe.quic else "" for probe in probes]
         causes = [probe.cause.code if probe.cause else "" for probe in probes]
-        if not selectivity.needs_matrix(quic_codes, causes, [probe.unstable for probe in probes]):
+        # Адреса сайта разошлись: на одних соединение открылось, на других сброшено — это тоже сигнал.
+        mixed = [
+            "адреса дают разный исход"
+            for probe in probes
+            if {kind == "ok" for _ip, kind in getattr(probe, "tried", ())} == {True, False}
+        ]
+        if not selectivity.needs_matrix(quic_codes, causes, [probe.unstable for probe in probes] + mixed):
             continue
         ordered = sorted(probes, key=lambda probe: not probe.target.main)
         addresses = [(probe.host, probe.reach.ip) for probe in ordered if probe.reach is not None and probe.reach.ip]
+        # Адреса, которые перебирал сам сайт: одно имя на каждом из них, чтобы видеть, какой пускает, а какой нет.
+        for probe in ordered:
+            addresses.extend((probe.host, ip) for ip, _kind in getattr(probe, "tried", ()) if ip and ":" not in ip)
         facts = selectivity.collect(
             [probe.host for probe in ordered], addresses, _matrix_cell(run), submit=run.submit, should_stop=run.dns_cancelled
         )

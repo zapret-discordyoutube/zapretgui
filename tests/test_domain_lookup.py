@@ -365,6 +365,14 @@ class AskTests(unittest.TestCase):
         self.assertIn("сам сайт при этом открывается", opens.detail)
         self.assertIn("сервер не ответил вовремя", opens.detail)
 
+    def test_address_stage_follows_the_address_that_opened_the_site(self) -> None:
+        site = {"targets": [{"main": True, "ok": True, "address": "142.251.153.4"}, {"main": False, "ok": True, "address": "9.9.9.9"}]}
+
+        self.assertEqual(engine.opened_address(site), "142.251.153.4")
+        self.assertEqual(engine.opened_address({"targets": [{"main": True, "ok": False, "address": "1.1.1.1"}]}), "")
+        self.assertEqual(engine.opened_address({"targets": [{"main": True, "ok": True, "address": "2001:db8::1"}]}), "")
+        self.assertEqual(engine.opened_address(None), "")
+
     def test_unreachable_service_is_explained_in_words(self) -> None:
         import requests
 
