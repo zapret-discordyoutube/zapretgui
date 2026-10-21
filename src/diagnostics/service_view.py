@@ -335,7 +335,8 @@ def _matrix_text(matrix: dict) -> str:
             tls = _CELL_WORDS.get(str(cell.get("tls")), "?")
             quic = _CELL_WORDS.get(str(cell.get("quic")), "?")
             cells.append(f"TLS {tls}, QUIC {quic}")
-        lines.append(f"{row.get('name', '')}: " + " | ".join(f"{head} → {cell}" for head, cell in zip(heads, cells, strict=False)))
+        lines.append(f"{row.get('name', '')}:")
+        lines.extend(f"    на {head} → {cell}" for head, cell in zip(heads, cells, strict=False))
     return "\n".join(lines)
 
 

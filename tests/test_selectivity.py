@@ -170,7 +170,7 @@ class AnnotateTests(unittest.TestCase):
         titles = [section.title for section in service_view.service_sections(report[0])]
         self.assertIn("Таблица: имя × адрес (исход TLS и QUIC)", titles)
         text = "\n".join(service_view.render_text(service_view.service_sections(report[0])))
-        self.assertIn("www.youtube.com: www.youtube.com 10.0.0.1 → TLS ответ, QUIC обрыв", text)
+        self.assertIn("    на www.youtube.com 10.0.0.1 → TLS ответ, QUIC обрыв", text)
 
 
 class MixedAddressesTests(unittest.TestCase):
