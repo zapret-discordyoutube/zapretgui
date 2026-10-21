@@ -101,7 +101,7 @@ def wait_endpoints() -> tuple[WaitEndpoint, ...]:
     from .mirrors import mirror_servers
     from ..server_config import should_verify_ssl
 
-    endpoints = [WaitEndpoint("Forgejo", site_links.resolve(FORGEJO_WAIT_URL), True)]
+    endpoints = [WaitEndpoint("Forgejo", site_links.resolve_probed(FORGEJO_WAIT_URL), True)]
     for server in mirror_servers():
         name = str(server.get("name") or server.get("host") or "")
         endpoints.append(

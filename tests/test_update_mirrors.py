@@ -450,3 +450,53 @@ class RaceSpeedTests(unittest.TestCase):
 
         mirror_list = mirrors.MirrorList(fetch)
         self.assertEqual(mirror_list.choose(), "git3.zapret.moe")
+
+
+class BestNameTests(unittest.TestCase):
+    """best(): имя для браузера — мгновенно, без сети и без ожидания гонки."""
+
+    def _body(self) -> bytes:
+        return json.dumps(
+            _document(("git.zapret.moe", True), ("git2.zapret.moe", False), ("git3.zapret.moe", False))
+        ).encode()
+
+    def test_without_any_data_it_is_the_first_mirror_and_asks_nothing(self) -> None:
+        asked: list[str] = []
+        mirror_list = mirrors.MirrorList(lambda url: asked.append(url))
+        self.assertEqual(mirror_list.best(), "git2.zapret.moe")
+        self.assertEqual(asked, [])
+        self.assertEqual(mirrors.MirrorList(lambda url: None, family="wiki").best(), "wiki2.zapret.moe")
+
+    def test_proven_name_wins_then_server_order(self) -> None:
+        now = [0.0]
+        body = json.dumps(
+            _document(("git2.zapret.moe", False), ("git3.zapret.moe", False), preferred="git3.zapret.moe")
+        ).encode()
+        # Из программы отвечает только git2 (победитель гонки), а сервер считает лучшим git3.
+        mirror_list = mirrors.MirrorList(lambda url: body if "git2." in url else None, clock=lambda: now[0])
+        mirror_list.hosts()
+        self.assertEqual(mirror_list.best(), "git2.zapret.moe")
+        # Когда доказательство устарело, остаётся порядок самого сервера.
+        now[0] = mirrors.GOOD_TTL_S + 1
+        self.assertEqual(mirror_list.best(), "git3.zapret.moe")
+
+    def test_blocked_main_name_is_last_in_the_server_order(self) -> None:
+        mirror_list = mirrors.MirrorList(lambda url: self._body() if "git3." in url else None)
+        mirror_list.hosts()
+        mirror_list.forget()
+        self.assertNotEqual(mirror_list.best(), "git.zapret.moe")
+
+    def test_it_does_not_wait_for_a_race_that_holds_the_lock(self) -> None:
+        import threading
+        import time
+
+        release = threading.Event()
+        mirror_list = mirrors.MirrorList(lambda url: release.wait(10) and None)
+        threading.Thread(target=mirror_list.choose, daemon=True).start()
+        time.sleep(0.2)
+        started = time.monotonic()
+        name = mirror_list.best()
+        elapsed = time.monotonic() - started
+        release.set()
+        self.assertEqual(name, "git2.zapret.moe")
+        self.assertLess(elapsed, 0.2)

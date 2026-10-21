@@ -16,7 +16,7 @@ from utils import site_links  # noqa: E402
 class ResolveTests(unittest.TestCase):
     def test_project_links_get_the_chosen_name_of_their_own_family(self) -> None:
         names = {"git": "git2.zapret.moe", "wiki": "wiki3.zapret.moe"}
-        with patch.object(site_links, "chosen_host", side_effect=lambda family="git": names[family]):
+        with patch.object(site_links, "best_host", side_effect=lambda family="git": names[family]):
             self.assertEqual(
                 site_links.resolve("https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues"),
                 "https://git2.zapret.moe/zapretdiscordyoutube/zapretgui/issues",
@@ -27,7 +27,9 @@ class ResolveTests(unittest.TestCase):
             )
 
     def test_other_addresses_are_untouched_and_ask_nothing(self) -> None:
-        with patch.object(site_links, "chosen_host", side_effect=AssertionError("сеть не нужна")):
+        with patch.object(site_links, "best_host", side_effect=AssertionError("имя не нужно")), patch.object(
+            site_links, "chosen_host", side_effect=AssertionError("сеть не нужна")
+        ):
             for url in (
                 "https://t.me/zaprethelp",
                 "https://discord.gg/kkcBDG2uws",
@@ -50,43 +52,64 @@ class ResolveTests(unittest.TestCase):
 
 
 class OpenInBrowserTests(unittest.TestCase):
-    def test_does_not_wait_for_the_network_and_opens_the_resolved_address(self) -> None:
-        release = threading.Event()
+    def test_opens_the_best_name_at_once_without_any_network(self) -> None:
         opened: list[str] = []
-        done = threading.Event()
-
-        def slow_choice(family="git"):
-            release.wait(5)
-            return "wiki2.zapret.moe"
-
-        def fake_open(url):
-            opened.append(url)
-            done.set()
-
-        with patch.object(site_links, "chosen_host", side_effect=slow_choice), patch.object(
-            site_links.webbrowser, "open", side_effect=fake_open
-        ):
+        with patch.object(site_links, "best_host", return_value="wiki2.zapret.moe"), patch.object(
+            site_links, "chosen_host", side_effect=AssertionError("кнопка не должна ждать пробу")
+        ), patch.object(site_links.webbrowser, "open", side_effect=opened.append):
             site_links.open_in_browser("https://wiki.zapret.moe/Zapret/home")
-            self.assertEqual(opened, [], "окно ждало выбор имени")
-            release.set()
-            self.assertTrue(done.wait(5))
-
         self.assertEqual(opened, ["https://wiki2.zapret.moe/Zapret/home"])
 
-    def test_a_failed_choice_never_raises_into_the_window(self) -> None:
-        done = threading.Event()
-        with patch.object(site_links, "resolve", side_effect=RuntimeError("нет сети")), patch.object(
-            site_links, "log", side_effect=lambda *a, **k: done.set()
-        ):
+    def test_a_race_in_progress_does_not_hold_up_a_click(self) -> None:
+        """Гонка в фоне держит блокировку списка; нажатие её не ждёт."""
+        import time
+        from zapret_update import mirrors
+
+        release = threading.Event()
+
+        def silent(url: str):
+            release.wait(10)
+            return None
+
+        names = mirrors.MirrorList(silent, family="wiki")
+        threading.Thread(target=names.choose, daemon=True).start()
+        time.sleep(0.2)
+        try:
+            with patch.object(site_links, "mirror_list", return_value=names):
+                started = time.monotonic()
+                url = site_links.resolve("https://wiki.zapret.moe/Zapret/home")
+                elapsed = time.monotonic() - started
+        finally:
+            release.set()
+        self.assertLess(elapsed, 0.3)
+        self.assertEqual(url, "https://wiki2.zapret.moe/Zapret/home")
+
+    def test_a_failed_open_never_raises_into_the_window(self) -> None:
+        with patch.object(site_links, "resolve", side_effect=RuntimeError("сбой")), patch.object(
+            site_links, "log"
+        ) as log:
             site_links.open_in_browser("https://git.zapret.moe/")
-            self.assertTrue(done.wait(5))
+        self.assertTrue(log.called)
+
+
+class ProbedNameTests(unittest.TestCase):
+    """Запросы самой программы идут под именем, до которого дошла гонка."""
+
+    def test_resolve_probed_uses_the_race_winner(self) -> None:
+        with patch.object(site_links, "chosen_host", return_value="git3.zapret.moe"):
+            self.assertEqual(
+                site_links.resolve_probed("https://git.zapret.moe/api/zapret/wait"),
+                "https://git3.zapret.moe/api/zapret/wait",
+            )
+        with patch.object(site_links, "chosen_host", side_effect=AssertionError("сеть не нужна")):
+            self.assertEqual(site_links.resolve_probed("https://t.me/x"), "https://t.me/x")
 
 
 class ButtonsGoThroughTheModuleTests(unittest.TestCase):
     """«Справка», «Исходный код», «Документация», форма заявки: адрес уходит в браузер под открытым именем."""
 
     def _opened_through(self, call):
-        with patch.object(site_links, "chosen_host", side_effect=lambda family="git": f"{family}2.zapret.moe"), patch(
+        with patch.object(site_links, "best_host", side_effect=lambda family="git": f"{family}2.zapret.moe"), patch(
             "webbrowser.open"
         ) as browser:
             call()

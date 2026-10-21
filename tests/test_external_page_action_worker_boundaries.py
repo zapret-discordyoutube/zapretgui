@@ -102,7 +102,7 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
         feature = _ExternalActionsFeature()
 
         with patch("about.commands.webbrowser.open", side_effect=opened_urls.append), patch(
-            "utils.site_links.chosen_host", return_value="wiki2.zapret.moe"
+            "utils.site_links.best_host", return_value="wiki2.zapret.moe"
         ):
             kwargs = build_about_page_kwargs(
                 page_name=PageName.ABOUT,
