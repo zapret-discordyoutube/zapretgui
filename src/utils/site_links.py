@@ -8,7 +8,9 @@
 
 Все ссылки в программе пишутся на основных именах (``config/urls.py``), а
 имя подменяется в последний момент: ``resolve`` — в фоновом потоке, где можно
-подождать сеть, ``open_in_browser`` — из окна, не задерживая его.
+подождать сеть, ``open_in_browser`` — из окна, не задерживая его. Выбор делается
+заранее (``warm_up`` при запуске), поэтому нажатие обычно не ждёт ничего; а если
+имена молчат, ждёт не дольше срока гонки и открывает лучшее имя из списка.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ _LIST_TIMEOUT = (3, 3)
 _USER_AGENT = "Zapret-Updater/5.0"
 
 _lists: dict[str, mirrors.MirrorList] = {}
-_choose_locks: dict[str, threading.Lock] = {}
 _guard = threading.Lock()
 
 
@@ -55,15 +56,26 @@ def mirror_list(family: str = "git") -> mirrors.MirrorList:
         found = _lists.get(family)
         if found is None:
             found = _lists[family] = mirrors.MirrorList(_fetch, family=family, report=_report)
-            _choose_locks[family] = threading.Lock()
         return found
 
 
 def chosen_host(family: str = "git") -> str:
-    """Имя, под которым сайт открывается сейчас. Может ждать сеть: только из фонового потока."""
-    names = mirror_list(family)
-    with _choose_locks[family]:
-        return names.choose()
+    """Имя, под которым сайт открывается сейчас.
+
+    Готовый выбор отдаётся сразу; иначе идёт гонка по именам (не дольше нескольких
+    секунд, см. ``zapret_update.mirrors``). Только из фонового потока.
+    """
+    return mirror_list(family).choose()
+
+
+def warm_up() -> None:
+    """Выбрать имена git и вики заранее, в фоне: к первому нажатию кнопки выбор готов.
+
+    Дёшево (одна гонка на семейство, обычно доли секунды) и безопасно звать
+    повторно: готовый выбор не пересчитывается.
+    """
+    for family in mirrors.FAMILIES:
+        threading.Thread(target=chosen_host, args=(family,), name=f"site-names-{family}", daemon=True).start()
 
 
 def resolve(url: str) -> str:

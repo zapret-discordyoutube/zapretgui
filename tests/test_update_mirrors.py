@@ -12,6 +12,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from zapret_update import mirrors  # noqa: E402
 
 
+def setUpModule() -> None:
+    # Гонка в тестах: имена подключаются почти сразу, срок короткий.
+    global _patches
+    from unittest.mock import patch
+
+    _patches = [patch.object(mirrors, "RACE_STAGGER_S", 0.01), patch.object(mirrors, "RACE_DEADLINE_S", 1.5)]
+    for patcher in _patches:
+        patcher.start()
+
+
+def tearDownModule() -> None:
+    for patcher in _patches:
+        patcher.stop()
+
+
 def _document(*names, preferred="git2.zapret.moe"):
     return {
         "schema": 1,
@@ -101,8 +116,10 @@ class MirrorListTests(unittest.TestCase):
         mirror_list, asked = self._list({"https://git3.zapret.moe/_sites/mirrors.json": body})
 
         self.assertEqual(mirror_list.hosts(), ["git2.zapret.moe", "git.zapret.moe"])
+        # Все имена спрашиваются параллельно: первым — лучшее, победителем стало то, что ответило.
         self.assertEqual(asked[0], "https://git2.zapret.moe/_sites/mirrors.json")
-        self.assertEqual(asked[-1], "https://git3.zapret.moe/_sites/mirrors.json")
+        self.assertIn("https://git3.zapret.moe/_sites/mirrors.json", asked)
+        self.assertEqual(mirror_list.choose(), "git3.zapret.moe")
 
     def test_list_is_cached_and_asked_again_after_the_time_is_up(self) -> None:
         now = [0.0]
@@ -175,7 +192,9 @@ class MirrorReportTests(unittest.TestCase):
         mirror_list.hosts()
 
         self.assertEqual(len(said), 1)
-        self.assertIn("получен с git4.zapret.moe", said[0])
+        self.assertIn("git4.zapret.moe ответило", said[0])
+        self.assertIn("git2.zapret.moe: OSError", said[0])
+        self.assertIn("git3.zapret.moe: ValueError", said[0])
 
     def test_report_lists_all_causes_when_nothing_answers(self) -> None:
         said: list[str] = []
@@ -301,11 +320,24 @@ class ChooseTests(unittest.TestCase):
         mirror_list, _asked = self._list({"git.zapret.moe", "git3.zapret.moe"})
         self.assertEqual(mirror_list.choose(), "git3.zapret.moe")
 
-    def test_nothing_answers_gives_best_guess_without_remembering(self) -> None:
-        mirror_list, asked = self._list(set())
-        guess = mirror_list.choose()
-        self.assertEqual(guess, "git2.zapret.moe")
+    def test_nothing_answers_gives_best_guess_and_does_not_race_again_for_a_while(self) -> None:
+        now = [0.0]
+        asked: list[str] = []
+
+        def fetch(url: str):
+            asked.append(url)
+            raise OSError("TLS закрыт")
+
+        mirror_list = mirrors.MirrorList(fetch, clock=lambda: now[0])
+        self.assertEqual(mirror_list.choose(), "git2.zapret.moe")
         before = len(asked)
+        self.assertGreater(before, 0)
+
+        # Кнопка не должна ждать при каждом нажатии: неудача помнится на FALLBACK_TTL_S.
+        self.assertEqual(mirror_list.choose(), "git2.zapret.moe")
+        self.assertEqual(len(asked), before)
+
+        now[0] = mirrors.FALLBACK_TTL_S + 1
         mirror_list.choose()
         self.assertGreater(len(asked), before)
 
@@ -318,3 +350,103 @@ class ChooseTests(unittest.TestCase):
         self.assertEqual(mirror_list.choose(), "git2.zapret.moe")
         mirror_list.forget()
         self.assertEqual(mirror_list.choose(), "git2.zapret.moe")
+
+
+class RaceSpeedTests(unittest.TestCase):
+    """Выбор имени — гонка с жёстким сроком: молчащие имена не задерживают кнопку."""
+
+    def _body(self) -> bytes:
+        return json.dumps(
+            _document(("git.zapret.moe", True), ("git2.zapret.moe", False), ("git3.zapret.moe", False))
+        ).encode()
+
+    def test_a_silent_first_name_does_not_hold_up_the_one_that_answers(self) -> None:
+        import time
+
+        body = self._body()
+
+        def fetch(url: str):
+            host = url.split("/")[2]
+            if host == "git2.zapret.moe":
+                time.sleep(30)  # молчит: такое имя при переборе стоило бы всего срока
+            return body if host == "git3.zapret.moe" else (_ for _ in ()).throw(OSError("закрыто"))
+
+        mirror_list = mirrors.MirrorList(fetch)
+        started = time.monotonic()
+        self.assertEqual(mirror_list.choose(), "git3.zapret.moe")
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_total_silence_is_bounded_by_the_deadline(self) -> None:
+        import time
+        from unittest.mock import patch
+
+        def fetch(url: str):
+            time.sleep(30)
+
+        mirror_list = mirrors.MirrorList(fetch)
+        with patch.object(mirrors, "RACE_DEADLINE_S", 0.4):
+            started = time.monotonic()
+            guess = mirror_list.choose()
+            elapsed = time.monotonic() - started
+        self.assertEqual(guess, "git2.zapret.moe")
+        self.assertLess(elapsed, 1.5)
+        # и повторное нажатие уже не ждёт
+        started = time.monotonic()
+        mirror_list.choose()
+        self.assertLess(time.monotonic() - started, 0.1)
+
+    def test_concurrent_callers_share_one_race(self) -> None:
+        import threading
+        import time
+
+        body = self._body()
+        calls: list[str] = []
+
+        def fetch(url: str):
+            calls.append(url)
+            time.sleep(0.2)
+            return body
+
+        mirror_list = mirrors.MirrorList(fetch)
+        results: list[str] = []
+        threads = [threading.Thread(target=lambda: results.append(mirror_list.choose())) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(5)
+
+        self.assertEqual(len(results), 6)
+        self.assertEqual(len(set(results)), 1)
+        self.assertEqual(calls.count("https://git2.zapret.moe/_sites/mirrors.json"), 1)
+
+    def test_good_name_expires_and_the_choice_is_made_again(self) -> None:
+        now = [0.0]
+        body = self._body()
+        asked: list[str] = []
+
+        def fetch(url: str):
+            asked.append(url)
+            return body
+
+        mirror_list = mirrors.MirrorList(fetch, clock=lambda: now[0])
+        mirror_list.choose()
+        count = len(asked)
+        mirror_list.choose()
+        self.assertEqual(len(asked), count)
+        now[0] = mirrors.GOOD_TTL_S + 1
+        mirror_list.choose()
+        self.assertGreater(len(asked), count)
+
+    def test_a_name_from_a_real_exchange_beats_the_race_winner(self) -> None:
+        mirror_list = mirrors.MirrorList(lambda url: self._body())
+        mirror_list.remember("git3.zapret.moe")
+        mirror_list.hosts()
+        self.assertEqual(mirror_list.choose(), "git3.zapret.moe")
+
+    def test_garbage_answers_are_not_a_working_name(self) -> None:
+        def fetch(url: str):
+            host = url.split("/")[2]
+            return b"<html>captive portal</html>" if host == "git2.zapret.moe" else self._body()
+
+        mirror_list = mirrors.MirrorList(fetch)
+        self.assertEqual(mirror_list.choose(), "git3.zapret.moe")

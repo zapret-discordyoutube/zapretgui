@@ -138,5 +138,37 @@ class ButtonsGoThroughTheModuleTests(unittest.TestCase):
         self.assertTrue(url.startswith("https://git3.zapret.moe/api/packages/"), url)
 
 
+class WarmUpTests(unittest.TestCase):
+    """Имена выбираются заранее, в фоне: к нажатию кнопки выбор уже готов."""
+
+    def test_warm_up_chooses_both_families_without_blocking(self) -> None:
+        release = threading.Event()
+        asked: list[str] = []
+        both = threading.Event()
+
+        def slow_choice(family="git"):
+            asked.append(family)
+            if len(asked) >= 2:
+                both.set()
+            release.wait(5)
+            return f"{family}2.zapret.moe"
+
+        import time
+
+        with patch.object(site_links, "chosen_host", side_effect=slow_choice):
+            started = time.monotonic()
+            site_links.warm_up()
+            self.assertLess(time.monotonic() - started, 0.5, "запуск ждал выбор имён")
+            self.assertTrue(both.wait(5))
+            release.set()
+        self.assertEqual(sorted(asked), ["git", "wiki"])
+
+    def test_startup_runs_the_warm_up(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "src" / "main" / "post_startup_update.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("site_links.warm_up()", source)
+
+
 if __name__ == "__main__":
     unittest.main()

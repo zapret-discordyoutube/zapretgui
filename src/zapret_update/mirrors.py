@@ -24,7 +24,9 @@
 from __future__ import annotations
 
 import json
+import queue
 import re
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -40,8 +42,15 @@ BOOTSTRAP_HOSTS = (*(f"git{number}.zapret.moe" for number in range(2, 9)), CANON
 WIKI_BOOTSTRAP_HOSTS = (*(f"wiki{number}.zapret.moe" for number in range(2, 9)), "wiki.zapret.moe")
 MAX_PUBLISHED_HOSTS = 16
 LIST_TTL_S = 600.0
-# Не удалось ни скачать список, ни разобрать: запасной список держится недолго.
+# Не ответило ни одно имя: запасной список держится недолго, гонка не повторяется.
 FALLBACK_TTL_S = 60.0
+# Выигравшее имя считается рабочим столько; потом выбор повторяется.
+GOOD_TTL_S = 1800.0
+# Гонка: имена спрашиваются параллельно, i-е — через i * RACE_STAGGER_S секунд (лучшее
+# первым, остальные подключаются, только если оно молчит), не дольше срока.
+RACE_DEADLINE_S = 4.0
+RACE_STAGGER_S = 0.25
+MAX_RACERS = 8
 
 _HOST_RE = re.compile(r"^(git|wiki)\d*\.zapret\.moe$", re.IGNORECASE)
 
@@ -154,15 +163,25 @@ def ordered_hosts(document: Any, family: str = "git") -> list[str]:
 
 
 class MirrorList:
-    """Открытые имена сайта (семейство ``git`` или ``wiki``): из списка сервера, запомненное удачное — первым.
+    """Открытые имена сайта (семейство ``git`` или ``wiki``) и выбор рабочего.
 
-    ``fetch(url)`` — короткий (одна попытка, несколько секунд) запрос без
-    повторов, возвращает тело ответа или ``None``/бросает ошибку. Работает на
-    маршруте вызывающего: прямом или через прокси.
+    Выбор — гонка, а не перебор: у имён параллельно (со сдвигом в долю секунды,
+    лучшее имя первым) запрашивается ``/_sites/mirrors.json``, и первое
+    ответившее верным документом выигрывает. Один такой запрос и доказывает, что
+    имя открывается с этого компьютера, и отдаёт список имён сервера. Дольше
+    ``RACE_DEADLINE_S`` гонка не идёт, сколько бы имён ни молчало: закрытое имя
+    стоит программе секунд, а не минут, как при переборе по одному.
 
-    ``report(строка)`` — необязательный журнал: откуда получен список имён и по
+    ``fetch(url)`` — короткий (одна попытка) запрос без повторов, возвращает
+    тело ответа или ``None``/бросает ошибку; вызывается из нескольких потоков
+    сразу. Работает на маршруте вызывающего: прямом или через прокси.
+
+    ``report(строка)`` — необязательный журнал: кто ответил и за сколько, и по
     какой причине не вышло с каждым именем (без него по записи «Forgejo
     недоступен» не понять, чем именно закрыты зеркала на этом компьютере).
+
+    Все вызовы безопасны из любых потоков; одновременные вопросы ждут одну и ту
+    же гонку, а не запускают свою.
     """
 
     def __init__(
@@ -177,33 +196,61 @@ class MirrorList:
         self._family = family
         self._clock = clock
         self._report = report
+        self._lock = threading.RLock()
         self._hosts: list[str] | None = None
         self._expires_at = 0.0
         self._good: str | None = None
+        self._good_until = 0.0
+        # Гонку не повторяют, пока не истёк срок: неудача помнится недолго.
+        self._failed_until = 0.0
 
     def remember(self, host: str) -> None:
         """Под этим именем только что получили ответ: пробовать его первым."""
         if family_of(host) == self._family:
-            self._good = host.lower()
+            with self._lock:
+                self._good = host.lower()
+                self._good_until = self._clock() + GOOD_TTL_S
 
     def forget(self) -> None:
-        self._hosts = None
-        self._good = None
+        with self._lock:
+            self._hosts = None
+            self._good = None
+            self._failed_until = 0.0
 
     def hosts(self) -> list[str]:
         """Имена в порядке, в котором их пробовать."""
-        now = self._clock()
-        if self._hosts is None or now >= self._expires_at:
-            published = self._download_list()
-            if published:
-                self._hosts, self._expires_at = published, now + LIST_TTL_S
-            else:
-                self._hosts, self._expires_at = list(bootstrap_hosts(self._family)), now + FALLBACK_TTL_S
-        hosts = list(self._hosts)
-        if self._good in hosts:
-            hosts.remove(self._good)
-            hosts.insert(0, self._good)
-        return hosts
+        with self._lock:
+            now = self._clock()
+            if self._hosts is None or now >= self._expires_at:
+                self._refresh()
+            hosts = list(self._hosts or bootstrap_hosts(self._family))
+            if self._good in hosts:
+                hosts.remove(self._good)
+                hosts.insert(0, self._good)
+            return hosts
+
+    def choose(self) -> str:
+        """Имя, под которым сайт открывается сейчас, и оно же запоминается.
+
+        Запомненное имя отдаётся сразу (выбор делается один раз). Иначе идёт
+        гонка (не дольше ``RACE_DEADLINE_S``). Не ответило ни одно — первое по
+        порядку списка (пометка «заблокировано» в списке сервера измерена из
+        российских сетей, поэтому это лучшая догадка), и следующие
+        ``FALLBACK_TTL_S`` секунд гонка не повторяется: кнопка не должна каждый
+        раз ждать.
+        """
+        with self._lock:
+            if self._good is not None and self._clock() < self._good_until:
+                return self._good
+            self._good = None
+            if self._clock() >= self._failed_until:
+                self._refresh()
+            hosts = self._hosts or list(bootstrap_hosts(self._family))
+            return self._good or (hosts[0] if hosts else canonical_host(self._family))
+
+    def note_failure(self, host: str, exc: BaseException) -> None:
+        """Журнал: под этим именем сервер не ответил (причина — для разбора на компьютере пользователя)."""
+        self._say(f"{host}: {type(exc).__name__}: {str(exc)[:160]}")
 
     def _say(self, message: str) -> None:
         if self._report is None:
@@ -213,53 +260,90 @@ class MirrorList:
         except Exception:
             pass
 
-    def _download_list(self) -> list[str]:
-        failures: list[str] = []
-        # Список один на все семейства, поэтому если свои имена закрыты, он
-        # скачивается и с имён соседнего семейства.
-        others = [name for name in FAMILIES if name != self._family]
-        sources = [*bootstrap_hosts(self._family), *(host for name in others for host in bootstrap_hosts(name))]
-        for host in sources:
+    def _refresh(self) -> None:
+        """Гонка по именам: запоминает победителя и список сервера (или неудачу)."""
+        started = time.monotonic()
+        winner, ordered, failures = self._race()
+        now = self._clock()
+        if winner is None:
+            self._hosts, self._expires_at = list(bootstrap_hosts(self._family)), now + FALLBACK_TTL_S
+            self._failed_until = now + FALLBACK_TTL_S
+            self._say("ни одно имя сервера не ответило, берётся запасной список; " + "; ".join(failures))
+            return
+        # Имя, под которым уже был настоящий обмен (``remember``), весомее гонки.
+        if self._good is None or now >= self._good_until:
+            self._good, self._good_until = winner, now + GOOD_TTL_S
+        self._failed_until = 0.0
+        if ordered:
+            self._hosts, self._expires_at = ordered, now + LIST_TTL_S
+        else:
+            self._hosts, self._expires_at = list(bootstrap_hosts(self._family)), now + FALLBACK_TTL_S
+        self._say(
+            f"{winner} ответило за {time.monotonic() - started:.1f} с"
+            + (f"; список имён: {', '.join(ordered)}" if ordered else "; списка имён нет, берётся запасной")
+            + (f"; не ответили: {'; '.join(failures)}" if failures else "")
+        )
+
+    def _candidates(self) -> list[str]:
+        """Кого спрашивать: имена из прошлого списка сервера, иначе запасной список."""
+        names = list(self._hosts) if self._hosts else []
+        if not names:
+            names = list(bootstrap_hosts(self._family))
+        if self._good in names:
+            names.remove(self._good)
+            names.insert(0, self._good)
+        return names[:MAX_RACERS]
+
+    def _race(self) -> tuple[str | None, list[str], list[str]]:
+        """(победитель, имена из его списка, причины неудач). Не дольше ``RACE_DEADLINE_S``."""
+        names = self._candidates()
+        answers: queue.Queue = queue.Queue()
+        stop = threading.Event()
+
+        def ask(host: str, delay: float) -> None:
+            if delay and stop.wait(delay):
+                answers.put((host, None, None))
+                return
             try:
                 body = self._fetch(f"https://{host}{MIRRORS_PATH}")
                 if not body:
-                    failures.append(f"{host}: пустой ответ")
-                    continue
-                ordered = ordered_hosts(json.loads(body), self._family)
-            except Exception as exc:
-                failures.append(f"{host}: {type(exc).__name__}: {str(exc)[:120]}")
-                continue
-            if ordered:
-                self._say(f"список имён сервера получен с {host}: {', '.join(ordered)}")
-                return ordered
-            failures.append(f"{host}: список без имён")
-        self._say("список имён сервера не получен, берётся запасной; " + "; ".join(failures))
-        return []
+                    raise ValueError("пустой ответ")
+                document = json.loads(body)
+                if not isinstance(document, dict):
+                    raise ValueError("ответ не похож на список имён")
+            except Exception as exc:  # noqa: BLE001 — любая причина идёт в журнал
+                answers.put((host, None, f"{host}: {type(exc).__name__}: {str(exc)[:120]}"))
+                return
+            answers.put((host, document, None))
 
-    def choose(self) -> str:
-        """Имя, под которым сайт открывается сейчас, и оно же запоминается.
-
-        Запомненное имя отдаётся сразу (выбор делается один раз). Иначе имена
-        из списка пробуются по порядку коротким запросом, первое ответившее
-        запоминается. Не ответило ни одно — первое по порядку (пометка
-        «заблокировано» в списке измерена из российских сетей, поэтому лучшая
-        догадка), без запоминания: в следующий раз выбор повторится.
-        """
-        if self._good is not None:
-            return self._good
-        hosts = self.hosts()
-        for host in hosts:
-            try:
-                if self._fetch(f"https://{host}{MIRRORS_PATH}"):
-                    self.remember(host)
-                    return host
-            except Exception as exc:
-                self.note_failure(host, exc)
-        return hosts[0] if hosts else canonical_host(self._family)
-
-    def note_failure(self, host: str, exc: BaseException) -> None:
-        """Журнал: под этим именем сервер не ответил (причина — для разбора на компьютере пользователя)."""
-        self._say(f"{host}: {type(exc).__name__}: {str(exc)[:160]}")
+        for index, host in enumerate(names):
+            threading.Thread(
+                target=ask, args=(host, index * RACE_STAGGER_S), name="site-name-race", daemon=True
+            ).start()
+        failures: list[str] = []
+        answered: set[str] = set()
+        deadline = time.monotonic() + RACE_DEADLINE_S
+        pending = len(names)
+        try:
+            while pending:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                try:
+                    host, document, failure = answers.get(timeout=left)
+                except queue.Empty:
+                    break
+                pending -= 1
+                answered.add(host)
+                if failure:
+                    failures.append(failure)
+                elif document is not None:
+                    return host, ordered_hosts(document, self._family), failures
+            silent = [host for host in names if host not in answered]
+            failures.extend(f"{host}: нет ответа за {RACE_DEADLINE_S:.0f} с" for host in silent)
+            return None, [], failures
+        finally:
+            stop.set()
 
 
 __all__ = [

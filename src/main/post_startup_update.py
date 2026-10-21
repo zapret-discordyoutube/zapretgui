@@ -463,6 +463,14 @@ def install_update_check(
     def _start_release_watcher() -> None:
         nonlocal release_watcher
         _note_window_presence()
+        # Рабочие имена git и вики выбираются заранее, в фоне: кнопки со ссылками
+        # и очередь обновлений не ждут выбора при нажатии.
+        try:
+            from utils import site_links
+
+            site_links.warm_up()
+        except Exception as exc:
+            log(f"Выбор имён сайтов проекта не запущен: {exc}", "WARNING")
         try:
             watcher = updater_feature.create_release_watcher(
                 on_release=lambda version: update_bridge.release_signalled.emit(str(version or "")),
