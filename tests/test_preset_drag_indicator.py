@@ -143,7 +143,7 @@ class PresetDragIndicatorTests(unittest.TestCase):
         self.assertIn('marker.get("mode") == "folder"', delegate_source)
         self.assertIn('marker.get("mode") in ("before", "after")', delegate_source)
         self.assertIn("drag_marker_visible", delegate_source)
-        self.assertIn("active=is_active and not drag_marker_visible", delegate_source)
+        self.assertIn("active=(is_active or clicked) and not drag_marker_visible", delegate_source)
         self.assertIn("show_active_marker=False", delegate_source)
 
     def test_delegate_action_updates_only_affected_preset_row(self) -> None:

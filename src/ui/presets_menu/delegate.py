@@ -60,6 +60,9 @@ class PresetListDelegate(QStyledItemDelegate):
     # Запас к системному времени двойного щелчка: одиночный щелчок включает
     # пресет только когда второй уже точно не придёт.
     _DOUBLE_CLICK_MARGIN_MS = 30
+    # Сколько плитка остаётся подсвеченной после включения: бегунок едет 760 мс.
+    # Если включение сорвалось, подсветка сама погаснет.
+    _CLICK_HIGHLIGHT_AFTER_ACTIVATION_MS = 1200
 
     def __init__(self, view: QListView, *, language_scope: str = "winws2", help_name_role: str = "name"):
         super().__init__(view)
@@ -80,6 +83,12 @@ class PresetListDelegate(QStyledItemDelegate):
         self._pending_shake_timer = QTimer(self)
         self._pending_shake_timer.timeout.connect(self._advance_pending_shake)
         self._pending_activation = ""
+        # Плитка, по которой только что щёлкнули: подсвечена сразу, хотя
+        # включится после ожидания двойного щелчка.
+        self._click_highlight = ""
+        self._click_highlight_timer = QTimer(self)
+        self._click_highlight_timer.setSingleShot(True)
+        self._click_highlight_timer.timeout.connect(self._clear_click_highlight)
         self._press_timer = QElapsedTimer()
         self._skip_release = False
         self._activation_timer = QTimer(self)
@@ -300,13 +309,45 @@ class PresetListDelegate(QStyledItemDelegate):
         # отсчитывает двойной щелчок от первого нажатия — ждём столько же.
         self._pending_activation = item_id
         since_press = self._press_timer.elapsed() if self._press_timer.isValid() else 0
-        wait = QApplication.doubleClickInterval() - since_press + self._DOUBLE_CLICK_MARGIN_MS
-        self._activation_timer.start(max(self._DOUBLE_CLICK_MARGIN_MS, wait))
+        wait = max(self._DOUBLE_CLICK_MARGIN_MS, QApplication.doubleClickInterval() - since_press + self._DOUBLE_CLICK_MARGIN_MS)
+        self._activation_timer.start(wait)
+        # Включение ждёт, не придёт ли второй щелчок, а человек должен увидеть,
+        # что щелчок принят, сразу.
+        self._set_click_highlight(item_id, wait + self._CLICK_HIGHLIGHT_AFTER_ACTIVATION_MS)
         return True
 
     def _cancel_pending_activation(self) -> None:
         self._activation_timer.stop()
         self._pending_activation = ""
+        self._clear_click_highlight()
+
+    def _set_click_highlight(self, file_name: str, lifetime_ms: int) -> None:
+        previous = self._click_highlight
+        self._click_highlight = str(file_name or "")
+        self._click_highlight_timer.start(int(lifetime_ms))
+        if previous != self._click_highlight:
+            self._update_preset_row_by_file_name(previous)
+        self._update_preset_row_by_file_name(self._click_highlight)
+
+    def _clear_click_highlight(self) -> None:
+        self._click_highlight_timer.stop()
+        previous, self._click_highlight = self._click_highlight, ""
+        self._update_preset_row_by_file_name(previous)
+
+    def _update_preset_row_by_file_name(self, file_name: str) -> None:
+        file_name = str(file_name or "").strip()
+        if not file_name:
+            return
+        model = self._view.model()
+        finder = getattr(model, "find_preset_row", None)
+        if not callable(finder):
+            return
+        try:
+            row = int(finder(file_name))
+        except Exception:
+            return
+        if row >= 0:
+            self._update_preset_row_view(model.index(row, 0))
 
     def _emit_pending_activation(self) -> None:
         item_id = self._pending_activation
@@ -533,6 +574,7 @@ class PresetListDelegate(QStyledItemDelegate):
         focused = bool(option.state & QStyle.StateFlag.State_HasFocus)
         pressed = self._pressed_row == index.row()
         file_name = str(index.data(PresetListModel.FileNameRole) or "")
+        clicked = bool(file_name) and file_name == self._click_highlight
         motion = active_row_motion(self._view)
         hover_motion = row_hover_motion(self._view)
         live_hover = hover_motion is not None and not focused
@@ -548,11 +590,13 @@ class PresetListDelegate(QStyledItemDelegate):
         row_paint = paint_profile_hover_row(
             painter,
             rect,
-            active=is_active and not drag_marker_visible,
+            # Щёлкнутая плитка подсвечена как включённая сразу, а когда бегунок
+            # доедет, подсветка уже на месте и не загорается заново.
+            active=(is_active or clicked) and not drag_marker_visible,
             hovered=bool(hovered) or focused,
             pressed=pressed,
             show_active_marker=False,
-            active_reveal=motion.row_reveal(index) if motion is not None else None,
+            active_reveal=None if clicked else (motion.row_reveal(index) if motion is not None else None),
             residual_active=motion.row_residual(index) if motion is not None else 0.0,
             hover_level=hover_level,
         )

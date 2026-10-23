@@ -242,6 +242,64 @@ class PresetListColumnsTests(unittest.TestCase):
         self.assertEqual(self.actions, [("open", "a2.txt")])
         self.assertFalse(self.delegate._activation_timer.isActive())
 
+    def _tile_pixels(self, row: int) -> bytes:
+        QApplication.processEvents()
+        image = self.view.viewport().grab(self._rect(row)).toImage()
+        return bytes(image.constBits().asarray(image.sizeInBytes()))
+
+    def _current_tile_pixels(self, row: int) -> bytes:
+        # Щелчок ставит плитку текущей, а это тоже меняет рисунок: сравниваем
+        # с плиткой, которая уже текущая, чтобы различалась только подсветка.
+        self.view.setCurrentIndex(self.model.index(row, 0))
+        return self._tile_pixels(row)
+
+    def test_clicked_tile_is_highlighted_at_once_while_activation_waits(self) -> None:
+        # Включение ждёт двойного щелчка (полсекунды), но щелчок должен быть
+        # виден сразу.
+        self._show(WIDE)
+        before = self._current_tile_pixels(2)
+        self._click(2)
+        self.assertEqual(self.actions, [])
+        self.assertNotEqual(self._tile_pixels(2), before)
+        self.assertEqual(self._tile_pixels(3), self._tile_pixels(3))
+
+    def test_highlight_goes_away_when_the_click_turns_out_to_open_the_preset(self) -> None:
+        self._show(WIDE)
+        before = self._current_tile_pixels(2)
+        self._double_click(2)
+        self.assertEqual(self._tile_pixels(2), before)
+        self.assertEqual(self.delegate._click_highlight, "")
+
+    def test_highlight_goes_away_after_shift_click(self) -> None:
+        self._show(WIDE)
+        before = self._current_tile_pixels(2)
+        self._click(2, Qt.KeyboardModifier.ShiftModifier)
+        self.assertEqual(self._tile_pixels(2), before)
+
+    def test_only_the_last_of_two_quick_clicks_stays_highlighted(self) -> None:
+        self._show(WIDE)
+        # После двух щелчков текущая плитка — вторая, первая уже обычная.
+        before_three = self._current_tile_pixels(3)
+        before_two = self._tile_pixels(2)
+        self._click(2)
+        self._click(3)
+        self.assertEqual(self._tile_pixels(2), before_two)
+        self.assertNotEqual(self._tile_pixels(3), before_three)
+
+    def test_highlight_stays_through_activation_and_clears_by_itself(self) -> None:
+        self._show(WIDE)
+        before = self._current_tile_pixels(2)
+        self._click(2)
+        self.delegate._activation_timer.stop()
+        self.delegate._emit_pending_activation()
+        # Бегунок ещё едет к плитке: подсветка уже на месте и не гаснет.
+        self.assertNotEqual(self._tile_pixels(2), before)
+        # Если включение сорвалось, подсветка гаснет по таймеру, а не висит.
+        self.assertTrue(self.delegate._click_highlight_timer.isActive())
+        self.delegate._click_highlight_timer.stop()
+        self.delegate._clear_click_highlight()
+        self.assertEqual(self._tile_pixels(2), before)
+
     def test_quick_clicks_on_two_presets_activate_only_the_last_one(self) -> None:
         self._show(WIDE)
         self._click(2)
