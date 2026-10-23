@@ -271,11 +271,9 @@ class ActiveRowMotion(QObject):
         self._t = 0.0
         self._landing = QPersistentModelIndex()
         self._leaving = QPersistentModelIndex()
-        # Слой уже пуст (капсула погасла или стала полоской строки): его уход не
-        # должен перерисовывать весь список, строки ниже обновляются отдельно.
-        self._overlay.setUpdatesEnabled(False)
+        # Слой по размеру пути капсулы, поэтому его уход дёшев; а перерисовка
+        # под ним нужна: если список прокрутили, след капсулы остался бы на экране.
         self._overlay.hide()
-        self._overlay.setUpdatesEnabled(True)
         if self._model is not None:
             for index in touched:
                 if index.isValid():
