@@ -139,7 +139,8 @@ class ActiveRowMotionTests(unittest.TestCase):
             for share in (0.1, 0.25, 0.4, 0.5, 0.65, 0.8, 0.95):
                 anim.setCurrentTime(int(anim.duration() * share))
                 geometry = self.motion._capsule_geometry()
-                strip = self.motion._capsule_strip(geometry)
+                # Картинка слоя — в его координатах, полоска — в координатах списка.
+                strip = self.motion._capsule_strip(geometry).translated(-self.motion._overlay.pos())
                 image = self.motion._overlay.grab().toImage()
                 width, height = image.width(), image.height()
                 alpha = bytes(image.constBits().asarray(image.sizeInBytes()))[3::4]
@@ -150,6 +151,58 @@ class ActiveRowMotionTests(unittest.TestCase):
                 xs = [index % width for index in drawn]
                 self.assertGreaterEqual(min(xs), strip.left())
                 self.assertLessEqual(max(xs), strip.right())
+            anim.setCurrentTime(anim.duration())
+            _drain()
+
+    def test_overlay_covers_only_the_path_of_the_marker_not_the_whole_list(self) -> None:
+        # Прозрачный слой при показе и скрытии перерисовывает всё, что под ним,
+        # поэтому он по размеру пути капсулы.
+        self._switch_active(1, 3)
+        viewport = self.view.viewport().rect()
+        area = self.motion._overlay.geometry()
+
+        self.assertTrue(viewport.contains(area))
+        self.assertLess(area.width(), viewport.width() // 2)
+        old_row = self.view.visualRect(self.view.model().index(1, 0))
+        new_row = self.view.visualRect(self.view.model().index(3, 0))
+        self.assertLessEqual(area.top(), old_row.top())
+        self.assertGreaterEqual(area.bottom(), new_row.bottom())
+
+    def test_overlay_grows_when_the_list_is_scrolled_during_the_slide(self) -> None:
+        self._switch_active(1, 3)
+        anim = self.motion._anim
+        anim.setCurrentTime(int(anim.duration() * 0.3))
+        before = self.motion._overlay.geometry()
+        # Строки уехали (список прокрутили): капсула вышла из слоя.
+        with mock.patch.object(self.motion, "_row_rect", side_effect=lambda index: self.view.visualRect(
+            self.view.model().index(index.row(), 0)).translated(0, 100)):
+            anim.setCurrentTime(int(anim.duration() * 0.35))
+        grown = self.motion._overlay.geometry()
+        self.assertTrue(grown.contains(before))
+        self.assertGreater(grown.bottom(), before.bottom())
+
+    def test_small_overlay_draws_exactly_what_a_full_size_overlay_draws(self) -> None:
+        from PyQt6.QtCore import QPoint
+        from PyQt6.QtGui import QColor, QImage
+
+        def render() -> QImage:
+            image = QImage(self.view.viewport().size(), QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(QColor(0, 0, 0, 0))
+            overlay = self.motion._overlay
+            overlay.render(image, QPoint(overlay.x(), overlay.y()))
+            return image
+
+        for old_row, new_row in ((1, 4), (4, 1)):
+            self._switch_active(old_row, new_row)
+            anim = self.motion._anim
+            for share in (0.1, 0.3, 0.5, 0.7, 0.9):
+                anim.setCurrentTime(int(anim.duration() * share))
+                small = render()
+                small_geometry = self.motion._overlay.geometry()
+                self.motion._overlay.setGeometry(self.view.viewport().rect())
+                full = render()
+                self.motion._overlay.setGeometry(small_geometry)
+                self.assertEqual(small, full, (old_row, new_row, share))
             anim.setCurrentTime(anim.duration())
             _drain()
 

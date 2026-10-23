@@ -346,6 +346,42 @@ class PresetListColumnsTests(unittest.TestCase):
                     without_skipping = self._render_region(region)
                 self.assertEqual(with_skipping, without_skipping)
 
+    def _count_drawn_tiles_after(self, change) -> int:
+        drawn: list[int] = []
+        original = self.delegate._paint_preset_row
+        self.delegate._paint_preset_row = lambda painter, option, index: (drawn.append(index.row()), original(painter, option, index))[1]
+        QApplication.processEvents()
+        drawn.clear()
+        change()
+        for _ in range(4):
+            QApplication.processEvents()
+        self.delegate._paint_preset_row = original
+        return len(drawn)
+
+    def test_active_marker_change_repaints_only_its_rows_not_the_whole_list(self) -> None:
+        # QListView при неодинаковых размерах строк на любую смену данных заново
+        # раскладывает и перерисовывает весь список; метка активного пресета
+        # размер плитки не меняет.
+        rows = [{"kind": "folder", "folder_key": "all", "name": "ALL", "is_collapsed": False, "count": 40}]
+        rows += [_preset(f"p{number}.txt", "all") for number in range(40)]
+        self.model.set_rows(rows)
+        self._show(WIDE)
+        self.model.set_active_preset("p1.txt")
+        QApplication.processEvents()
+        visible = len([row for row in range(1, 41) if self.view.viewport().rect().intersects(self._rect(row))])
+        self.assertGreater(visible, 20)
+
+        marker_change = self._count_drawn_tiles_after(lambda: self.model.set_active_preset("p5.txt"))
+        name_change = self._count_drawn_tiles_after(
+            lambda: self.model.dataChanged.emit(
+                self.model.index(5, 0), self.model.index(5, 0), [PresetListModel.NameRole]
+            )
+        )
+
+        self.assertLessEqual(marker_change, 8)
+        # Смена, способная изменить размер, по-прежнему раскладывает всё заново.
+        self.assertGreater(name_change, visible // 2)
+
     def test_quick_clicks_on_two_presets_activate_only_the_last_one(self) -> None:
         self._show(WIDE)
         self._click(2)

@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 
 from PyQt6 import sip
-from PyQt6.QtCore import QEvent, QObject, QPersistentModelIndex, QRect, QRectF, Qt, QTimer, QVariantAnimation
+from PyQt6.QtCore import QEvent, QObject, QPersistentModelIndex, QPoint, QRect, QRectF, Qt, QTimer, QVariantAnimation
 from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter
 from PyQt6.QtWidgets import QWidget
 
@@ -31,6 +31,10 @@ BOUNCE_DURATION_MS = 380
 _SLIDE_SHARE = SLIDE_DURATION_MS / (SLIDE_DURATION_MS + BOUNCE_DURATION_MS)
 # С этого момента row_residual() старой строки равен нулю (см. row_residual).
 _LEAVING_SETTLED_AT = _SLIDE_SHARE * 0.8
+# Запас слоя вокруг пути капсулы: по горизонтали — свечение и сглаживание, по
+# вертикали — хвост (до 36 точек), вытягивание капсулы в полёте и свечение.
+_TRAVEL_MARGIN_X = 12
+_TRAVEL_MARGIN_Y = 50
 _MOTION_ATTR = "_zapret_active_row_motion"
 
 
@@ -205,7 +209,9 @@ class ActiveRowMotion(QObject):
         self._from_rect = self._row_rect(previous)
         self._landing = current
         self._leaving = previous
-        self._overlay.setGeometry(self._view.viewport().rect())
+        # Слой по размеру пути капсулы, а не всего списка: прозрачный слой при
+        # появлении и исчезновении перерисовывает всё, что под ним.
+        self._overlay.setGeometry(self._travel_area())
         self._overlay.show()
         self._overlay.raise_()
         self._anim.stop()
@@ -213,6 +219,22 @@ class ActiveRowMotion(QObject):
         self._drawn_strip = QRect()
         self._leaving_done = False
         self._anim.start()
+
+    def _travel_area(self) -> QRect:
+        """Прямоугольник, по которому едет капсула: от старой строки до новой."""
+        source, target = self._from_rect, self._row_rect(self._landing)
+        inset = self._marker_inset
+        area = QRect(
+            QPoint(
+                min(source.left(), target.left()) + inset - _TRAVEL_MARGIN_X,
+                min(source.top(), target.top()) - _TRAVEL_MARGIN_Y,
+            ),
+            QPoint(
+                max(source.left(), target.left()) + inset + _TRAVEL_MARGIN_X,
+                max(source.bottom(), target.bottom()) + _TRAVEL_MARGIN_Y,
+            ),
+        )
+        return area.intersected(self._view.viewport().rect())
 
     def _stop(self) -> None:
         if self._anim.state() != QVariantAnimation.State.Stopped:
@@ -365,7 +387,11 @@ class ActiveRowMotion(QObject):
         if dirty.isNull():
             self._overlay.update()
             return
-        self._overlay.update(dirty)
+        area = self._overlay.geometry()
+        if not area.contains(dirty):
+            # Список прокрутили во время переезда: слой дорастает до капсулы.
+            self._overlay.setGeometry(area.united(dirty).intersected(self._view.viewport().rect()))
+        self._overlay.update(dirty.translated(-self._overlay.pos()))
 
     def paint_overlay(self, overlay: QWidget) -> None:
         geometry = self._capsule_geometry()
@@ -379,6 +405,8 @@ class ActiveRowMotion(QObject):
         center_y = top + height / 2.0
 
         painter = QPainter(overlay)
+        # Числа капсулы — в координатах списка, а слой лежит не в его углу.
+        painter.translate(-overlay.x(), -overlay.y())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
 
