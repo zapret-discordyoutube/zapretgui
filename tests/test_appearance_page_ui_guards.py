@@ -92,6 +92,27 @@ class AccentRestyleGuardTests(unittest.TestCase):
         set_theme_color.assert_called_once()
         self.assertEqual(set_theme_color.call_args.args[0].name(), "#445566")
 
+    def test_colour_dialog_repeating_the_same_colour_restyles_once(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from PyQt6.QtGui import QColor
+
+        from ui.pages import appearance_page
+        from ui.pages.appearance_page import AppearancePage
+
+        page = MagicMock()
+        page._is_ui_syncing.return_value = False
+
+        with patch.object(appearance_page, "setThemeColor") as set_theme_color:
+            for name in ("#445566", "#445566", "#445566", "#778899", "#778899"):
+                AppearancePage._on_accent_color_changed(page, QColor(name))
+                # Как у программы: после первого применения цвет уже в настройках.
+                from qfluentwidgets.common.config import qconfig
+
+                qconfig.set(qconfig.themeColor, QColor(name), save=False)
+
+        self.assertEqual([call.args[0].name() for call in set_theme_color.call_args_list], ["#445566", "#778899"])
+
     def test_page_build_with_saved_accent_does_not_restyle(self) -> None:
         from unittest.mock import patch
 

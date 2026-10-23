@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, QObject, QTimer
-from PyQt6.QtWidgets import QWidget
 
 from log.log import log
 
@@ -329,17 +328,6 @@ class WindowLifecycleMixin:
             refresh_titlebar_layout(self)
         except Exception as e:
             log(f"Не удалось обновить верхнюю панель после показа окна: {e}", "DEBUG")
-
-    def _force_style_refresh(self) -> None:
-        """Принудительно обновляет стили всех виджетов после показа окна."""
-        try:
-            for widget in self.findChildren(QWidget):
-                widget.style().unpolish(widget)
-                widget.style().polish(widget)
-
-            log("🎨 Принудительное обновление стилей выполнено после показа окна", "DEBUG")
-        except Exception as e:
-            log(f"Ошибка обновления стилей: {e}", "DEBUG")
 
 
 def sync_titlebar_search_width(window) -> None:

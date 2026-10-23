@@ -1463,7 +1463,9 @@ class AppearancePage(BasePage):
         if self._is_ui_syncing():
             return
         try:
-            setThemeColor(color)
+            # Выбор цвета шлёт сигнал на каждый шаг ползунка и повторяет прежний
+            # цвет: setThemeColor заново стилизует все виджеты программы.
+            set_theme_color_if_changed(color)
         except Exception:
             pass
         hex_color = color.name()
