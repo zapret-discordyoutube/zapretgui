@@ -29,6 +29,8 @@ SLIDE_DURATION_MS = 380
 BOUNCE_DURATION_MS = 380
 # Доля общего времени, отведённая на переезд; остальное — прыжок значка.
 _SLIDE_SHARE = SLIDE_DURATION_MS / (SLIDE_DURATION_MS + BOUNCE_DURATION_MS)
+# С этого момента row_residual() старой строки равен нулю (см. row_residual).
+_LEAVING_SETTLED_AT = _SLIDE_SHARE * 0.8
 _MOTION_ATTR = "_zapret_active_row_motion"
 
 
@@ -87,6 +89,10 @@ class ActiveRowMotion(QObject):
         self._landing = QPersistentModelIndex()
         self._leaving = QPersistentModelIndex()
         self._from_rect = QRect()
+        # Где капсула была нарисована в прошлом кадре (поле слоя, в точках экрана).
+        self._drawn_strip = QRect()
+        # Старая строка уже погасла и больше не меняется до конца анимации.
+        self._leaving_done = False
         self._t = 0.0
         self._check_scheduled = False
         self._model = None
@@ -204,6 +210,8 @@ class ActiveRowMotion(QObject):
         self._overlay.raise_()
         self._anim.stop()
         self._t = 0.0
+        self._drawn_strip = QRect()
+        self._leaving_done = False
         self._anim.start()
 
     def _stop(self) -> None:
@@ -216,10 +224,19 @@ class ActiveRowMotion(QObject):
             self._t = float(value)
         except (TypeError, ValueError):
             return
-        self._overlay.update()
+        self._update_overlay_strip()
+        # Старая строка перестаёт меняться, когда подсветка погасла: дальше её
+        # не перерисовываем. Список сам решает, какие плитки рисовать, по
+        # объемлющему прямоугольнику всех грязных мест, поэтому лишняя далёкая
+        # строка заставляет перерисовывать всё, что лежит между ней и новой.
+        leaving_settled = self._t >= _LEAVING_SETTLED_AT
         for index in (self._landing, self._leaving):
+            if index is self._leaving and self._leaving_done:
+                continue
             if index.isValid():
                 self._view.viewport().update(self._row_rect(index).adjusted(0, -8, 0, 8))
+        if leaving_settled:
+            self._leaving_done = True
 
     def _alive(self) -> bool:
         return not (sip.isdeleted(self._overlay) or sip.isdeleted(self._view))
@@ -232,7 +249,11 @@ class ActiveRowMotion(QObject):
         self._t = 0.0
         self._landing = QPersistentModelIndex()
         self._leaving = QPersistentModelIndex()
+        # Слой уже пуст (капсула погасла или стала полоской строки): его уход не
+        # должен перерисовывать весь список, строки ниже обновляются отдельно.
+        self._overlay.setUpdatesEnabled(False)
         self._overlay.hide()
+        self._overlay.setUpdatesEnabled(True)
         if self._model is not None:
             for index in touched:
                 if index.isValid():
@@ -285,13 +306,13 @@ class ActiveRowMotion(QObject):
 
     # ---- отрисовка слоя ------------------------------------------------
 
-    def paint_overlay(self, overlay: QWidget) -> None:
-        if not self._landing.isValid():
-            return
-        from ui.theme import get_theme_tokens, to_qcolor
+    def _capsule_geometry(self):
+        """Где и какой капсула в этот момент: (left, top, height, tail, direction, alpha).
 
-        tokens = get_theme_tokens()
-        accent = to_qcolor(tokens.accent_hex, "#5caee8")
+        None — рисовать нечего. По этим числам и рисуется капсула, и считается
+        полоска, которую надо перерисовать: они не могут разойтись."""
+        if not self._landing.isValid():
+            return None
         target = self._row_rect(self._landing)
         source = self._from_rect
         inset = self._marker_inset
@@ -319,11 +340,47 @@ class ActiveRowMotion(QObject):
             tail = 0.0
             direction = 1.0
             alpha = 1.0 if self._static_marker else max(0.0, 1.0 - q)
+        return left, center_y - height / 2.0, height, tail, direction, alpha
+
+    @staticmethod
+    def _capsule_strip(geometry) -> QRect:
+        """Узкая полоска, в которую укладывается капсула с хвостом и свечением."""
+        left, top, height, tail, direction, _alpha = geometry
+        top_edge = top - 3.0 - (tail if direction > 0 else 0.0)
+        bottom_edge = top + height + 3.0 + (tail if direction <= 0 else 0.0)
+        strip = QRectF(left - 3.0, top_edge, 10.0, bottom_edge - top_edge)
+        # Запас на сглаживание краёв.
+        return strip.toAlignedRect().adjusted(-2, -2, 2, 2)
+
+    def _update_overlay_strip(self) -> None:
+        """Перерисовывает только то, что капсула закрывала и закроет, а не весь слой.
+
+        Слой прозрачный и лежит над всем списком: update() без области
+        перерисовывал под ним каждую плитку на каждом кадре (сотни вызовов
+        paint у delegate за один щелчок)."""
+        geometry = self._capsule_geometry()
+        strip = self._capsule_strip(geometry) if geometry is not None else QRect()
+        dirty = self._drawn_strip.united(strip) if not self._drawn_strip.isNull() else strip
+        self._drawn_strip = strip
+        if dirty.isNull():
+            self._overlay.update()
+            return
+        self._overlay.update(dirty)
+
+    def paint_overlay(self, overlay: QWidget) -> None:
+        geometry = self._capsule_geometry()
+        if geometry is None:
+            return
+        from ui.theme import get_theme_tokens, to_qcolor
+
+        tokens = get_theme_tokens()
+        accent = to_qcolor(tokens.accent_hex, "#5caee8")
+        left, top, height, tail, direction, alpha = geometry
+        center_y = top + height / 2.0
 
         painter = QPainter(overlay)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        top = center_y - height / 2.0
 
         if tail > 1.0:
             # Хвост тает против направления движения.

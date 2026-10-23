@@ -98,6 +98,87 @@ class ActiveRowMotionTests(unittest.TestCase):
         self.assertIsNone(self.motion.row_reveal(new_index))
         self.assertEqual(self.motion.row_residual(old_index), 0.0)
 
+    def test_each_frame_repaints_only_the_strip_the_capsule_moves_through(self) -> None:
+        # Слой прозрачный и лежит над всем списком: update() без области
+        # перерисовывал под ним каждую плитку на каждом кадре.
+        self._switch_active(1, 4)
+        anim = self.motion._anim
+        viewport_area = self.view.viewport().width() * self.view.viewport().height()
+        updates: list[tuple] = []
+        with mock.patch.object(self.motion._overlay, "update", side_effect=lambda *args: updates.append(args)):
+            for share in (0.05, 0.15, 0.3, 0.45, 0.55, 0.7, 0.85, 0.95):
+                anim.setCurrentTime(int(anim.duration() * share))
+
+        self.assertEqual(len(updates), 8)
+        for args in updates:
+            self.assertEqual(len(args), 1, "update() без области перерисовывает весь список")
+            strip = args[0]
+            self.assertLess(strip.width(), 40)
+            self.assertLess(strip.width() * strip.height(), viewport_area / 4)
+
+    def test_strip_covers_everything_the_capsule_draws(self) -> None:
+        self._switch_active(1, 4)
+        anim = self.motion._anim
+        for share in (0.1, 0.25, 0.4, 0.5, 0.65, 0.8):
+            anim.setCurrentTime(int(anim.duration() * share))
+            left, top, height, tail, direction, _alpha = self.motion._capsule_geometry()
+            strip = self.motion._capsule_strip(self.motion._capsule_geometry())
+            tail_top = top - tail if direction > 0 else top
+            tail_bottom = top + height + tail if direction <= 0 else top + height
+            self.assertLessEqual(strip.left(), left - 3)
+            self.assertGreaterEqual(strip.right() + 1, left + 7)
+            self.assertLessEqual(strip.top(), min(top - 3, tail_top))
+            self.assertGreaterEqual(strip.bottom() + 1, max(top + height + 3, tail_bottom))
+
+    def test_every_drawn_pixel_lies_inside_the_repainted_strip(self) -> None:
+        # Проверка по настоящей картинке слоя, а не по тем же формулам: всё, что
+        # нарисовано, обязано попасть в полоску, которую перерисовывает кадр.
+        for old_row, new_row in ((1, 4), (4, 1)):
+            self._switch_active(old_row, new_row)
+            anim = self.motion._anim
+            for share in (0.1, 0.25, 0.4, 0.5, 0.65, 0.8, 0.95):
+                anim.setCurrentTime(int(anim.duration() * share))
+                geometry = self.motion._capsule_geometry()
+                strip = self.motion._capsule_strip(geometry)
+                image = self.motion._overlay.grab().toImage()
+                width, height = image.width(), image.height()
+                alpha = bytes(image.constBits().asarray(image.sizeInBytes()))[3::4]
+                drawn = [index for index, value in enumerate(alpha) if value]
+                self.assertTrue(drawn)
+                for index in (drawn[0], drawn[-1]):
+                    self.assertTrue(strip.contains(index % width, index // width), (share, strip, index % width, index // width))
+                xs = [index % width for index in drawn]
+                self.assertGreaterEqual(min(xs), strip.left())
+                self.assertLessEqual(max(xs), strip.right())
+            anim.setCurrentTime(anim.duration())
+            _drain()
+
+    def test_old_row_is_not_repainted_after_its_highlight_has_faded(self) -> None:
+        # Список рисует плитки по объемлющему прямоугольнику всех грязных мест:
+        # далёкая старая строка заставляла перерисовывать всё между ней и новой.
+        self._switch_active(1, 4)
+        anim = self.motion._anim
+        old_rect = self.view.visualRect(self.view.model().index(1, 0)).adjusted(0, -8, 0, 8)
+        updates: list = []
+        with mock.patch.object(self.view.viewport(), "update", side_effect=lambda *args: updates.append(args[0])):
+            anim.setCurrentTime(int(anim.duration() * 0.3))
+            before_fade_end = [rect for rect in updates if rect.intersects(old_rect)]
+            updates.clear()
+            # Первый кадр после угасания ещё рисует старую строку в конечном
+            # виде; после него она до конца анимации не меняется.
+            anim.setCurrentTime(int(anim.duration() * 0.45))
+            final_frame = [rect for rect in updates if rect.intersects(old_rect)]
+            updates.clear()
+            for share in (0.6, 0.75, 0.9):
+                anim.setCurrentTime(int(anim.duration() * share))
+
+        self.assertTrue(before_fade_end, "пока подсветка гаснет, старую строку нужно обновлять")
+        self.assertTrue(final_frame, "старая строка должна один раз перерисоваться уже погасшей")
+        self.assertEqual([rect for rect in updates if rect.intersects(old_rect)], [])
+        # Новая строка до конца прыжка значка обновляется.
+        new_rect = self.view.visualRect(self.view.model().index(4, 0))
+        self.assertTrue(any(rect.intersects(new_rect) for rect in updates))
+
     def test_rebuilding_the_list_does_not_animate(self) -> None:
         self.view.clear()
         for row in range(6):
