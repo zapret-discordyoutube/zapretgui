@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import unittest
 from unittest.mock import patch
@@ -7,7 +8,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
+from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 
 from ui.pages.base_page import BasePage
 
@@ -64,6 +65,27 @@ class BasePageAccessibilityTests(unittest.TestCase):
         self._app.processEvents()
 
         self.assertIs(page._first_keyboard_focus_control(), first_button)
+
+    def test_focus_candidates_come_lazily_in_find_children_order(self) -> None:
+        # Рядом с занятым потоком каждый обёрнутый в Python виджет отдаёт замок
+        # интерпретатора, поэтому поиск не должен оборачивать всю страницу
+        # (findChildren), а обязан остановиться на первом подходящем виджете.
+        page = BasePage("Тестовая страница")
+        self.addCleanup(page.deleteLater)
+        group = QWidget(page.content)
+        page.layout.addWidget(group)
+        QLabel("Текст", group)
+        nested_button = QPushButton("Вложенная", group)
+        for index in range(30):
+            QPushButton(f"Кнопка {index}", page.content)
+
+        page.show()
+        self._app.processEvents()
+        candidates = page._iter_keyboard_focus_candidates()
+
+        self.assertTrue(inspect.isgenerator(candidates))
+        self.assertEqual(list(candidates), page.content.findChildren(QWidget))
+        self.assertIs(page._first_keyboard_focus_control(), nested_button)
 
     def test_page_focuses_first_keyboard_control_when_focus_is_outside(self) -> None:
         outside_button = QPushButton("Снаружи")

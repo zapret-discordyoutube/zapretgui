@@ -970,10 +970,23 @@ class BasePage(_FluentScrollArea):
         return None
 
     def _iter_keyboard_focus_candidates(self):
+        # Тот же порядок, что у findChildren (в глубину, сверху вниз), но
+        # лениво: поиск останавливается на первом подходящем виджете. Целиком
+        # findChildren оборачивает в Python каждый виджет страницы, а рядом с
+        # занятым потоком каждая такая обёртка отдаёт замок интерпретатора.
         try:
-            return tuple(self.content.findChildren(QWidget))
+            stack = [iter(self.content.children())]
+            while stack:
+                try:
+                    child = next(stack[-1])
+                except StopIteration:
+                    stack.pop()
+                    continue
+                if isinstance(child, QWidget):
+                    yield child
+                stack.append(iter(child.children()))
         except Exception:
-            return ()
+            return
 
     @staticmethod
     def _is_keyboard_focus_control(widget) -> bool:
