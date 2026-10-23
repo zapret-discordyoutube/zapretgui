@@ -34,6 +34,8 @@ class LinkedWheelListView(ListView):
         self._drag_start_pos: QPoint | None = None
         self._drag_source: tuple[str, str] | None = None
         self._draggable_kinds = {str(kind) for kind in (draggable_kinds or {"preset"})}
+        # Область, которую сейчас перерисовывает paintEvent (None — вне его).
+        self._paint_region = None
         # Пресеты укладываются слева направо с переносом: в широком окне они
         # встают в несколько столбцов. Ширину плиток задаёт PresetListDelegate,
         # заголовок папки всегда занимает линию целиком.
@@ -49,6 +51,22 @@ class LinkedWheelListView(ListView):
         if not self.isWrapping() or not callable(column_layout):
             return 1
         return int(column_layout()[0])
+
+    def paintEvent(self, event):  # noqa: N802
+        # QListView зовёт delegate для каждой плитки в объемлющем прямоугольнике
+        # всей грязной области, хотя рисовать Qt позволит только саму область:
+        # при наведении, когда гаснут несколько далёких строк, это десятки
+        # лишних плиток за кадр. Delegate спрашивает область и пропускает те,
+        # что в неё не попали.
+        self._paint_region = event.region()
+        try:
+            super().paintEvent(event)
+        finally:
+            self._paint_region = None
+
+    def paint_region(self):
+        """Перерисовываемая сейчас область окна списка; None — вне paintEvent."""
+        return self._paint_region
 
     def resizeEvent(self, event):  # noqa: N802
         if event.size().width() != event.oldSize().width():

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
-from PyQt6.QtGui import QKeyEvent, QMouseEvent
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PyQt6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QRegion
 from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem
 from PyQt6.QtTest import QTest
 
@@ -299,6 +300,51 @@ class PresetListColumnsTests(unittest.TestCase):
         self.delegate._click_highlight_timer.stop()
         self.delegate._clear_click_highlight()
         self.assertEqual(self._tile_pixels(2), before)
+
+    def _render_region(self, region) -> "QImage":
+        image = QImage(self.view.viewport().size(), QImage.Format.Format_ARGB32)
+        image.fill(QColor("#ff00ff"))
+        self.view.viewport().render(image, QPoint(0, 0), region)
+        return image
+
+    def test_paint_region_is_known_only_while_the_view_paints(self) -> None:
+        self._show(WIDE)
+        seen: list = []
+        original = self.delegate._paint_preset_row
+        self.delegate._paint_preset_row = lambda *args: (seen.append(self.view.paint_region()), original(*args))[1]
+        self.assertIsNone(self.view.paint_region())
+        self._render_region(QRegion(self.view.viewport().rect()))
+        self.assertTrue(seen)
+        self.assertTrue(all(region is not None for region in seen))
+        self.assertIsNone(self.view.paint_region())
+
+    def test_tiles_between_two_far_dirty_rectangles_are_not_drawn(self) -> None:
+        # QListView зовёт delegate для всех плиток объемлющего прямоугольника
+        # грязных мест; рисовать плитки между двумя далёкими строками незачем.
+        self._show(WIDE)
+        first, last = self._rect(1), self._rect(8)
+        self.assertGreater(last.top(), first.bottom() + 40)
+        drawn: list[int] = []
+        original = self.delegate._paint_preset_row
+        self.delegate._paint_preset_row = lambda painter, option, index: (drawn.append(index.row()), original(painter, option, index))[1]
+        self._render_region(QRegion(first).united(QRegion(last)))
+        self.assertEqual(sorted(set(drawn)), [1, 8])
+
+    def test_skipping_tiles_outside_the_region_leaves_the_picture_unchanged(self) -> None:
+        self._show(WIDE)
+        thin_strip = QRect(0, 120, 14, 80)
+        regions = {
+            "две далёкие строки": QRegion(self._rect(1)).united(QRegion(self._rect(8))),
+            "полоска и далёкая строка": QRegion(thin_strip).united(QRegion(self._rect(8))),
+            "всё окно": QRegion(self.view.viewport().rect()),
+        }
+        for name, region in regions.items():
+            with self.subTest(region=name):
+                with_skipping = self._render_region(region)
+                # Без пропуска delegate рисует всё, что зовёт QListView.
+                with patch.object(self.view, "paint_region", return_value=None):
+                    without_skipping = self._render_region(region)
+                self.assertEqual(with_skipping, without_skipping)
 
     def test_quick_clicks_on_two_presets_activate_only_the_last_one(self) -> None:
         self._show(WIDE)

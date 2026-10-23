@@ -223,6 +223,12 @@ class PresetListDelegate(QStyledItemDelegate):
         return QSize(self.column_layout()[1], self._ROW_HEIGHT)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+        # Плитка вне перерисовываемой области всё равно была бы обрезана: не
+        # тратим на неё Python-код (картинка не меняется).
+        region_of_paint = getattr(self._view, "paint_region", None)
+        region = region_of_paint() if callable(region_of_paint) else None
+        if region is not None and not region.intersects(option.rect):
+            return
         kind = index.data(PresetListModel.KindRole)
 
         if kind == "folder":
