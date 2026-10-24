@@ -76,6 +76,27 @@ class HostAndUrlTests(unittest.TestCase):
         self.assertEqual(mirrors.with_host(url, ""), url)
 
 
+class ReaderHostTests(unittest.TestCase):
+    """Имя для ссылки в посте о выпуске: preferred сервера, а не то, что открылось у сборщика."""
+
+    def test_takes_preferred_from_the_first_answering_name(self) -> None:
+        asked = []
+        body = json.dumps(_document(("git.zapret.moe", True), ("git3.zapret.moe", False), preferred="git3.zapret.moe"))
+
+        def fetch(url):
+            asked.append(url)
+            if url.startswith("https://git2."):
+                raise OSError("reset")
+            return body.encode()
+
+        self.assertEqual(mirrors.reader_host(fetch), "git3.zapret.moe")
+        self.assertEqual(asked[:2], ["https://git2.zapret.moe/_sites/mirrors.json", "https://git3.zapret.moe/_sites/mirrors.json"])
+
+    def test_without_any_answer_never_falls_back_to_the_blocked_main_name(self) -> None:
+        self.assertEqual(mirrors.reader_host(lambda url: None), "git2.zapret.moe")
+        self.assertEqual(mirrors.reader_host(lambda url: b"{", family="wiki"), "wiki2.zapret.moe")
+
+
 class OrderedHostsTests(unittest.TestCase):
     def test_preferred_first_blocked_last_unknown_and_foreign_dropped(self) -> None:
         document = _document(

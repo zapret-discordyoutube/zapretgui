@@ -162,6 +162,25 @@ def ordered_hosts(document: Any, family: str = "git") -> list[str]:
     return (open_names + blocked_names)[:MAX_PUBLISHED_HOSTS]
 
 
+def reader_host(fetch: Callable[[str], bytes | None], family: str = "git") -> str:
+    """Имя для ссылки в тексте, который читают люди (пост о выпуске, список изменений).
+
+    Не гонка с этой машины, а ``preferred`` из списка сервера: его отмечают по
+    замерам из российских домашних сетей, а машина сборки может видеть любое имя.
+    Список берётся с первого ответившего имени; не ответило ни одно — первое
+    запасное (нумерованное зеркало, а не основное имя, которое режут по TLS).
+    """
+    for host in bootstrap_hosts(family):
+        try:
+            body = fetch(f"https://{host}{MIRRORS_PATH}")
+            ordered = ordered_hosts(json.loads(body), family) if body else []
+        except Exception:
+            continue
+        if ordered:
+            return ordered[0]
+    return bootstrap_hosts(family)[0]
+
+
 class MirrorList:
     """Открытые имена сайта (семейство ``git`` или ``wiki``) и выбор рабочего.
 
@@ -380,5 +399,6 @@ __all__ = [
     "is_rewritable",
     "is_site_host",
     "ordered_hosts",
+    "reader_host",
     "with_host",
 ]
