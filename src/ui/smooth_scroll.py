@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import weakref
 
 
@@ -105,6 +106,55 @@ def iter_managed_smooth_scroll_widgets() -> tuple:
         return ()
 
 
+# Сколько шагов анимации разрешено пройти за один тик, если окно не успевало.
+_FRAME_SKIP_MAX_STEPS = 8
+
+
+def install_frame_skipping(engine_cls) -> None:
+    """Учит шаговый движок плавной прокрутки не отставать, когда кадры тяжёлые.
+
+    Движок qfluentwidgets делает фиксированное число шагов (на один поворот
+    колеса — 24), по одному на тик таймера, и каждый шаг перерисовывает список
+    целиком. Если перерисовка дольше тика, тики опаздывают, а «долги» не
+    возвращаются: прокрутка растягивается и тянется, а быстрое «туда-сюда»
+    копит очередь. Теперь за тик проходится столько шагов, сколько реально
+    прошло времени (не больше _FRAME_SKIP_MAX_STEPS): путь и длительность те же,
+    а на слабом или занятом компьютере лишние промежуточные кадры пропускаются.
+    Когда кадры укладываются в тик, поведение прежнее — по одному шагу."""
+    if engine_cls.__dict__.get("_zapret_frame_skipping"):
+        return
+    original_smooth_move = engine_cls._smoothMove
+
+    def _get_total_delta(self) -> float:
+        now = time.monotonic()
+        last = self.__dict__.get("_zapret_last_tick")
+        self._zapret_last_tick = now
+        steps = 1
+        if last is not None and self.fps > 0:
+            steps = int(round((now - last) * self.fps))
+            steps = max(1, min(_FRAME_SKIP_MAX_STEPS, steps))
+        total = 0.0
+        for _ in range(steps):
+            for item in self.stepsLeftQueue:
+                total += self._subDelta(item[0], item[1])
+                item[1] -= 1
+            while self.stepsLeftQueue and self.stepsLeftQueue[0][1] == 0:
+                self.stepsLeftQueue.popleft()
+            if not self.stepsLeftQueue:
+                break
+        return total
+
+    def _smooth_move(self) -> None:
+        original_smooth_move(self)
+        if not self.stepsLeftQueue:
+            # Таймер остановлен: следующая прокрутка начнётся с одного шага.
+            self._zapret_last_tick = None
+
+    engine_cls._getTotalDelta = _get_total_delta
+    engine_cls._smoothMove = _smooth_move
+    engine_cls._zapret_frame_skipping = True
+
+
 def install_global_smooth_scroll_policy() -> None:
     """Глобально патчит qfluentwidgets: каждый виджет с плавной прокруткой при
     создании регистрируется в реестре и сразу получает текущую настройку.
@@ -117,10 +167,12 @@ def install_global_smooth_scroll_policy() -> None:
         return
 
     try:
-        from qfluentwidgets.common.smooth_scroll import SmoothScroll
+        from qfluentwidgets.common.smooth_scroll import FixedStepSmoothScrollEngine, SmoothScroll
         from qfluentwidgets.components.widgets.scroll_bar import SmoothScrollDelegate
     except Exception:
         return
+
+    install_frame_skipping(FixedStepSmoothScrollEngine)
 
     original_smooth_scroll_init = SmoothScroll.__init__
 
