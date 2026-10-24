@@ -11,6 +11,7 @@ from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
 from ui.widgets.active_row_motion import active_row_motion
 from ui.widgets.hover_row import paint_profile_hover_row
+from ui.widgets.stable_center import center_point as stable_center_point, center_y as stable_center_y
 from ui.widgets.row_hover_motion import attach_row_hover_motion, row_hover_motion
 
 from .common import (
@@ -487,7 +488,7 @@ class PresetListDelegate(QStyledItemDelegate):
         actions = list(self._ACTION_ICONS)
         total_width = len(actions) * self._ACTION_SIZE + (len(actions) - 1) * self._ACTION_SPACING
         x = tile.right() - 4 - total_width + 1
-        y = tile.center().y() - (self._ACTION_SIZE // 2)
+        y = stable_center_y(tile) - (self._ACTION_SIZE // 2)
 
         rects: list[tuple[str, QRect]] = []
         for action in actions:
@@ -508,7 +509,7 @@ class PresetListDelegate(QStyledItemDelegate):
             return
 
         painter.save()
-        center = icon_rect.center()
+        center = stable_center_point(icon_rect)
         transform = QTransform()
         transform.translate(center.x(), center.y())
         transform.rotate(rotation)
@@ -526,7 +527,7 @@ class PresetListDelegate(QStyledItemDelegate):
         painter.setPen(to_qcolor(tokens.fg_muted, "#9aa2af"))
         painter.drawText(rect, _ALIGN_LEFT_VCENTER, text)
 
-        line_y = rect.center().y()
+        line_y = stable_center_y(rect)
         text_width = painter.fontMetrics().horizontalAdvance(text)
         left_end = rect.left() + text_width + 12
         if left_end < rect.right():
@@ -646,7 +647,7 @@ class PresetListDelegate(QStyledItemDelegate):
 
         icon_rect = QRect(
             rect.left() + self._TILE_PADDING,
-            rect.center().y() - self._ICON_SIZE // 2 + 1,
+            stable_center_y(rect) - self._ICON_SIZE // 2 + 1,
             self._ICON_SIZE,
             self._ICON_SIZE,
         )
@@ -663,7 +664,7 @@ class PresetListDelegate(QStyledItemDelegate):
         cached_icon(icon_name, icon_color).paint(painter, icon_rect)
 
         text_left = icon_rect.right() + self._ICON_GAP
-        center_y = rect.center().y()
+        center_y = stable_center_y(rect)
         actions = self._action_rects(option.rect)
         meta_font = painter.font()
         meta_font.setBold(False)
@@ -723,7 +724,7 @@ class PresetListDelegate(QStyledItemDelegate):
                         cloud_color = get_semantic_palette(tokens.theme_name).warning_soft
                     except Exception:
                         cloud_color = "#ff9800"
-                cloud_rect = QRect(cloud_left, name_rect.center().y() - 6, 13, 13)
+                cloud_rect = QRect(cloud_left, stable_center_y(name_rect) - 6, 13, 13)
                 cached_icon("fa5s.cloud", cloud_color).paint(painter, cloud_rect)
 
         meta_font.setBold(False)
@@ -735,7 +736,7 @@ class PresetListDelegate(QStyledItemDelegate):
         if rating_rect.isValid() and marks_opacity > 0.0:
             star_rect = QRect(
                 rating_rect.left(),
-                rating_rect.center().y() - self._MARK_SIZE // 2,
+                stable_center_y(rating_rect) - self._MARK_SIZE // 2,
                 self._MARK_SIZE,
                 self._MARK_SIZE,
             )

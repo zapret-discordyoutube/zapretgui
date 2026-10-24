@@ -9,6 +9,7 @@ from ui.accessibility import set_control_accessibility, set_state_text
 from ui.presets_menu.common import cached_icon, to_qcolor
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_refresh import ThemeRefreshBinding
+from ui.widgets.stable_center import center_x as stable_center_x, center_y as stable_center_y
 
 
 FOLDER_HEADER_HEIGHT = 28
@@ -271,13 +272,13 @@ def paint_folder_header_row(
     rect = option.rect.adjusted(FOLDER_HEADER_LEFT_MARGIN, 0, -FOLDER_HEADER_RIGHT_MARGIN, 0)
     icon_box_rect = QRect(
         rect.left(),
-        rect.center().y() - FOLDER_HEADER_ICON_BOX // 2,
+        stable_center_y(rect) - FOLDER_HEADER_ICON_BOX // 2,
         FOLDER_HEADER_ICON_BOX,
         FOLDER_HEADER_ICON_BOX,
     )
     icon_rect = QRect(
-        icon_box_rect.center().x() - FOLDER_HEADER_ICON_SIZE // 2,
-        icon_box_rect.center().y() - FOLDER_HEADER_ICON_SIZE // 2,
+        stable_center_x(icon_box_rect) - FOLDER_HEADER_ICON_SIZE // 2,
+        stable_center_y(icon_box_rect) - FOLDER_HEADER_ICON_SIZE // 2,
         FOLDER_HEADER_ICON_SIZE,
         FOLDER_HEADER_ICON_SIZE,
     )
@@ -294,7 +295,7 @@ def paint_folder_header_row(
     painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
     painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
 
-    line_y = rect.center().y()
+    line_y = stable_center_y(rect)
     metrics = QFontMetrics(painter.font())
     left_end = text_rect.left() + metrics.horizontalAdvance(text) + FOLDER_HEADER_LINE_GAP
     if left_end < rect.right():

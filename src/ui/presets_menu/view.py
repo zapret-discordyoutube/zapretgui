@@ -14,6 +14,8 @@ from .common import (
 )
 from .model import PresetListModel
 from ui.accessibility import set_state_text
+from ui.widgets.active_row_motion import active_row_motion
+from ui.widgets.opaque_scroll import OpaqueScroll
 from qfluentwidgets import ListView
 
 
@@ -39,6 +41,8 @@ class LinkedWheelListView(ListView):
         self._draggable_kinds = {str(kind) for kind in (draggable_kinds or {"preset"})}
         # Область, которую сейчас перерисовывает paintEvent (None — вне его).
         self._paint_region = None
+        # Прокрутка без перерисовки всех плиток: см. ui/widgets/opaque_scroll.py.
+        self._opaque_scroll = OpaqueScroll(self, is_busy=self._marker_is_sliding)
         # Пресеты укладываются слева направо с переносом: в широком окне они
         # встают в несколько столбцов. Ширину плиток задаёт PresetListDelegate,
         # заголовок папки всегда занимает линию целиком.
@@ -64,7 +68,25 @@ class LinkedWheelListView(ListView):
             return
         super().dataChanged(top_left, bottom_right, roles)
 
+    def _marker_is_sliding(self) -> bool:
+        motion = active_row_motion(self)
+        return motion is not None and motion.is_running()
+
+    def end_opaque_scroll(self) -> None:
+        """Вернуть обычную отрисовку (например, перед анимацией поверх списка)."""
+        self._opaque_scroll.end()
+
+    def scrollContentsBy(self, dx, dy):  # noqa: N802
+        self._opaque_scroll.on_scroll()
+        super().scrollContentsBy(dx, dy)
+
+    def hideEvent(self, event):  # noqa: N802
+        self._opaque_scroll.end()
+        super().hideEvent(event)
+
     def paintEvent(self, event):  # noqa: N802
+        if self._opaque_scroll.painting_suppressed:
+            return
         # QListView зовёт delegate для каждой плитки в объемлющем прямоугольнике
         # всей грязной области, хотя рисовать Qt позволит только саму область:
         # при наведении, когда гаснут несколько далёких строк, это десятки
@@ -75,6 +97,7 @@ class LinkedWheelListView(ListView):
         begin_frame = getattr(delegate, "begin_frame", None)
         if callable(begin_frame):
             begin_frame()
+        self._opaque_scroll.paint_backdrop(event.region())
         try:
             super().paintEvent(event)
         finally:

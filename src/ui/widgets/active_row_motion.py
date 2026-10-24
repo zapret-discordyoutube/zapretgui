@@ -22,6 +22,7 @@ from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter
 from PyQt6.QtWidgets import QWidget
 
 from ui.animation_policy import are_live_animations_enabled
+from ui.widgets.stable_center import center_y as stable_center_y
 from utils.qt_signal_links import SignalLinks
 
 
@@ -206,6 +207,11 @@ class ActiveRowMotion(QObject):
         window = self._view.window()
         if window is not None and window.isMinimized():
             return
+        # Слой бегунка лежит поверх списка и при «сдвиге картинки» поехал бы
+        # вместе с ней: на время анимации список прокручивается обычным путём.
+        end_opaque_scroll = getattr(self._view, "end_opaque_scroll", None)
+        if callable(end_opaque_scroll):
+            end_opaque_scroll()
         self._from_rect = self._row_rect(previous)
         self._landing = current
         self._leaving = previous
@@ -342,18 +348,18 @@ class ActiveRowMotion(QObject):
         if self._t < _SLIDE_SHARE:
             p = self._t / _SLIDE_SHARE
             eased = _ease_in_out_cubic(p)
-            center_y = _lerp(source.center().y(), target.center().y(), eased)
+            center_y = _lerp(stable_center_y(source), stable_center_y(target), eased)
             # В списке из нескольких столбцов новая строка может стоять и сбоку.
             left = _lerp(source.left() + inset, left, eased)
             speed = math.sin(math.pi * p)
             # В полёте капсула чуть вытягивается и оставляет хвост.
             height = base_height * (1.0 + 0.35 * speed)
-            tail = min(abs(target.center().y() - source.center().y()), 36.0) * speed
-            direction = 1.0 if target.center().y() >= source.center().y() else -1.0
+            tail = min(abs(stable_center_y(target) - stable_center_y(source)), 36.0) * speed
+            direction = 1.0 if stable_center_y(target) >= stable_center_y(source) else -1.0
             alpha = 1.0
         else:
             q = (self._t - _SLIDE_SHARE) / (1.0 - _SLIDE_SHARE)
-            center_y = float(target.center().y())
+            center_y = float(stable_center_y(target))
             # Приземление: короткая пружинка, потом капсула становится обычной
             # полоской строки (или тает, если у строки своей полоски нет).
             height = base_height * (1.0 + 0.22 * math.sin(math.pi * min(1.0, q / 0.55)) * (1.0 - q))
