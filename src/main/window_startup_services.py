@@ -14,7 +14,6 @@ def init_theme_manager(app, *, appearance_feature) -> None:
     app.visual_state.theme_manager = ThemeManager(
         app=QApplication.instance(),
         widget=app,
-        create_theme_persist_worker=appearance_feature.create_theme_persist_worker,
     )
 
     current_theme = app.visual_state.theme_manager.current_theme

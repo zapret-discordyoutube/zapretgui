@@ -198,21 +198,3 @@ class AppearanceWindowsAccentLoadWorker(QThread):
             self.failed.emit(self._request_id, str(exc))
             return
         self.loaded.emit(self._request_id, result)
-
-
-class ThemePersistWorker(QThread):
-    saved = pyqtSignal(str, bool)
-    failed = pyqtSignal(str, str)
-
-    def __init__(self, theme_name: str, *, save_selected_theme, parent=None):
-        super().__init__(parent)
-        self._theme_name = str(theme_name or "").strip()
-        self._save_selected_theme = save_selected_theme
-
-    def run(self) -> None:
-        try:
-            result = self._save_selected_theme(self._theme_name)
-        except Exception as exc:
-            self.failed.emit(self._theme_name, str(exc))
-            return
-        self.saved.emit(self._theme_name, bool(result))

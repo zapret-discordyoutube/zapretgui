@@ -83,18 +83,6 @@ class AppearanceFeature:
             parent=parent,
         )
 
-    def save_selected_theme(self, theme_name: str) -> bool:
-        return bool(self._appearance().save_selected_theme(theme_name))
-
-    def create_theme_persist_worker(self, theme_name: str, *, parent=None):
-        from settings.appearance_workers import ThemePersistWorker
-
-        return ThemePersistWorker(
-            theme_name,
-            save_selected_theme=self.save_selected_theme,
-            parent=parent,
-        )
-
 
 def build_appearance_feature() -> AppearanceFeature:
     return AppearanceFeature()

@@ -4,7 +4,7 @@ import re
 import sys
 from collections import OrderedDict
 from dataclasses import dataclass
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QPixmap, QColor, QIcon
 from config.runtime_layout import APPLICATION_PATHS
 from log.log import log
@@ -14,10 +14,6 @@ from settings.appearance_backgrounds import (
     resolve_rkn_background_path,
 )
 
-from typing import Optional
-import time
-from ui.latest_value_worker_state import LatestValueWorkerState
-from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 
 
 _THEME_SWITCH_METRICS_ACTIVE: dict[str, object] | None = None
@@ -1162,45 +1158,13 @@ def get_themed_qta_icon(
     except Exception:
         return QIcon()
 
-class ThemeBuildWorker(QObject):
-    """Worker for theme CSS preparation. Returns empty CSS (qfluentwidgets handles styling)."""
-
-    finished = pyqtSignal(str, str)  # final_css, theme_name
-    error = pyqtSignal(str)
-    progress = pyqtSignal(str)  # status message
-
-    def __init__(self, theme_name: str):
-        super().__init__()
-        self.theme_name = theme_name
-
-    def run(self):
-        try:
-            self.progress.emit("Applying theme...")
-            self.finished.emit("", self.theme_name)
-        except Exception as e:
-            self.error.emit(str(e))
-
-
 class ThemeManager:
     """Класс для управления текущей темой приложения."""
 
-    def __init__(self, app, widget, *, create_theme_persist_worker):
+    def __init__(self, app, widget):
         self.app = app
         self.widget = widget
-        self._create_theme_persist_worker = create_theme_persist_worker
         self._cleanup_in_progress = False
-
-        self._theme_request_seq = 0
-        self._latest_theme_request_id = 0
-        self._latest_requested_theme: str | None = None
-        self._active_theme_build_jobs: dict[int, OneShotWorkerRuntime] = {}
-        self._theme_persist_runtime = OneShotWorkerRuntime()
-        self._theme_persist_runtime_worker = None
-        self._theme_persist_state = LatestValueWorkerState(
-            self._theme_persist_runtime,
-            empty_value=None,
-        )
-        
 
         # список тем — теперь пустой (тема определяется isDarkTheme() системно)
         self.themes = []
@@ -1218,299 +1182,9 @@ class ThemeManager:
         """Безопасная очистка всех ресурсов"""
         try:
             self._cleanup_in_progress = True
-
-            for _, runtime in list(self._active_theme_build_jobs.items()):
-                try:
-                    runtime.stop(
-                        blocking=False,
-                        wait_timeout_ms=1000,
-                        log_fn=log,
-                        warning_prefix="theme build worker",
-                    )
-                    runtime.cancel()
-                except RuntimeError:
-                    pass
-            self._cleanup_theme_build_thread()
-            self._theme_persist_state_obj().reset()
-            self._theme_persist_runtime_worker = None
-            self._theme_persist_runtime.stop(
-                blocking=False,
-                wait_timeout_ms=1000,
-                log_fn=log,
-                warning_prefix="theme persist worker",
-            )
-            self._theme_persist_runtime.cancel()
-                    
             log("ThemeManager очищен", "DEBUG")
-            
         except Exception as e:
             log(f"Ошибка при очистке ThemeManager: {e}", "ERROR")
-
-    def get_clean_theme_name(self, display_name):
-        """Извлекает чистое имя темы из отображаемого названия"""
-        return str(display_name or "").strip()
-
-    def apply_theme_async(self, theme_name: str | None = None, *, persist: bool = True,
-                          progress_callback=None, done_callback=None) -> None:
-        """
-        Асинхронно применяет тему (не блокирует UI).
-        CSS генерируется в фоновом потоке, применяется в главном.
-
-        Args:
-            theme_name: Имя темы (если None, используется текущая)
-            persist: Сохранять ли выбор в settings.sqlite3
-            progress_callback: Функция для обновления прогресса (str)
-            done_callback: Функция вызываемая после завершения (bool success, str message)
-        """
-        if self._cleanup_in_progress:
-            return
-        if theme_name is None:
-            theme_name = self.current_theme
-
-        clean = self.get_clean_theme_name(theme_name)
-
-        # Быстрый дедуп одинакового последнего запроса, если он всё ещё в работе.
-        if self._latest_requested_theme == clean and self._latest_theme_request_id in self._active_theme_build_jobs:
-            log(f"⏭️ Тема '{clean}' уже запрошена, игнорируем дубликат", "DEBUG")
-            return
-
-        try:
-            if progress_callback:
-                progress_callback("Подготовка темы...")
-
-            self._theme_request_seq += 1
-            request_id = self._theme_request_seq
-            self._latest_theme_request_id = request_id
-            self._latest_requested_theme = clean
-
-            request_data = {
-                'theme_name': clean,
-                'persist': persist,
-                'done_callback': done_callback,
-                'progress_callback': progress_callback,
-            }
-
-            log(
-                f"🎨 Запуск асинхронной подготовки темы: {clean} (request_id={request_id})",
-                "DEBUG",
-            )
-
-            runtime = OneShotWorkerRuntime()
-            self._active_theme_build_jobs[request_id] = runtime
-
-            def bind_worker(worker):
-                worker.finished.connect(
-                    lambda final_css, built_theme, rid=request_id, data=request_data:
-                    self._on_theme_css_ready(final_css, built_theme, rid, data)
-                )
-                if progress_callback:
-                    worker.progress.connect(
-                        lambda status, rid=request_id, cb=progress_callback:
-                        (rid == self._latest_theme_request_id) and cb(status)
-                    )
-
-            runtime.start_qobject_worker(
-                parent=self.widget,
-                worker_factory=lambda _request_id: ThemeBuildWorker(theme_name=clean),
-                bind_worker=bind_worker,
-                on_failed=lambda _request_id, error, rid=request_id, data=request_data:
-                self._on_theme_build_error(error, rid, data),
-                on_finished=lambda _request_id, _thread, rid=request_id:
-                self._cleanup_theme_build_thread(rid),
-                failed_signal_name="error",
-            )
-
-        except Exception as e:
-            log(f"Ошибка запуска асинхронного применения темы: {e}", "❌ ERROR")
-            if done_callback:
-                done_callback(False, str(e))
-
-    def _on_theme_css_ready(
-        self,
-        final_css: str,
-        theme_name: str,
-        request_id: int | None = None,
-        request_data: Optional[dict] = None,
-    ):
-        """Обработчик готовности CSS (вызывается из главного потока).
-
-        Применяет CSS только для актуального (последнего) запроса.
-        """
-        if self._cleanup_in_progress:
-            return
-        done_callback = None
-        try:
-            data = request_data or {}
-            requested_theme = str(data.get('theme_name') or theme_name)
-            persist = bool(data.get('persist', True))
-            done_callback = data.get('done_callback')
-            progress_callback = data.get('progress_callback')
-
-            if request_id is not None and request_id != self._latest_theme_request_id:
-                log(
-                    f"⏭️ Игнорируем устаревший CSS результат (request_id={request_id}, latest={self._latest_theme_request_id})",
-                    "DEBUG",
-                )
-                return
-
-            if progress_callback:
-                progress_callback("Применяем тему...")
-
-            log(
-                f"🎨 CSS готов ({len(final_css)} символов), применяем: {requested_theme} (request_id={request_id})",
-                "DEBUG",
-            )
-
-            # Применяем готовый CSS - это ЕДИНСТВЕННАЯ синхронная операция!
-            self._apply_css_only(final_css, requested_theme, persist)
-
-            if done_callback:
-                try:
-                    done_callback(True, "ok")
-                except Exception as cb_error:
-                    log(f"Ошибка в done_callback: {cb_error}", "WARNING")
-
-        except Exception as e:
-            log(f"Ошибка применения готового CSS: {e}", "❌ ERROR")
-            import traceback
-            log(traceback.format_exc(), "DEBUG")
-
-            if done_callback:
-                try:
-                    done_callback(False, str(e))
-                except Exception as cb_error:
-                    log(f"Ошибка в error callback: {cb_error}", "WARNING")
-
-    def _on_theme_build_error(
-        self,
-        error: str,
-        request_id: int | None = None,
-        request_data: Optional[dict] = None,
-    ):
-        """Обработчик ошибки генерации CSS"""
-        if self._cleanup_in_progress:
-            return
-        log(f"❌ Ошибка генерации CSS темы: {error}", "ERROR")
-
-        if request_id is not None and request_id != self._latest_theme_request_id:
-            log(
-                f"⏭️ Игнорируем устаревшую ошибку темы (request_id={request_id}, latest={self._latest_theme_request_id})",
-                "DEBUG",
-            )
-            return
-
-        done_callback = None
-        if request_data:
-            done_callback = request_data.get('done_callback')
-        if done_callback:
-            done_callback(False, error)
-
-    def _cleanup_theme_build_thread(self, request_id: int | None = None):
-        """Очистка потока генерации CSS по request_id."""
-        try:
-            ids_to_cleanup = [request_id] if request_id is not None else list(self._active_theme_build_jobs.keys())
-            for rid in ids_to_cleanup:
-                if rid is None:
-                    continue
-                job = self._active_theme_build_jobs.pop(rid, None)
-                if not job:
-                    continue
-                job.cancel()
-
-        except RuntimeError:
-            self._active_theme_build_jobs.clear()
-    
-    def _apply_css_only(self, final_css: str, theme_name: str, persist: bool):
-        """Sync qfluentwidgets theme state without a main-window stylesheet.
-
-        qfluentwidgets manages all widget styling natively via setTheme(DARK/LIGHT).
-        Applying an overlay CSS via main_window.setStyleSheet() would inject hardcoded
-        dark-mode QLabel colors (color: rgba(255,255,255,0.87)) that survive light-mode
-        switches → white text on white background.
-        """
-        try:
-            if not self.widget or not self.app:
-                return
-
-            clean = _normalize_theme_name(theme_name)
-
-            # Sync qfluentwidgets dark/light mode — updates all native widgets.
-            _sync_theme_mode_to_qfluent(clean, window=self.widget)
-
-            # Sync accent color and invalidate token cache.
-            _sync_theme_accent_to_qfluent(clean)
-            invalidate_theme_tokens_cache()
-
-            self.current_theme = clean
-
-            if persist:
-                self._request_theme_persist(clean)
-
-        except Exception as e:
-            log(f"Ошибка в _apply_css_only: {e}", "❌ ERROR")
-
-    def _request_theme_persist(self, theme_name: str) -> None:
-        clean = _normalize_theme_name(theme_name)
-        state = self._theme_persist_state_obj()
-        if state.is_busy():
-            state.pending = clean
-            return
-        state.pending = None
-        self._start_theme_persist_worker(clean)
-
-    def _start_theme_persist_worker(self, theme_name: str) -> None:
-        def bind_worker(worker) -> None:
-            worker.saved.connect(lambda saved_theme, _ok: log(f"💾 Тема сохранена: '{saved_theme}'", "DEBUG"))
-            worker.failed.connect(lambda saved_theme, error: log(f"Не удалось сохранить тему '{saved_theme}': {error}", "WARNING"))
-
-        _request_id, worker = self._theme_persist_runtime.start_qthread_worker(
-            worker_factory=lambda _request_id: self._create_theme_persist_worker(theme_name, parent=self.widget),
-            bind_worker=bind_worker,
-            on_finished=self._on_theme_persist_finished,
-            signal_includes_request_id=False,
-        )
-        self._theme_persist_runtime_worker = worker
-
-    def _on_theme_persist_finished(self, _worker) -> None:
-        current_worker = self.__dict__.get("_theme_persist_runtime_worker")
-        if current_worker is not None and _worker is not current_worker:
-            return
-        self._theme_persist_runtime_worker = None
-        pending = self._theme_persist_state_obj().pending
-        self._theme_persist_state_obj().pending = None
-        if pending and not self._cleanup_in_progress:
-            self._schedule_theme_persist_worker_start(pending)
-
-    def _schedule_theme_persist_worker_start(self, theme_name: str) -> None:
-        pending = _normalize_theme_name(theme_name)
-        state = self._theme_persist_state_obj()
-        state.pending = pending
-        state.schedule_start(
-            QTimer.singleShot,
-            self._run_scheduled_theme_persist_worker_start,
-            cleanup_in_progress=bool(self.__dict__.get("_cleanup_in_progress", False)),
-            pending_when_already_scheduled=pending,
-        )
-
-    def _run_scheduled_theme_persist_worker_start(self) -> None:
-        pending = self._theme_persist_state_obj().take_pending_for_scheduled_start(
-            cleanup_in_progress=bool(self.__dict__.get("_cleanup_in_progress", False)),
-        )
-        if pending and not bool(self.__dict__.get("_cleanup_in_progress", False)):
-            self._start_theme_persist_worker(pending)
-
-    def _theme_persist_state_obj(self) -> LatestValueWorkerState:
-        state = self.__dict__.get("_theme_persist_state")
-        runtime = self.__dict__.get("_theme_persist_runtime")
-        if state is None:
-            state = LatestValueWorkerState(
-                runtime,
-                empty_value=None,
-            )
-            self.__dict__["_theme_persist_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
 
     def _set_status(self, text):
         """Устанавливает текст статуса (через главное окно)"""

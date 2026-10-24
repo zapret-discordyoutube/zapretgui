@@ -782,11 +782,6 @@ def save_snowflakes_enabled(enabled: bool) -> AppearanceTogglePlan:
     store_warmed_premium_effects(None if current is None else current.garland_enabled, bool(enabled))
     return AppearanceTogglePlan(enabled=bool(enabled))
 
-def save_selected_theme(theme_name: str) -> bool:
-    from settings.store import set_selected_theme
-
-    return bool(set_selected_theme(str(theme_name or "").strip()))
-
 def resolve_premium_access(*, subscription_known: bool, is_premium: bool) -> AppearancePremiumAccess:
     """Единое правило Premium для оформления: его используют и окно, и страница."""
     if not subscription_known:
