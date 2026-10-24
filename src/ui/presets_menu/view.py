@@ -71,10 +71,17 @@ class LinkedWheelListView(ListView):
         # лишних плиток за кадр. Delegate спрашивает область и пропускает те,
         # что в неё не попали.
         self._paint_region = event.region()
+        delegate = self.itemDelegate()
+        begin_frame = getattr(delegate, "begin_frame", None)
+        if callable(begin_frame):
+            begin_frame()
         try:
             super().paintEvent(event)
         finally:
             self._paint_region = None
+            end_frame = getattr(delegate, "end_frame", None)
+            if callable(end_frame):
+                end_frame()
 
     def paint_region(self):
         """Перерисовываемая сейчас область окна списка; None — вне paintEvent."""

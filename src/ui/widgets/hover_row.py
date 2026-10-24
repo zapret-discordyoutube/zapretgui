@@ -34,6 +34,7 @@ def paint_profile_hover_row(
     active_reveal: float | None = None,
     residual_active: float = 0.0,
     hover_level: float | None = None,
+    tokens=None,
 ) -> HoverRowPaintResult:
     """
     Рисует общий фон строки списка.
@@ -46,7 +47,9 @@ def paint_profile_hover_row(
     наведении (ui/widgets/row_hover_motion.py); None — мгновенно по hovered.
     """
 
-    tokens = get_theme_tokens()
+    # Список передаёт токены, взятые один раз на перерисовку, а не на плитку.
+    if tokens is None:
+        tokens = get_theme_tokens()
     if active and active_reveal is not None and active_reveal < 1.0:
         return _paint_revealing_active_row(painter, rect, tokens, active_reveal, hovered or pressed or selected)
     if not active and residual_active > 0.0:
@@ -58,6 +61,7 @@ def paint_profile_hover_row(
             selected=selected,
             fill_idle=fill_idle,
             hover_level=hover_level,
+            tokens=tokens,
         )
         fading = to_qcolor(tokens.accent_soft_bg, tokens.accent_hex)
         fading.setAlphaF(fading.alphaF() * max(0.0, min(1.0, residual_active)))

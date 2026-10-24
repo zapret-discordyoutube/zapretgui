@@ -216,6 +216,12 @@ def contrast_ratio(foreground: QColor, background: QColor) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+# Результат зависит только от четырёх значений, а плитки зовут функцию на каждой
+# перерисовке с одними и теми же цветами.
+_CONTRAST_CACHE: dict[tuple, str] = {}
+_CONTRAST_CACHE_LIMIT = 1024
+
+
 def pick_contrast_color(
     preferred_color: str,
     background_color: QColor,
@@ -227,6 +233,23 @@ def pick_contrast_color(
     if not bg.isValid():
         bg = QColor("#000000")
     bg.setAlpha(255)
+    cache_key = (str(preferred_color or ""), bg.rgb(), tuple(str(c or "") for c in fallback_colors), float(minimum_ratio))
+    cached = _CONTRAST_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    result = _pick_contrast_color_uncached(preferred_color, bg, fallback_colors, minimum_ratio)
+    if len(_CONTRAST_CACHE) >= _CONTRAST_CACHE_LIMIT:
+        _CONTRAST_CACHE.clear()
+    _CONTRAST_CACHE[cache_key] = result
+    return result
+
+
+def _pick_contrast_color_uncached(
+    preferred_color: str,
+    bg: QColor,
+    fallback_colors: list[str],
+    minimum_ratio: float,
+) -> str:
 
     candidates: list[str] = []
     for raw in [preferred_color, *fallback_colors]:

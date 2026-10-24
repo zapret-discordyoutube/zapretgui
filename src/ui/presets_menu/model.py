@@ -1,8 +1,22 @@
 from __future__ import annotations
 
 import json
+from typing import NamedTuple
 
 from PyQt6.QtCore import QAbstractListModel, QMimeData, QModelIndex, Qt
+
+
+class TileValues(NamedTuple):
+    """Всё, что нужно нарисовать плитке пресета (те же значения, что отдаёт data())."""
+
+    name: str
+    is_active: bool
+    is_pinned: bool
+    rating: int
+    file_name: str
+    icon_color: str
+    is_remote: bool
+    remote_state: str
 
 
 class PresetListModel(QAbstractListModel):
@@ -608,6 +622,29 @@ class PresetListModel(QAbstractListModel):
             return self._repeated_prefix_length(index.row()) if kind == "preset" else 0
 
         return None
+
+    def tile_values(self, row_index: int) -> TileValues | None:
+        """Данные плитки одним обращением вместо десятка data() по ролям.
+
+        Каждый data() — отдельный заход из C++ в Python, а плитку перерисовывают
+        на каждом шаге прокрутки. Значения те же, что у ролей (это проверяет
+        тест); имя уже без повтора заголовка папки."""
+        if row_index < 0 or row_index >= len(self._rows):
+            return None
+        row = self._rows[row_index]
+        name = str(row.get("name", "") or "")
+        if row.get("kind", "preset") == "preset":
+            name = name[int(self._repeated_prefix_length(row_index) or 0):]
+        return TileValues(
+            name=name,
+            is_active=bool(row.get("is_active", False)),
+            is_pinned=bool(row.get("is_pinned", False)),
+            rating=int(row.get("rating", 0) or 0),
+            file_name=str(row.get("file_name", "") or ""),
+            icon_color=str(row.get("icon_color", "#5caee8") or ""),
+            is_remote=bool(row.get("is_remote", False)),
+            remote_state=str(row.get("remote_state", "") or ""),
+        )
 
     def _repeated_prefix_length(self, row_index: int) -> int:
         """Сколько первых символов имени пресета повторяют заголовок над ним.
