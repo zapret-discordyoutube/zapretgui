@@ -35,7 +35,7 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "странно. После этого понадобится перезагрузка;\n"
             "• «Открыть папку» — папка программы с пресетами, списками и логами;\n"
             "• «Документация» — вики с подробными инструкциями;\n"
-            "• «Исходный код» — сайт git.zapret.moe: код программы и все её выпуски."
+            "• «Исходный код» — Git-сайт проекта: код программы и все её выпуски."
         ),
         "en": (
             "The tiles under the summary are what you need most often:\n"
@@ -44,7 +44,7 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "behaves oddly. A reboot is needed afterwards;\n"
             "• Open folder — the app folder with presets, lists and logs;\n"
             "• Documentation — the wiki with detailed guides;\n"
-            "• Source code — the git.zapret.moe site: the app's code and all its releases."
+            "• Source code — the project's Git site: the app's code and all its releases."
         ),
     },
     "onboarding.step.windows_settings.title": {"ru": "Windows и блокировки", "en": "Windows and blocks"},

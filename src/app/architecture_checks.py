@@ -176,6 +176,29 @@ def check_switches_use_aligned_switch_button(files: list[Path]) -> list[Problem]
     )
 
 
+def check_browser_opens_use_site_links(files: list[Path]) -> list[Problem]:
+    """Браузер открывается только с адресом из utils.site_links.
+
+    Основные имена сайтов проекта (git.zapret.moe, wiki.zapret.moe) режут по TLS:
+    адрес для браузера подменяет site_links.resolve. Модуль, который сам зовёт
+    webbrowser.open, без site_links отправит человека на заблокированное имя.
+    Исключения открывают только t.me.
+    """
+    allowed = {"src/utils/site_links.py", "src/config/telegram_links.py", "src/donater/commands.py"}
+    problems: list[Problem] = []
+    for path in files:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if rel in allowed or path == THIS_FILE:
+            continue
+        lines = _lines(path)
+        if any("site_links" in line for line in lines):
+            continue
+        for index, line in enumerate(lines, start=1):
+            if "webbrowser.open(" in line:
+                problems.append(Problem(path, index, "адрес для браузера пропускайте через utils.site_links.resolve (или open_in_browser)", line))
+    return problems
+
+
 def check_skip_float_in_is_allowlisted(files: list[Path]) -> list[Problem]:
     """Появление страниц не выключают: skip_float_in — только для виджетов,
     у которых вход уже есть свой (вкладки «О программе», девиз, шапка).
@@ -1731,6 +1754,7 @@ def run_checks() -> list[Problem]:
     problems.extend(check_no_page_signal_layer(files))
     problems.extend(check_no_window_level_state_subscriptions(files))
     problems.extend(check_switches_use_aligned_switch_button(files))
+    problems.extend(check_browser_opens_use_site_links(files))
     problems.extend(check_skip_float_in_is_allowlisted(files))
     problems.extend(check_runtime_feedback_uses_ui_bridge(files))
     problems.extend(check_runtime_ui_bridge_is_feature_neutral())

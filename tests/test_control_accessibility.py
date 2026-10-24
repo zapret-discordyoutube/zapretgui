@@ -352,13 +352,13 @@ class ControlAccessibilityTests(unittest.TestCase):
         self.assertEqual(kwargs["internet_cleanup_card"].accessible_name, "Сбросить сеть Windows")
         self.assertEqual(kwargs["folder_card"].accessible_name, "Открыть папку программы")
         self.assertEqual(kwargs["docs_card"].accessible_name, "Открыть документацию")
-        self.assertEqual(kwargs["git_card"].accessible_name, "Открыть сайт git.zapret.moe")
+        self.assertEqual(kwargs["git_card"].accessible_name, "Открыть Git-сайт проекта")
         self.assertEqual(kwargs["internet_cleanup_card"].title, "Сбросить сеть Windows")
         self.assertIn("перезагрузка", kwargs["internet_cleanup_card"].content)
         self.assertEqual(kwargs["folder_card"].title, "Открыть папку")
         self.assertEqual(kwargs["docs_card"].title, "Документация")
         self.assertEqual(kwargs["git_card"].title, "Исходный код")
-        self.assertIn("git.zapret.moe", kwargs["git_card"].content)
+        self.assertIn("Git-сайт проекта", kwargs["git_card"].content)
 
     def test_winws2_language_refresh_updates_control_button_screen_reader_names(self) -> None:
         from presets.ui.control.zapret2.runtime_helpers import apply_profile_language
@@ -388,13 +388,13 @@ class ControlAccessibilityTests(unittest.TestCase):
         self.assertEqual(kwargs["internet_cleanup_card"].accessible_name, "Сбросить сеть Windows")
         self.assertEqual(kwargs["folder_card"].accessible_name, "Открыть папку программы")
         self.assertEqual(kwargs["docs_card"].accessible_name, "Открыть документацию")
-        self.assertEqual(kwargs["git_card"].accessible_name, "Открыть сайт git.zapret.moe")
+        self.assertEqual(kwargs["git_card"].accessible_name, "Открыть Git-сайт проекта")
         self.assertEqual(kwargs["internet_cleanup_card"].title, "Сбросить сеть Windows")
         self.assertIn("перезагрузка", kwargs["internet_cleanup_card"].content)
         self.assertEqual(kwargs["folder_card"].title, "Открыть папку")
         self.assertEqual(kwargs["docs_card"].title, "Документация")
         self.assertEqual(kwargs["git_card"].title, "Исходный код")
-        self.assertIn("git.zapret.moe", kwargs["git_card"].content)
+        self.assertIn("Git-сайт проекта", kwargs["git_card"].content)
 
 
 if __name__ == "__main__":

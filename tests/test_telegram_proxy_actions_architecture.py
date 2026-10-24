@@ -53,6 +53,22 @@ class TelegramProxyActionsArchitectureTests(unittest.TestCase):
         self.assertIn("subprocess.Popen", commands_source)
         self.assertIn("webbrowser.open", commands_source)
 
+    def test_external_link_opens_under_reachable_site_name(self) -> None:
+        # git.zapret.moe режут по TLS: ссылка на сайт проекта (страница ZaStoGram)
+        # уходит в браузер под именем, которое выбрал utils.site_links.
+        from unittest import mock
+
+        url = "https://git.zapret.moe/zastogram/ZaStoGram_desktop/releases/latest"
+        with (
+            mock.patch.object(telegram_commands.site_links, "resolve", return_value="https://git2.zapret.moe/x") as resolve,
+            mock.patch.object(telegram_commands.webbrowser, "open") as browser_open,
+        ):
+            result = telegram_commands.open_external_link(url, success_log="ok", error_prefix="fail")
+
+        resolve.assert_called_once_with(url)
+        browser_open.assert_called_once_with("https://git2.zapret.moe/x")
+        self.assertTrue(result.ok)
+
     def test_upstream_config_builder_has_single_settings_owner(self) -> None:
         manager_source = inspect.getsource(telegram_manager.build_upstream_proxy_config_from_settings)
         commands_source = inspect.getsource(telegram_commands.build_upstream_config)

@@ -109,7 +109,7 @@ class ControlPageActionMixin:
         self._request_external_open_url(
             GIT_SITE_URL,
             error_title="Исходный код",
-            error_default="Не удалось открыть сайт git.zapret.moe: {error}",
+            error_default="Не удалось открыть Git-сайт проекта: {error}",
         )
 
     def _open_folder(self) -> None:

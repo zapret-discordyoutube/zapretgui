@@ -16,6 +16,7 @@ from telegram_proxy.runtime.plans import (
     build_diagnostics_poll_plan,
     build_diagnostics_start_plan,
 )
+from utils import site_links
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,7 +258,8 @@ def open_external_link(url: str, *, success_log: str, error_prefix: str) -> Tele
     if not target:
         return TelegramProxyActionResult(False, f"{error_prefix}: empty url", "", "")
     try:
-        webbrowser.open(target)
+        # адрес сайта проекта — под открывающимся именем (git.zapret.moe режут по TLS)
+        webbrowser.open(site_links.resolve(target))
         return TelegramProxyActionResult(True, success_log, "", "")
     except Exception as e:
         return TelegramProxyActionResult(False, f"{error_prefix}: {e}", "", "")

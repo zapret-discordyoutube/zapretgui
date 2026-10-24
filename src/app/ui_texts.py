@@ -350,12 +350,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Source code",
     },
     "page.control.git.desc": {
-        "ru": "Открыть git.zapret.moe: код и выпуски программ проекта",
-        "en": "Open git.zapret.moe: the project's code and releases",
+        "ru": "Открыть Git-сайт проекта: код и выпуски программ",
+        "en": "Open the project's Git site: code and releases of its apps",
     },
     "page.control.git.accessible_name": {
-        "ru": "Открыть сайт git.zapret.moe",
-        "en": "Open the git.zapret.moe site",
+        "ru": "Открыть Git-сайт проекта",
+        "en": "Open the project's Git site",
     },
     "page.control.button.open_folder": {
         "ru": "Открыть папку",

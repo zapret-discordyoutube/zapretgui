@@ -91,8 +91,8 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
             icon_name="git",
             icon_color="#f0883e",
             title=("page.control.git.title", "Исходный код"),
-            content=("page.control.git.desc", "Открыть git.zapret.moe: код и выпуски программ проекта"),
-            accessible_name=("page.control.git.accessible_name", "Открыть сайт git.zapret.moe"),
+            content=("page.control.git.desc", "Открыть Git-сайт проекта: код и выпуски программ"),
+            accessible_name=("page.control.git.accessible_name", "Открыть Git-сайт проекта"),
         ),
     )
 

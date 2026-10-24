@@ -66,9 +66,9 @@ class QuickActionsTests(unittest.TestCase):
 
         self.assertEqual(tile.focusPolicy(), Qt.FocusPolicy.StrongFocus)
         self.assertEqual(tile.title(), "Исходный код")
-        self.assertEqual(tile.accessibleName(), "Открыть сайт git.zapret.moe")
-        self.assertEqual(tile.property("screenReaderStateText"), "Открыть сайт git.zapret.moe")
-        self.assertIn("git.zapret.moe: код и выпуски", tile.accessibleDescription())
+        self.assertEqual(tile.accessibleName(), "Открыть Git-сайт проекта")
+        self.assertEqual(tile.property("screenReaderStateText"), "Открыть Git-сайт проекта")
+        self.assertIn("Git-сайт проекта: код и выпуски", tile.accessibleDescription())
         self.assertIn("Enter или Пробел", tile.accessibleDescription())
 
         tile.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier))
@@ -123,7 +123,7 @@ class QuickActionsTests(unittest.TestCase):
         self.assertEqual(w.tour_card.accessibleName(), "Show the guided tour")
         self.assertEqual(w.docs_card.title(), tr_catalog("page.winws2_control.button.documentation", language="en"))
         self.assertEqual(w.git_card.title(), "Source code")
-        self.assertEqual(w.git_card.accessibleName(), "Open the git.zapret.moe site")
+        self.assertEqual(w.git_card.accessibleName(), "Open the project's Git site")
 
     def test_five_tiles_stand_in_one_row_and_wrap_three_plus_two(self) -> None:
         self.host.resize(1200, 600)
