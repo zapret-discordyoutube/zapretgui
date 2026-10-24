@@ -1994,7 +1994,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
 
         builder = (PRIVATE_ROOT / "build_zapret" / "release_pipeline.py").read_text(encoding="utf-8")
         self.assertIn("resource_sets = (", builder)
-        self.assertIn("PUBLIC_SRC / \"presets\" / \"builtin\" / \"winws2\"", builder)
+        # Сборщик берёт исходники через параметр (public_src) или константу PUBLIC_SRC.
+        self.assertRegex(builder, r'(?:PUBLIC_SRC|public_src) / "presets" / "builtin" / "winws2"')
         self.assertIn("PRIVATE_ROOT / \"resources\" / \"profile\" / \"templates\"", builder)
         self.assertIn("PRIVATE_ROOT / \"resources\" / \"system\"", builder)
         self.assertNotIn("f'/DPUBLICSRC=", builder)
