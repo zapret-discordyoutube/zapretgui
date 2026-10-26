@@ -1,5 +1,5 @@
 # Preset: Default v1 (game filter)
-# BuiltinVersion: 2.44
+# BuiltinVersion: 2.45
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -81,12 +81,16 @@
 --blob=hex_0f0e0e0f:0x0F0E0E0F
 --blob=hex_0f0f0f0f:0x0F0F0F0F
 --blob=hex_00:0x00
+--blob=fake_stun_as_tls:@bin/stun.bin
+--blob=http_max:@bin/tls_clienthello_max_ru.bin
 
 --name=zapret.moe
+--skip
 --filter-tcp=443
 --hostlist=lists/zapret-moe.txt
 --out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+--payload=tls_client_hello,http_req
+--lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 --new
 
@@ -102,7 +106,7 @@
 --filter-udp=443,6568,50000-51000
 --ipset=lists/ipset-anydesk.txt
 --out-range=-d8
---lua-desync=fake:blob=stun_pat:repeats=6
+--lua-desync=pass
 
 --new
 
@@ -163,6 +167,15 @@
 --hostlist=lists/twimg.txt
 --out-range=-d8
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
+
+--name=Tanki X
+--filter-tcp=80,443-65535
+--hostlist=lists/tankix.txt
+--out-range=-d8
+--lua-desync=fake:blob=fake_default_http:repeats=4:ip_autottl=2,3-20:ip6_autottl=2,3-20:tcp_md5
+--lua-desync=multidisorder:pos=host+1
 
 --new
 
