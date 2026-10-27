@@ -6,11 +6,13 @@
 догадкой: у сайта открывается главная страница, а видеоузел режут; QUIC к одному
 имени теряется, к другому на том же сервере проходит.
 
-Здесь одна таблица замеров. Строки — имена (имена сайтов сервиса и два контроля:
-постороннее имя и приветствие без имени), столбцы — адреса сервисов, ячейки — исход
-приветствия TLS и первого пакета QUIC. Контроль важен: если с посторонним именем
-или без имени тот же адрес отвечает, адрес жив и режут именно имя; если не
-отвечает ничего, закрыт адрес или протокол.
+Здесь одна таблица замеров. Строки — имена (имена сайтов сервиса и три контроля:
+постороннее имя, приветствие без имени и первое имя сервиса другими буквами),
+столбцы — адреса сервисов, ячейки — исход приветствия TLS и первого пакета QUIC.
+Контроль важен: если с посторонним именем или без имени тот же адрес отвечает,
+адрес жив и режут именно имя; если не отвечает ничего, закрыт адрес или протокол.
+Имя другими буквами (``googlevideo.COM``) сервер принимает как то же самое: если оно
+проходит, а обычное нет, их различает фильтр, который ищет имя буква в букву.
 
 Сбор (``collect``) отделён от вывода (``judge``): вывод — чистая функция над таблицей.
 Пробы отправляются только по сигналу беды (``needs_matrix``): браузер их не шлёт.
@@ -20,6 +22,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+
+from diagnostics.block_cause import case_variant
 
 __all__ = [
     "CONTROL_NAME",
@@ -84,6 +88,13 @@ class MatrixFacts:
     # Ключ ячейки — (имя, IP); имя "" — приветствие без имени, ``CONTROL_NAME`` — посторонее имя.
     cells: dict[tuple[str, str], Cell] = field(default_factory=dict)
     cancelled: bool = False
+    # Первое имя сервиса другими буквами (``block_cause.case_variant``). Пусто — такой строки нет.
+    recased: str = ""
+
+    @property
+    def controls(self) -> tuple[str, ...]:
+        """Строки-контроли: по ним видно, жив ли адрес сам по себе."""
+        return (CONTROL_NAME, "", *((self.recased,) if self.recased else ()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,14 +150,16 @@ def collect(
     """Замеряет все сочетания «имя на адресе» вместе с контролями. ``probe(имя, ip)`` — одна ячейка."""
     names = tuple(dict.fromkeys(name for name in names if name))[:MAX_NAMES]
     addresses = tuple(dict.fromkeys(addresses))[:MAX_ADDRESSES]
-    keys = [(name, ip) for name in (*names, CONTROL_NAME, "") for _host, ip in addresses]
+    recased = case_variant(names[0]) if names else ""
+    rows = (*names, CONTROL_NAME, "", *((recased,) if recased else ()))
+    keys = [(name, ip) for name in rows for _host, ip in addresses]
     futures = {}
     for name, ip in keys:
         if should_stop():
-            return MatrixFacts(names, addresses, {}, cancelled=True)
+            return MatrixFacts(names, addresses, {}, cancelled=True, recased=recased)
         futures[(name, ip)] = submit(probe, name, ip)
     cells = {key: future.result() for key, future in futures.items()}
-    return MatrixFacts(names, addresses, cells, cancelled=should_stop())
+    return MatrixFacts(names, addresses, cells, cancelled=should_stop(), recased=recased)
 
 
 def _row(facts: MatrixFacts, name: str, protocol: str) -> dict[str, str]:
@@ -164,7 +177,7 @@ def _names_word(names: Sequence[str]) -> str:
 
 def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
     title = PROTOCOL_TITLES[protocol]
-    rows = {name: _row(facts, name, protocol) for name in (*facts.names, CONTROL_NAME, "")}
+    rows = {name: _row(facts, name, protocol) for name in (*facts.names, *facts.controls)}
     if not any(state == ANSWERED for row in rows.values() for state in row.values()):
         # Не ответило ничего: протокол к этим серверам не работает совсем (или не поддержан) — имя тут ни при чём.
         if all(state == CUT for row in rows.values() for state in row.values()):
@@ -177,9 +190,7 @@ def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
         return []
     findings: list[Finding] = []
     by_name: dict[str, list[str]] = {}
-    control_ok_ips = {
-        ip for _host, ip in facts.addresses if rows[CONTROL_NAME].get(ip) == ANSWERED or rows[""].get(ip) == ANSWERED
-    }
+    control_ok_ips = {ip for _host, ip in facts.addresses if any(rows[name].get(ip) == ANSWERED for name in facts.controls)}
     for name in facts.names:
         for _host, ip in facts.addresses:
             if rows[name].get(ip) == CUT and ip in control_ok_ips:
@@ -203,6 +214,17 @@ def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
                 "она задевает только часть имён сервиса."
             )
         findings.append(Finding(protocol, SCOPE_NAME, "warn", f"{title}: режут по имени", text, blocked, passing))
+    if facts.recased and facts.names:
+        first = facts.names[0]
+        letters = [ip for _host, ip in facts.addresses if rows[first].get(ip) == CUT and rows[facts.recased].get(ip) == ANSWERED]
+        if letters:
+            text = (
+                f"{title}: с именем {first} соединение обрывается, а то же имя другими буквами ({facts.recased}) "
+                f"на тех же адресах проходит — на {', '.join(_label(facts, ip) for ip in letters)}. Сервер регистр букв "
+                "не различает, значит, различает фильтр на пути: он ищет имя буква в букву. Это доказывает, что режут "
+                "именно имя, и такую блокировку стратегия Zapret обходит."
+            )
+            findings.append(Finding(protocol, SCOPE_NAME, "warn", f"{title}: фильтр ищет имя буква в букву", text, (first,)))
     node: list[str] = []
     for name in facts.names:
         cut_ips = [ip for _host, ip in facts.addresses if rows[name].get(ip) == CUT and ip in control_ok_ips]
@@ -223,7 +245,7 @@ def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
         ip
         for _host, ip in facts.addresses
         if ip not in control_ok_ips
-        and all(rows[name].get(ip) == CUT for name in (*facts.names, CONTROL_NAME, ""))
+        and all(rows[name].get(ip) == CUT for name in (*facts.names, *facts.controls))
         and any(state == ANSWERED for row in rows.values() for state in row.values())
     ]
     if dead:
@@ -249,10 +271,12 @@ def judge(facts: MatrixFacts) -> MatrixVerdict | None:
     for protocol in (PROTOCOL_TLS, PROTOCOL_QUIC):
         findings.extend(_judge_protocol(facts, protocol))
     table = []
-    for name in (*facts.names, CONTROL_NAME, ""):
+    for name in (*facts.names, *facts.controls):
         shown = name or "без имени (контроль)"
         if name == CONTROL_NAME:
             shown = f"{CONTROL_NAME} (контроль)"
+        elif name and name == facts.recased:
+            shown = f"{name} (контроль: то же имя другими буквами)"
         table.append(
             {
                 "name": shown,

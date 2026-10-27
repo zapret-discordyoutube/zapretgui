@@ -162,7 +162,10 @@ class NetLaneTests(unittest.TestCase):
 
         # Сайт не открылся: только тогда идут пробы протоколов.
         probe = SimpleNamespace(
-            host="discord.com", reach=ProbeResult(ip="203.0.113.5", kind=KIND_RESET, stage=STAGE_TLS), reach_state=ReachState.DPI
+            host="discord.com",
+            reach=ProbeResult(ip="203.0.113.5", kind=KIND_RESET, stage=STAGE_TLS),
+            reach_state=ReachState.DPI,
+            target=SimpleNamespace(discover_googlevideo=False),
         )
         seen = {}
 

@@ -9,6 +9,8 @@
    Если с именем сайта соединение рвётся, а с посторонним именем или вовсе
    без имени тот же сервер отвечает — режут по имени. Ответом считается и
    отказ сервера («не знаю такого имени»): раз он дошёл, дорога открыта.
+   Отдельно пробуется то же имя другими буквами (``googlevideo.COM``): сервер
+   регистр не различает, а фильтр, который ищет имя буква в букву, его пропустит.
 2. **Обычный HTTP, порт 80.** Часть провайдеров вместо сайта показывает
    страницу о блокировке или отдаёт код 451.
 3. **Пинг** — когда адрес не принимает соединение вовсе.
@@ -51,6 +53,7 @@ __all__ = [
     "HELLO_OK",
     "TLS_1_2",
     "TLS_1_3",
+    "case_variant",
     "HELLO_RESET",
     "HELLO_TIMEOUT",
     "NEUTRAL_NAME",
@@ -162,6 +165,12 @@ class CauseFacts:
     http: HttpFacts | None = None
     # None — пинг не делали или он недоступен в системе.
     ping_ok: bool | None = None
+    # То же имя другими буквами (``case_variant``) и его исход. None — не проверяли.
+    recased: HelloResult | None = None
+    recased_name: str = ""
+    # Сервер заведомо принимает любое имя (видеосервер Google): тогда отказ на всех именах —
+    # это не его привередливость, а закрытый адрес.
+    any_name: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,6 +348,19 @@ def stub_reason(host: str, facts: HttpFacts | None) -> str:
     return ""
 
 
+def case_variant(name: str) -> str:
+    """То же имя другими буквами: последняя часть заглавными («googlevideo.COM»). Пусто — менять нечего.
+
+    Имена сайтов регистр не различают, и сервер ответит на оба написания одинаково. Если одно
+    проходит, а другое нет, их различает фильтр на пути: он ищет имя буква в букву.
+    """
+    head, dot, tail = str(name or "").rpartition(".")
+    if not dot or not head or not tail.isascii() or not any(char.isalpha() for char in tail):
+        return ""
+    flipped = tail.upper() if tail != tail.upper() else tail.lower()
+    return f"{head}.{flipped}"
+
+
 def needs_refining(result: ProbeResult | None) -> bool:
     """Есть ли что уточнять: соединение не состоялось или оборвалось на шифровании."""
     if result is None or not result.ip:
@@ -361,8 +383,12 @@ def collect(
     submit: Callable,
     cancel: SocketCancel,
     ping: Callable[[str], bool | None] | None = None,
+    any_name: bool = False,
 ) -> CauseFacts:
-    """Дополнительные пробы к адресу, на котором сайт не открылся. Идут одновременно."""
+    """Дополнительные пробы к адресу, на котором сайт не открылся. Идут одновременно.
+
+    ``any_name`` — сервер заведомо принимает любое имя (видеосервер Google).
+    """
     ip = result.ip
     http = submit(http_probe, host, ip, cancel=cancel)
     if result.kind == KIND_CONNECT:
@@ -372,6 +398,7 @@ def collect(
             result=result,
             http=http.result(),
             ping_ok=ping_future.result() if ping_future is not None else None,
+            any_name=any_name,
         )
     neutral = submit(tls_hello, ip, NEUTRAL_NAME, cancel=cancel)
     nameless = submit(later, STAGGER_S, cancel, tls_hello, ip, None, cancel=cancel)
@@ -382,6 +409,12 @@ def collect(
     # Настоящее имя ещё раз: один сбой — не сравнение. Вывод «по имени» уверенный,
     # только если оно оборвалось и теперь, пока постороннее имя проходит.
     real_again = submit(later, (2 + len(ALLOWED_NAMES)) * STAGGER_S, cancel, tls_hello, ip, host, cancel=cancel)
+    recased_name = case_variant(host)
+    recased = (
+        submit(later, (3 + len(ALLOWED_NAMES)) * STAGGER_S, cancel, tls_hello, ip, recased_name, cancel=cancel)
+        if recased_name
+        else None
+    )
     answers = [(name, future.result()) for name, future in allowed]
     allowed_name, allowed_result = next((item for item in answers if item[1].answered), answers[-1])
     return CauseFacts(
@@ -393,6 +426,9 @@ def collect(
         allowed_name=allowed_name,
         real_again=real_again.result(),
         http=http.result(),
+        recased=recased.result() if recased is not None else None,
+        recased_name=recased_name,
+        any_name=any_name,
     )
 
 
@@ -424,6 +460,21 @@ def judge(facts: CauseFacts) -> Cause | None:
             return Cause(CAUSE_ADDRESS_SILENT, "адрес не отвечает совсем — ни на соединение, ни на пинг")
         return None
 
+    recased = facts.recased
+    again = facts.real_again
+    if (
+        recased is not None
+        and recased.kind == HELLO_OK
+        and result.kind != KIND_TLS
+        and not (again is not None and again.kind == HELLO_OK)
+    ):
+        # То же имя, только другими буквами, проходит: сервер их не различает, различает фильтр.
+        return Cause(
+            CAUSE_BY_NAME,
+            f"блокировка по имени сайта: с именем {facts.host} соединение {_how(result)}, а то же имя другими "
+            f"буквами ({facts.recased_name}) тот же сервер принимает — фильтр на пути ищет имя буква в букву",
+            confident=True,
+        )
     hellos = [item for item in (facts.neutral, facts.nameless) if item is not None and item.kind != HELLO_CANCELLED]
     if not hellos:
         return None
@@ -433,7 +484,6 @@ def judge(facts: CauseFacts) -> Cause | None:
     refused_by_server = result.kind == KIND_TLS
     passed = [item for item in hellos if item.kind == HELLO_OK or (item.answered and not refused_by_server)]
     if passed:
-        again = facts.real_again
         if again is not None and again.kind == HELLO_OK:
             # Со второго раза настоящее имя прошло: первый обрыв был сбоем, сравнивать нечего.
             return None
@@ -462,7 +512,11 @@ def judge(facts: CauseFacts) -> Cause | None:
             f"а с именем {facts.host} и с посторонним — нет",
             confident=True,
         )
-    probes = [*hellos, *([allowed] if allowed is not None and allowed.kind != HELLO_CANCELLED else [])]
+    probes = [
+        *hellos,
+        *([allowed] if allowed is not None and allowed.kind != HELLO_CANCELLED else []),
+        *([recased] if recased is not None and recased.kind != HELLO_CANCELLED else []),
+    ]
     checked = "ни с каким именем, даже с разрешённым" if allowed is not None and not allowed.answered else "ни с каким именем"
     if all(item.kind == HELLO_TIMEOUT for item in probes):
         # Тишина на любое имя — так молчит фильтр. Сервер, который сам не принимает
@@ -471,6 +525,16 @@ def judge(facts: CauseFacts) -> Cause | None:
             CAUSE_BY_ADDRESS,
             f"соединение с адресом устанавливается, а шифрование — {checked}: ответа нет вовсе. Похоже, закрыт сам "
             "адрес или вся его сеть (так выглядит и режим «белых списков» адресов), а не имя сайта",
+        )
+    if facts.any_name and all(item.kind in (HELLO_RESET, HELLO_TIMEOUT) for item in probes):
+        # Этот сервер принимает любое имя, даже чужое: раз не проходит ни одно, закрыт адрес, а не имя.
+        return Cause(
+            CAUSE_BY_ADDRESS,
+            f"соединение с адресом устанавливается, а шифрование не проходит {checked}"
+            + (", даже без имени" if facts.nameless in probes else "")
+            + ". "
+            "Этот сервер принимает любое имя, поэтому закрыт сам адрес для шифрованных соединений, а не имя сайта",
+            confident=True,
         )
     if all(item.kind in (HELLO_RESET, HELLO_TIMEOUT) for item in probes):
         return Cause(

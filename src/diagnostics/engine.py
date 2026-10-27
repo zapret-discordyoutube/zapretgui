@@ -55,6 +55,7 @@ from diagnostics import (
     system_state,
     telegram_check,
     transfer_probe,
+    video_node_check,
     video_nodes,
     volume_probe,
 )
@@ -205,6 +206,9 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool, volume
             run, target, service, host, f"{nodes.note}; первый видеосервер не ответил, проверен запасной", full=full, volume=volume
         )
     best = probe if probe.reach_state == ReachState.OK else first
+    if full and best.reach is not None and best.reach.ip and best.reach_state != ReachState.OK and not run.dns_cancelled():
+        # Видеосервер не открылся: чей он и отдаёт ли он видео через другие адреса Google.
+        best.video_facts = video_node_check.collect(run, best.host, best.reach, best.cause_facts)
     if full and best.reach is not None and best.reach_state == ReachState.OK:
         _describe_node(run, nodes, best, volume=volume, target=target, service=service)
         if volume:
@@ -343,10 +347,17 @@ def _refine_cause(run: _Run, probe: _Probe) -> None:
     if not block_cause.needs_refining(result) or run.dns_cancelled():
         return
     facts = block_cause.collect(
-        probe.host, result, submit=run.net_lane.submit, cancel=run.probe_cancel, ping=net_access.ping_ok
+        probe.host,
+        result,
+        submit=run.net_lane.submit,
+        cancel=run.probe_cancel,
+        ping=net_access.ping_ok,
+        # Видеосервер Google принимает любое имя: отказ на всех именах у него — закрытый адрес.
+        any_name=probe.target.discover_googlevideo,
     )
     # Проверку могли снять, пока шли пробы: по обрывкам вывод не делаем.
     if not run.dns_cancelled():
+        probe.cause_facts = facts
         probe.cause = block_cause.judge(facts)
 
 
@@ -557,6 +568,7 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
                 and not probe.dns.ips
                 and not probe.hosts_ips
             ),
+            cure=probe.video_node.advice if probe.strategy_futile else (),
         )
         for probe in probes
     ]

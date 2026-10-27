@@ -19,7 +19,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from diagnostics import block_cause, block_kind, protocol_probe, quic_probe, transfer_probe, volume_probe
+from diagnostics import block_cause, block_kind, protocol_probe, quic_probe, transfer_probe, video_node_check, volume_probe
 from diagnostics.outside_check import OUTSIDE_DOWN
 from diagnostics.limits import NET_AT_ONCE, NET_AT_ONCE_WEAK, REFERENCE_AT_ONCE, RUN_DEADLINE, SITE_START_GAP_S
 from diagnostics.services import Target
@@ -75,6 +75,10 @@ class Probe:
     reach_state: ReachState = ReachState.UNKNOWN
     # Как именно блокируют (по имени сайта, по адресу, страницей провайдера), если удалось выяснить.
     cause: block_cause.Cause | None = None
+    # Пробы, из которых выведена причина: ступени до адреса для подробного разбора. None — не проверяли.
+    cause_facts: block_cause.CauseFacts | None = None
+    # Видеосервер YouTube не открылся: владелец его сети и запрос через другие адреса Google.
+    video_facts: video_node_check.NodeFacts | None = None
     # Сайт открылся, но не каждый раз или не по каждому адресу: что именно шатается. Пусто — стабилен.
     unstable: str = ""
     # Кто ответил вместо сайта, когда сертификат не прошёл проверку (``cert_owner.CertVerdict``).
@@ -144,6 +148,17 @@ class Probe:
         if self.quic is not None and self.quic.code == quic_probe.QUIC_OK:
             return False
         return True
+
+    @property
+    def video_node(self) -> video_node_check.NodeVerdict | None:
+        """Вывод о видеосервере, который не открылся. Ответ сервера за рубежом приходит позже проб — учитывается здесь."""
+        return video_node_check.judge(self.video_facts, outside=self.outside)
+
+    @property
+    def strategy_futile(self) -> bool:
+        """Доказано, что стратегия Zapret этот адрес не откроет: кнопка подбора увела бы не туда."""
+        verdict = self.video_node
+        return verdict is not None and not verdict.strategy_helps
 
     @property
     def kind(self) -> str:

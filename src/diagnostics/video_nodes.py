@@ -33,7 +33,10 @@ __all__ = [
     "combine",
     "discover",
     "goodput_volume",
+    "is_google",
+    "node_owner",
     "owner_note",
+    "owner_text",
     "page_failure_reason",
     "spare_note",
 ]
@@ -280,20 +283,35 @@ def goodput_volume(run, probe) -> None:
     )
 
 
-def owner_note(run, ip: str) -> str:
-    """Чья сеть у узла: кэш Google внутри провайдера или сам Google. Пусто — владельца узнать не удалось."""
+def node_owner(run, ip: str):
+    """Владелец сети узла (``utils.ip_owner.IpOwner``). None — узнать не удалось."""
     from utils.ip_owner import lookup_ip_owner
 
     try:
         owner = lookup_ip_owner(ip, lambda name, rtype: net_access.doh_ask(run, name, rtype))
     except Exception:
-        return ""
+        return None
+    return owner if owner is not None and owner.asn else None
+
+
+def is_google(owner) -> bool:
+    """Сеть самого Google, а не кэш Google внутри сети провайдера."""
+    return owner is not None and owner.asn in _GOOGLE_ASNS
+
+
+def owner_text(owner) -> str:
+    """Чья сеть у узла словами. Пусто — владельца нет."""
     if owner is None or not owner.asn:
         return ""
     name = f"AS{owner.asn}" + (f" ({owner.owner})" if owner.owner else "")
-    if owner.asn in _GOOGLE_ASNS:
+    if is_google(owner):
         return f"узел в сети Google, {name}"
     return f"узел в сети провайдера, {name}: это кэш Google внутри сети, а не сам Google"
+
+
+def owner_note(run, ip: str) -> str:
+    """Чья сеть у узла: кэш Google внутри провайдера или сам Google. Пусто — владельца узнать не удалось."""
+    return owner_text(node_owner(run, ip))
 
 
 def spare_note(first, spare) -> str:

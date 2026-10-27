@@ -305,11 +305,12 @@ def collect_problems(
             # Стратегия помогает только от DPI и обрыва. При чужом сертификате,
             # недоступном адресе или без адреса кнопка подбора увела бы не туда.
             # Сайт, который не открылся и из-за рубежа, не блокируют — он лежит сам: подбор не поможет.
+            # Видеосервер, который не пускают ни с каким именем, стратегия тоже не откроет — это доказано пробами.
             bypassable = next(
                 (
                     probe
                     for probe in broken
-                    if probe.reach_state in BYPASSABLE and probe.kind != block_kind.KIND_DOWN
+                    if probe.reach_state in BYPASSABLE and probe.kind != block_kind.KIND_DOWN and not probe.strategy_futile
                 ),
                 None,
             )

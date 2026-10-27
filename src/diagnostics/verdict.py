@@ -293,6 +293,9 @@ class TargetOutcome:
     # DNS компьютера адреса не дал вовсе («такого сайта нет»), хотя сайт существует: проверка
     # дошла до него по адресу из шифрованного DNS, а браузер и программы спросят Windows.
     dns_blind: bool = False
+    # Свой, доказанный пробами совет этого адреса (видеосервер, который стратегия не откроет).
+    # Пусто — совет берётся по виду блокировки.
+    cure: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,6 +425,16 @@ def _advice_for(
     return ("Повторите проверку через минуту.",)
 
 
+def _with_cures(items: list[TargetOutcome], advice: tuple[str, ...]) -> tuple[str, ...]:
+    """Совет по виду блокировки уступает доказанному совету адреса: у всех сломанных он свой — только он."""
+    cures = tuple(dict.fromkeys(line for item in items for line in item.cure))
+    if not cures:
+        return advice
+    if all(item.cure for item in items):
+        return cures
+    return advice + tuple(line for line in cures if line not in advice)
+
+
 def summarize_service(
     label: str,
     targets: list[TargetOutcome],
@@ -481,8 +494,9 @@ def summarize_service(
             states = [item.reach for item in secondary_broken]
             cause = _cert_cause(secondary_broken)
             headline = f"{label} открывается, но не работают {parts}: {_reason_for(secondary_broken, cause)}"
-            advice = _advice_for(
-                states, zapret_running=zapret_running, cert_cause=cause, kind=_leading_kind(secondary_broken)
+            advice = _with_cures(
+                secondary_broken,
+                _advice_for(states, zapret_running=zapret_running, cert_cause=cause, kind=_leading_kind(secondary_broken)),
             )
             if stale and ADVICE_HOSTS_STALE not in advice:
                 # Нерабочий адрес в hosts ломает сайт в браузере и при другом сломанном адресе.
@@ -501,7 +515,7 @@ def summarize_service(
         headline = f"{label} {opens}: {_reason_for(broken, cause)}"
         if main.reach in (ReachState.DPI, ReachState.FREEZE) and zapret_running and kind != KIND_DOWN:
             headline += " — Zapret запущен, но эту блокировку не обходит"
-        advice = _advice_for(states, zapret_running=zapret_running, cert_cause=cause, kind=kind)
+        advice = _with_cures(broken, _advice_for(states, zapret_running=zapret_running, cert_cause=cause, kind=kind))
         if spoofed and _ADVICE_DNS not in advice:
             advice = advice + (_ADVICE_DNS,)
         # «Причина не ясна» и «не работает сам» — не установленная блокировка: замечание, а не тревога.

@@ -391,7 +391,8 @@ class CollectTests(unittest.TestCase):
 
         started.sort()
         gaps = [later - earlier for earlier, later in pairwise(started)]
-        self.assertEqual(len(started), 2 + len(bc.ALLOWED_NAMES) + 1)
+        # Постороннее, без имени, разрешённые, настоящее ещё раз и то же имя другими буквами.
+        self.assertEqual(len(started), 2 + len(bc.ALLOWED_NAMES) + 2)
         self.assertTrue(all(gap >= 0.03 for gap in gaps), gaps)
 
     def test_failed_encryption_is_retried_with_other_name_and_without_name(self) -> None:
@@ -407,6 +408,8 @@ class CollectTests(unittest.TestCase):
                     *[("hello", "203.0.113.5", name) for name in bc.ALLOWED_NAMES],
                     # Настоящее имя ещё раз: один обрыв — не сравнение.
                     ("hello", "203.0.113.5", "discord.com"),
+                    # То же имя другими буквами: сервер их не различает, фильтр — может.
+                    ("hello", "203.0.113.5", "discord.COM"),
                     ("http", "discord.com", "203.0.113.5"),
                 ],
                 key=repr,
@@ -495,3 +498,66 @@ class WhitelistKindTests(unittest.TestCase):
 
     def test_without_probes_nothing_extra_is_claimed(self) -> None:
         self.assertEqual(self._kind(""), "провайдер пропускает только разрешённые адреса")
+
+
+class CaseVariantTests(unittest.TestCase):
+    """То же имя другими буквами: сервер регистр не различает, фильтр, ищущий имя буква в букву, — различает."""
+
+    def test_last_part_of_the_name_flips_its_case(self) -> None:
+        self.assertEqual(bc.case_variant("rr4---sn-jvhnu5g-c35d.googlevideo.com"), "rr4---sn-jvhnu5g-c35d.googlevideo.COM")
+        self.assertEqual(bc.case_variant("example.COM"), "example.com")
+
+    def test_name_without_letters_to_flip_gives_nothing(self) -> None:
+        for name in ("", "localhost", "10.0.0.1", "сайт.рф"):
+            with self.subTest(name=name):
+                self.assertEqual(bc.case_variant(name), "")
+
+    def test_other_case_passing_is_a_confident_block_by_name(self) -> None:
+        cause = bc.judge(_facts(neutral=RESET, nameless=RESET, recased=ANSWER, recased_name="discord.COM", real_again=RESET))
+
+        self.assertEqual((cause.code, cause.confident), (bc.CAUSE_BY_NAME, True))
+        self.assertIn("discord.COM", cause.text)
+        self.assertIn("буква в букву", cause.text)
+
+    def test_other_case_passing_after_the_real_name_passed_again_is_no_block(self) -> None:
+        self.assertIsNone(bc.judge(_facts(neutral=ANSWER, nameless=ANSWER, recased=ANSWER, real_again=ANSWER)))
+
+    def test_server_refusing_the_real_name_is_not_compared(self) -> None:
+        refused = _broken(KIND_TLS)
+
+        cause = bc.judge(_facts(refused, neutral=REFUSAL, nameless=REFUSAL, recased=ANSWER, real_again=REFUSAL))
+
+        self.assertNotEqual(getattr(cause, "code", ""), bc.CAUSE_BY_NAME)
+
+
+class AnyNameServerTests(unittest.TestCase):
+    """Видеосервер Google принимает любое имя: отказ на всех именах — закрытый адрес, а не его привередливость."""
+
+    def test_reset_on_every_name_of_an_any_name_server_is_the_address(self) -> None:
+        cause = bc.judge(
+            _facts(neutral=RESET, nameless=RESET, allowed=RESET, recased=RESET, real_again=RESET, any_name=True)
+        )
+
+        self.assertEqual((cause.code, cause.confident), (bc.CAUSE_BY_ADDRESS, True))
+        self.assertIn("даже без имени", cause.text)
+        self.assertEqual(bk.site_kind("dpi", cause.code), bk.KIND_IP)
+
+    def test_same_resets_on_an_ordinary_server_stay_undecided(self) -> None:
+        cause = bc.judge(_facts(neutral=RESET, nameless=RESET, allowed=RESET, recased=RESET, real_again=RESET))
+
+        self.assertEqual(cause.code, bc.CAUSE_NO_NAME_WORKS)
+
+    def test_any_name_flag_reaches_the_facts(self) -> None:
+        from unittest.mock import patch
+
+        with (
+            ThreadPoolExecutor(8) as pool,
+            patch.object(bc, "tls_hello", lambda *_a, **_k: RESET),
+            patch.object(bc, "http_probe", lambda *_a, **_k: bc.HttpFacts()),
+            patch.object(bc, "STAGGER_S", 0.0),
+        ):
+            facts = bc.collect("rr1---sn-x.googlevideo.com", _broken(), submit=pool.submit, cancel=SocketCancel(), any_name=True)
+
+        self.assertTrue(facts.any_name)
+        self.assertEqual((facts.recased_name, facts.recased), ("rr1---sn-x.googlevideo.COM", RESET))
+        self.assertEqual(bc.judge(facts).code, bc.CAUSE_BY_ADDRESS)

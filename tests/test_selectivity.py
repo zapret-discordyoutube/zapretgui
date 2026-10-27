@@ -31,7 +31,7 @@ def _by_scope(verdict: sel.MatrixVerdict, protocol: str) -> dict[str, sel.Findin
 
 
 class CollectTests(unittest.TestCase):
-    def test_every_name_and_both_controls_are_measured_on_every_address(self) -> None:
+    def test_every_name_and_all_controls_are_measured_on_every_address(self) -> None:
         asked: list[tuple[str, str]] = []
 
         def probe(name: str, ip: str) -> Cell:
@@ -40,10 +40,12 @@ class CollectTests(unittest.TestCase):
 
         facts = _facts(probe)
 
-        self.assertEqual(len(asked), (3 + 2) * 3)
+        # Три имени и три контроля: постороннее имя, без имени и первое имя другими буквами.
+        self.assertEqual(len(asked), (3 + 3) * 3)
         self.assertIn((sel.CONTROL_NAME, "10.0.0.2"), asked)
         self.assertIn(("", "10.0.0.3"), asked)
-        self.assertEqual(len(facts.cells), 15)
+        self.assertIn(("www.youtube.COM", "10.0.0.1"), asked)
+        self.assertEqual(len(facts.cells), 18)
 
     def test_stop_returns_a_cancelled_table_that_judges_to_nothing(self) -> None:
         facts = sel.collect(["a.com"], [WWW], lambda *_: Cell(), submit=_submit, should_stop=lambda: True)
@@ -57,14 +59,15 @@ class CollectTests(unittest.TestCase):
 
         facts = sel.collect(names, addresses, lambda *_: Cell(), submit=_submit)
 
-        self.assertLessEqual(len(facts.cells), (sel.MAX_NAMES + 2) * sel.MAX_ADDRESSES)
+        self.assertLessEqual(len(facts.cells), (sel.MAX_NAMES + 3) * sel.MAX_ADDRESSES)
 
 
 class JudgeTests(unittest.TestCase):
     def test_quic_cut_for_one_name_only_is_a_name_filter_and_others_pass(self) -> None:
         # Как в отчёте: QUIC к www.youtube.com теряется на всех адресах, остальные имена и контроли проходят.
+        # Фильтр регистр не различает, как и сервер: имя другими буквами режется так же.
         def rule(name: str, ip: str) -> Cell:
-            return Cell(ANSWERED, CUT if name == "www.youtube.com" else ANSWERED)
+            return Cell(ANSWERED, CUT if name.lower() == "www.youtube.com" else ANSWERED)
 
         verdict = sel.judge(_facts(rule))
         quic = _by_scope(verdict, sel.PROTOCOL_QUIC)
@@ -103,12 +106,36 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(quic[sel.SCOPE_ADDRESS].level, "info")
         self.assertIn("не блокировка по имени", quic[sel.SCOPE_ADDRESS].text)
 
-    def test_table_has_a_row_per_name_and_both_controls(self) -> None:
+    def test_name_cut_but_passing_in_other_letters_is_a_letter_by_letter_filter(self) -> None:
+        # Как за рубежом у видеосерверов ТТК: строчное имя молчит, то же имя с заглавными COM проходит.
+        def rule(name: str, ip: str) -> Cell:
+            return Cell(CUT if name == "www.youtube.com" else ANSWERED, ANSWERED)
+
+        findings = [item for item in sel.judge(_facts(rule)).findings if item.protocol == sel.PROTOCOL_TLS]
+        letters = [item for item in findings if "буква в букву" in item.title]
+
+        self.assertEqual(len(letters), 1)
+        self.assertEqual(letters[0].scope, sel.SCOPE_NAME)
+        self.assertIn("www.youtube.COM", letters[0].text)
+
+    def test_other_letters_count_as_a_live_address_control(self) -> None:
+        # Адрес молчит на всё, кроме имени другими буквами: он жив, закрытым его называть нельзя.
+        def rule(name: str, ip: str) -> Cell:
+            if ip == "10.0.0.1":
+                return Cell(ANSWERED if name == "www.youtube.COM" else CUT, ANSWERED)
+            return Cell(ANSWERED, ANSWERED)
+
+        findings = _by_scope(sel.judge(_facts(rule)), sel.PROTOCOL_TLS)
+
+        self.assertNotIn(sel.SCOPE_ADDRESS, findings)
+
+    def test_table_has_a_row_per_name_and_all_controls(self) -> None:
         verdict = sel.judge(_facts(lambda name, ip: Cell(ANSWERED, ANSWERED)))
 
-        self.assertEqual(len(verdict.table), 5)
-        self.assertEqual(verdict.table[-2]["name"], f"{sel.CONTROL_NAME} (контроль)")
-        self.assertEqual(verdict.table[-1]["name"], "без имени (контроль)")
+        self.assertEqual(len(verdict.table), 6)
+        self.assertEqual(verdict.table[-3]["name"], f"{sel.CONTROL_NAME} (контроль)")
+        self.assertEqual(verdict.table[-2]["name"], "без имени (контроль)")
+        self.assertEqual(verdict.table[-1]["name"], "www.youtube.COM (контроль: то же имя другими буквами)")
         self.assertEqual(len(verdict.table[0]["cells"]), 3)
         self.assertEqual(verdict.as_dict()["addresses"][0], {"host": "www.youtube.com", "ip": "10.0.0.1"})
 

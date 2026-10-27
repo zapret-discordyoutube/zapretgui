@@ -70,7 +70,8 @@ _OUTSIDE_WORDS = {
 _BLOCK_LAYERS = {
     "ip": (
         "IP-адрес (сетевой уровень)",
-        "закрыт сам адрес сервера: до него не доходит ничего или он молчит, каким именем сайта ни называйся. "
+        "закрыт сам адрес сервера: до него не доходит ничего, или соединение с ним молчит либо обрывается, "
+        "каким именем сайта ни называйся. "
         "Так бывает, когда оператор связи внёс адрес в чёрный список на своём оборудовании или на маршруте оборван путь. "
         "Стратегия Zapret адрес не открывает: нужен другой маршрут (VPN, прокси).",
     ),
@@ -236,6 +237,7 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
         rows.append(ViewRow(INFO, "Вид блокировки", str(item["kind_title"])))
     if item.get("cause_text"):
         rows.append(ViewRow(FAIL, "Как блокируют", str(item["cause_text"])))
+    rows.extend(video_node_rows(item.get("video_node")))
     if "registry" in item:
         rows.append(ViewRow(INFO, "Реестр РКН", _registry_text(item)))
     if item.get("seconds"):
@@ -258,6 +260,24 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
     rows.extend(blocker_rows(item))
     if item.get("note"):
         rows.append(ViewRow(INFO, "Заметка", str(item["note"])))
+    return tuple(rows)
+
+
+def video_node_rows(node: object) -> tuple[ViewRow, ...]:
+    """Видеосервер, который не открылся: чья сеть, ступени до него, запрос через другие адреса Google и вывод."""
+    if not isinstance(node, dict):
+        return ()
+    rows = []
+    if node.get("owner"):
+        rows.append(ViewRow(INFO, "Чей видеосервер", str(node["owner"])))
+    for step in node.get("ladder") or ():
+        rows.append(ViewRow(shown_level(step.get("level")), f"Видеосервер: {step.get('title', '')}", str(step.get("text") or "")))
+    for via in node.get("via") or ():
+        rows.append(
+            ViewRow(shown_level(via.get("level")), f"Через адрес Google {via.get('ip', '')} ({via.get('name', '')})", str(via.get("text") or ""))
+        )
+    if node.get("text"):
+        rows.append(ViewRow(shown_level(node.get("level")), "Вывод по видеосерверу", str(node["text"])))
     return tuple(rows)
 
 
@@ -358,7 +378,9 @@ def matrix_sections(service: dict) -> tuple[ViewSection, ...]:
                 ViewRow(
                     INFO,
                     "Каждое имя сайта проверено на каждом адресе сервиса двумя протоколами: приветствием TLS и первым пакетом QUIC. "
-                    "Два контроля — постороннее имя и приветствие без имени — показывают, жив ли адрес сам по себе. "
+                    "Контроли — постороннее имя и приветствие без имени — показывают, жив ли адрес сам по себе. "
+                    "Третий контроль — первое имя сервиса другими буквами: сервер регистр не различает, и если такое имя "
+                    "проходит, а обычное нет, их различает фильтр, который ищет имя буква в букву. "
                     "Если контроль отвечает, а имя сайта нет, режут имя. Если не отвечает ничего, закрыт адрес или протокол. "
                     "Если имя проходит на одном адресе и обрывается на другом, результат зависит от узла. "
                     "Проба отправляется только при сигнале беды: обычная проверка таких пакетов не шлёт.",

@@ -170,6 +170,8 @@ def target_report(probe: Probe) -> dict:
         "path": [step.as_dict() for step in path_report.build(probe)] if probe.reach is not None else None,
         "cause": probe.cause.code if probe.cause else "",
         "cause_text": sentence(probe.cause.text) if probe.cause else "",
+        # Видеосервер не открылся: ступени до него, чья сеть, запрос через другие адреса Google и вывод.
+        "video_node": probe.video_node.as_dict() if probe.video_node is not None else None,
         "quic": probe.quic.code if probe.quic else "",
         "quic_text": probe.quic.text if probe.quic else "",
         # Тот же адрес по TLS 1.2, TLS 1.3, «как Chrome» и HTTP отдельно.
