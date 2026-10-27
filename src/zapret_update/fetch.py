@@ -32,6 +32,11 @@ from .plan import UpdatePlan, Want
 CHUNK = 256 * 1024
 ROUNDS = 3
 ROUND_PAUSES = (2.0, 5.0)
+# Сколько источник может молчать: до первых байт ответа и между кусками.
+# Молчит дольше — считаем зависшим и берём следующий. Живой источник отвечает
+# за доли секунды; при выходе 21.1.7.207 перегруженный Forgejo отвечал по
+# 30+ секунд, и с прежними 30 секундами каждый файл ждал его до обрыва.
+STALL_TIMEOUT = 10.0
 
 
 class FetchCancelled(Exception):
@@ -77,6 +82,38 @@ class _Progress:
             pass
 
 
+class _Ranking:
+    """Общий для всех потоков порядок источников.
+
+    Источник, который завис или отдал ошибку, уходит в конец очереди для всех
+    файлов сразу: один зависший сервер стоит одно ожидание, а не по ожиданию
+    на каждый файл в каждом потоке. Удачная загрузка возвращает ему место.
+    """
+
+    def __init__(self, sources: Sequence[Source]) -> None:
+        self._sources = list(sources)
+        self._strikes = [0] * len(self._sources)
+        self._lock = threading.Lock()
+
+    def order(self, skip: set[int]) -> list[int]:
+        with self._lock:
+            return sorted(
+                (index for index in range(len(self._sources)) if index not in skip),
+                key=lambda index: (self._strikes[index], index),
+            )
+
+    def source(self, index: int) -> Source:
+        return self._sources[index]
+
+    def failed(self, index: int) -> None:
+        with self._lock:
+            self._strikes[index] += 1
+
+    def worked(self, index: int) -> None:
+        with self._lock:
+            self._strikes[index] = 0
+
+
 def _opener(source: Source) -> urllib.request.OpenerDirector:
     context = ssl.create_default_context()
     if not source.verify_ssl:
@@ -118,7 +155,9 @@ def _download_part(
             while True:
                 if cancelled():
                     raise FetchCancelled("скачивание остановлено")
-                chunk = response.read(CHUNK)
+                # read1 отдаёт то, что уже пришло: при обрыве посреди куска
+                # полученные байты не теряются, и ход загрузки идёт ровно.
+                chunk = response.read1(CHUNK)
                 if not chunk:
                     break
                 if have + len(chunk) > size:
@@ -160,7 +199,7 @@ def fetch_plan(
     work_dir: Path,
     sources: Sequence[Source],
     threads: int = 4,
-    timeout: float = 30.0,
+    timeout: float = STALL_TIMEOUT,
     cancelled: Callable[[], bool] = lambda: False,
     progress: Callable[[int, int], None] = lambda _done, _total: None,
     sleep: Callable[[float], None] = time.sleep,
@@ -173,6 +212,7 @@ def fetch_plan(
     parts_dir.mkdir(parents=True, exist_ok=True)
     ready_dir.mkdir(parents=True, exist_ok=True)
     tracker = _Progress(plan.download_size, progress)
+    ranking = _Ranking(sources)
     result: dict[str, Path] = {}
     # Окончательная ошибка одного файла останавливает остальные: без него
     # версию всё равно не собрать.
@@ -193,7 +233,13 @@ def fetch_plan(
         errors: list[str] = []
         broken = False
         for round_index in range(ROUNDS):
-            for source in sources:
+            tried: set[int] = set()
+            # Порядок берётся заново перед каждой попыткой: пока этот файл ждал
+            # один источник, соседние потоки могли узнать, что завис другой.
+            while candidates := ranking.order(tried):
+                index = candidates[0]
+                tried.add(index)
+                source = ranking.source(index)
                 if stopped():
                     raise FetchCancelled("скачивание остановлено")
                 try:
@@ -202,23 +248,27 @@ def fetch_plan(
                         timeout=timeout, cancelled=stopped, progress=tracker,
                     )
                     _finish(want, part, ready, root)
+                    ranking.worked(index)
                     result[want.entry.sha256] = ready
                     return
                 except FetchCancelled:
                     raise
                 except store.StoreError as exc:
                     # Битый файл: этот кусок не годится ни с какого источника.
+                    ranking.failed(index)
                     broken = True
                     if part.exists():
                         tracker.add(-part.stat().st_size)
                         part.unlink()
                     errors.append(f"{source.label}: {exc}")
                 except FetchError as exc:
+                    ranking.failed(index)
                     if part.exists():
                         tracker.add(-part.stat().st_size)
                         part.unlink()
                     errors.append(f"{source.label}: {exc}")
                 except (OSError, urllib.error.URLError, ValueError) as exc:
+                    ranking.failed(index)
                     errors.append(f"{source.label}: {exc}")
             if round_index < ROUNDS - 1:
                 sleep(ROUND_PAUSES[min(round_index, len(ROUND_PAUSES) - 1)])
@@ -244,4 +294,4 @@ def fetch_plan(
     return result
 
 
-__all__ = ["FetchCancelled", "FetchError", "Source", "fetch_plan"]
+__all__ = ["STALL_TIMEOUT", "FetchCancelled", "FetchError", "Source", "fetch_plan"]

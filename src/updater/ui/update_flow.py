@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, replace
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from updater.ui import plans
 
@@ -55,6 +55,7 @@ class _SpeedState:
     smoothed_speed: float = 0.0
     speed_kb: float | None = None
     eta_seconds: float | None = None
+    last_progress_time: float = 0.0
 
 
 class UpdateFlow(QObject):
@@ -69,6 +70,11 @@ class UpdateFlow(QObject):
         self._offer: UpdateOffer | None = None
         self._progress = DownloadProgress()
         self._speed = _SpeedState()
+        # Ход загрузки пересчитывается раз в секунду и без новых байт: иначе
+        # при молчащем сервере окно навсегда застывало на последней скорости.
+        self._tick = QTimer(self)
+        self._tick.setInterval(1000)
+        self._tick.timeout.connect(self._on_tick)
 
     # --- чтение ---------------------------------------------------------------
 
@@ -115,6 +121,7 @@ class UpdateFlow(QObject):
         now = time.time()
         self._phase = PHASE_DOWNLOADING
         self._speed = _SpeedState(last_speed_time=now)
+        self._tick.start()
         self._progress = DownloadProgress(
             stage_text=plans.update_flow_text(self._language, "stage.preparing", "Подготовка к загрузке…"),
         )
@@ -128,6 +135,13 @@ class UpdateFlow(QObject):
             self._progress = replace(self._progress, stage_text=message)
             self.changed.emit()
 
+    def _on_tick(self) -> None:
+        if self._phase != PHASE_DOWNLOADING:
+            self._tick.stop()
+            return
+        if self._progress.total_bytes > 0:
+            self.on_progress(self._progress.percent, self._progress.done_bytes, self._progress.total_bytes)
+
     def on_progress(self, percent: int, done_bytes: int, total_bytes: int) -> None:
         if self._phase != PHASE_DOWNLOADING:
             return
@@ -140,6 +154,8 @@ class UpdateFlow(QObject):
             smoothed_speed=self._speed.smoothed_speed,
             download_speed_kb=self._speed.speed_kb,
             download_eta_seconds=self._speed.eta_seconds,
+            previous_done_bytes=self._progress.done_bytes,
+            last_progress_time=self._speed.last_progress_time,
             language=self._language,
             now=time.time(),
             progress_bar_visible=self._progress.known_size,
@@ -150,6 +166,7 @@ class UpdateFlow(QObject):
             smoothed_speed=plan.smoothed_speed,
             speed_kb=plan.download_speed_kb,
             eta_seconds=plan.download_eta_seconds,
+            last_progress_time=plan.last_progress_time,
         )
         self._progress = replace(
             self._progress,
@@ -166,6 +183,7 @@ class UpdateFlow(QObject):
     def on_downloaded(self) -> None:
         if self._phase != PHASE_DOWNLOADING:
             return
+        self._tick.stop()
         self._phase = PHASE_INSTALLING
         self._progress = replace(
             self._progress,
@@ -184,6 +202,7 @@ class UpdateFlow(QObject):
     def on_failed(self, error: str) -> None:
         if not self.is_busy:
             return
+        self._tick.stop()
         self._phase = PHASE_FAILED
         self._progress = replace(self._progress, error_text=str(error or "").strip())
         self.changed.emit()

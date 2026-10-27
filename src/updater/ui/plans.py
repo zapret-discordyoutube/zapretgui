@@ -53,6 +53,25 @@ class ChangelogProgressPlan:
     smoothed_speed: float
     download_speed_kb: float | None
     download_eta_seconds: float | None
+    last_progress_time: float = 0.0
+
+
+# Сколько секунд без новых байт считать ожиданием сервера: вместо «0 КБ/с» и
+# устаревшего «Осталось» окно честно пишет, что ждёт ответа.
+DOWNLOAD_WAITING_SECONDS = 5.0
+
+
+def _speed_label(tr, speed_kb: float) -> str:
+    if speed_kb > 1024:
+        return tr("page.servers.changelog.progress.speed_mb_template", "Скорость: {value:.1f} МБ/с").format(
+            value=speed_kb / 1024
+        )
+    if speed_kb < 10:
+        # Меньше 1 КБ/с при целых числах выглядело как «0 КБ/с».
+        return tr("page.servers.changelog.progress.speed_kb_fraction_template", "Скорость: {value:.1f} КБ/с").format(
+            value=speed_kb
+        )
+    return tr("page.servers.changelog.progress.speed_kb_template", "Скорость: {value:.0f} КБ/с").format(value=speed_kb)
 
 
 def update_flow_text(language: str, key: str, default: str) -> str:
@@ -591,6 +610,8 @@ def build_changelog_progress_plan(
     smoothed_speed: float,
     download_speed_kb: float | None = None,
     download_eta_seconds: float | None = None,
+    previous_done_bytes: int = 0,
+    last_progress_time: float = 0.0,
     language: str,
     now: float,
     progress_bar_visible: bool,
@@ -615,17 +636,14 @@ def build_changelog_progress_plan(
     speed_label_text = tr("page.servers.changelog.progress.speed_unknown", "Скорость: —")
     eta_label_text = tr("page.servers.changelog.progress.eta_unknown", "Осталось: —")
 
+    # Когда байты пришли в последний раз: по этому времени окно понимает, что
+    # загрузка не идёт, а ждёт сервер (вызов бывает и без новых байт — по таймеру).
+    next_last_progress_time = float(last_progress_time)
+    if int(done_bytes) > int(previous_done_bytes) or next_last_progress_time <= 0:
+        next_last_progress_time = float(now)
+
     if next_download_speed_kb is not None:
-        if next_download_speed_kb > 1024:
-            speed_label_text = tr(
-                "page.servers.changelog.progress.speed_mb_template",
-                "Скорость: {value:.1f} МБ/с",
-            ).format(value=next_download_speed_kb / 1024)
-        else:
-            speed_label_text = tr(
-                "page.servers.changelog.progress.speed_kb_template",
-                "Скорость: {value:.0f} КБ/с",
-            ).format(value=next_download_speed_kb)
+        speed_label_text = _speed_label(tr, next_download_speed_kb)
 
     if next_download_eta_seconds is not None:
         if next_download_eta_seconds < 60:
@@ -660,16 +678,7 @@ def build_changelog_progress_plan(
 
             speed = next_smoothed_speed
             next_download_speed_kb = speed / 1024
-            if next_download_speed_kb > 1024:
-                speed_label_text = tr(
-                    "page.servers.changelog.progress.speed_mb_template",
-                    "Скорость: {value:.1f} МБ/с",
-                ).format(value=next_download_speed_kb / 1024)
-            else:
-                speed_label_text = tr(
-                    "page.servers.changelog.progress.speed_kb_template",
-                    "Скорость: {value:.0f} КБ/с",
-                ).format(value=next_download_speed_kb)
+            speed_label_text = _speed_label(tr, next_download_speed_kb)
 
             if speed > 0:
                 remaining = (total_bytes - done_bytes) / speed
@@ -684,6 +693,13 @@ def build_changelog_progress_plan(
                         "page.servers.changelog.progress.eta_min_template",
                         "Осталось: {minutes} мин",
                     ).format(minutes=int(remaining / 60))
+
+    if int(done_bytes) < int(total_bytes) and float(now) - next_last_progress_time >= DOWNLOAD_WAITING_SECONDS:
+        speed_label_text = tr("page.servers.changelog.progress.waiting_server", "Ждём ответа сервера…")
+        eta_label_text = tr("page.servers.changelog.progress.eta_unknown", "Осталось: —")
+        next_smoothed_speed = 0.0
+        next_download_speed_kb = None
+        next_download_eta_seconds = None
 
     return ChangelogProgressPlan(
         mode="downloading",
@@ -703,5 +719,6 @@ def build_changelog_progress_plan(
         smoothed_speed=next_smoothed_speed,
         download_speed_kb=next_download_speed_kb,
         download_eta_seconds=next_download_eta_seconds,
+        last_progress_time=next_last_progress_time,
     )
 

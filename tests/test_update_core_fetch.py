@@ -6,6 +6,7 @@ import hashlib
 import http.server
 import random
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -16,10 +17,26 @@ from zapret_update import builder, fetch, manifest, plan, stage, store  # noqa: 
 
 
 class _Store(http.server.ThreadingHTTPServer):
-    def __init__(self, files: dict[str, bytes], *, cut_after: int | None = None, corrupt: bool = False) -> None:
+    daemon_threads = True
+
+    def __init__(
+        self,
+        files: dict[str, bytes],
+        *,
+        cut_after: int | None = None,
+        corrupt: bool = False,
+        hang: bool = False,
+        hang_after: int | None = None,
+    ) -> None:
         self.files, self.cut_after, self.corrupt, self.requests = files, cut_after, corrupt, []
+        # hang — принимает запрос и молчит; hang_after — отдаёт столько байт тела и молчит.
+        self.hang, self.hang_after, self.released = hang, hang_after, threading.Event()
         super().__init__(("127.0.0.1", 0), _Handler)
         threading.Thread(target=self.serve_forever, daemon=True).start()
+
+    def shutdown(self) -> None:
+        self.released.set()
+        super().shutdown()
 
     def url_for(self, name: str) -> str:
         return f"http://127.0.0.1:{self.server_address[1]}/{name}"
@@ -33,6 +50,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         server: _Store = self.server
         name = self.path.lstrip("/")
         server.requests.append((name, self.headers.get("Range")))
+        if server.hang:
+            server.released.wait(30)
+            return
         data = server.files.get(name)
         if data is None:
             self.send_response(404)
@@ -54,6 +74,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data) - start))
         self.end_headers()
         try:
+            if server.hang_after is not None:
+                self.wfile.write(body[: server.hang_after])
+                self.wfile.flush()
+                server.released.wait(30)
+                return
             self.wfile.write(body)
         except OSError:
             pass
@@ -188,3 +213,63 @@ def test_stage_refuses_a_program_file_changed_during_the_update(tmp_path) -> Non
     with pytest.raises(stage.StageError):
         stage.build_stage(planned, root=root, ready=ready, stage_dir=tmp_path / "stage")
     server.shutdown()
+
+
+def _many_new_files(tmp_path: Path, count: int):
+    """Выпуск из ``count`` новых файлов: каждый качается отдельным запросом."""
+    rng = random.Random(11)
+    files = {f"lua/f{index}.lua": rng.randbytes(3_000) for index in range(count)}
+    source = tmp_path / "src"
+    for relative, data in files.items():
+        (source / relative).parent.mkdir(parents=True, exist_ok=True)
+        (source / relative).write_bytes(data)
+    built = builder.build_store(layout={relative: source / relative for relative in files}, cache_dir=tmp_path / "cache")
+    release = manifest.parse({
+        "schema": 1, "product": "zapret-gui", "channel": "dev", "version": "1.0.0.2", "created": 1, "key": "k",
+        "files": built.files, "patches": built.patches,
+    })
+    root = tmp_path / "app"
+    root.mkdir()
+    stored = {path.name: path.read_bytes() for path in (tmp_path / "cache").glob("*.zst")}
+    return root, release, stored
+
+
+def test_a_silent_source_is_dropped_for_all_files_after_one_wait(tmp_path) -> None:
+    # Выход 21.1.7.207: перегруженный Forgejo молчал 30+ секунд на каждый файл,
+    # и каждый файл ждал его до обрыва. Зависший источник должен стоить одно
+    # ожидание на поток, а не по ожиданию на файл.
+    root, release, stored = _many_new_files(tmp_path, 16)
+    silent, good = _Store(stored, hang=True), _Store(stored)
+    planned = plan.make_plan(release, root)
+    started = time.monotonic()
+
+    ready = fetch.fetch_plan(
+        planned, root=root, work_dir=tmp_path / "work", threads=4, timeout=0.5,
+        sources=[fetch.Source("silent", silent.url_for), fetch.Source("good", good.url_for)], sleep=lambda _s: None,
+    )
+
+    assert len(ready) == 16
+    assert len(silent.requests) <= 4
+    assert time.monotonic() - started < 4.0
+    silent.shutdown(), good.shutdown()
+
+
+def test_a_source_that_stops_mid_file_is_resumed_on_the_next_one(tmp_path) -> None:
+    root, old, new, stored, v2 = _release(tmp_path)
+    stuck, good = _Store(stored, hang_after=5), _Store(stored)
+    planned = plan.make_plan(new, root, installed=old)
+
+    ready = fetch.fetch_plan(
+        planned, root=root, work_dir=tmp_path / "work", threads=2, timeout=0.5,
+        sources=[fetch.Source("stuck", stuck.url_for), fetch.Source("good", good.url_for)], sleep=lambda _s: None,
+    )
+    tree = stage.build_stage(planned, root=root, ready=ready, stage_dir=tmp_path / "stage")
+
+    assert {path.relative_to(tree).as_posix(): path.read_bytes() for path in tree.rglob("*") if path.is_file()} == v2
+    # Следующий источник продолжил с места, где замолчал первый.
+    assert any(rng == "bytes=5-" for _name, rng in good.requests)
+    stuck.shutdown(), good.shutdown()
+
+
+def test_default_wait_for_a_silent_source_is_short() -> None:
+    assert fetch.STALL_TIMEOUT <= 10.0

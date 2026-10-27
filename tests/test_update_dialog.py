@@ -88,6 +88,34 @@ class UpdateFlowTests(unittest.TestCase):
         flow.clear_offer()
         self.assertEqual(flow.phase, PHASE_IDLE)
 
+    def test_silent_server_turns_into_waiting_without_new_bytes(self) -> None:
+        # Сервер замолчал: новых вызовов хода нет, но окно само раз в секунду
+        # пересчитывает его и вместо застывших «0 КБ/с, 9 мин» пишет, что ждёт.
+        from unittest.mock import patch
+
+        QApplication.instance() or QApplication([])
+        clock = [100.0]
+        with patch("updater.ui.update_flow.time.time", side_effect=lambda: clock[0]):
+            flow = UpdateFlow()
+            flow.set_offer(_offer())
+            flow.start_download()
+            self.assertTrue(flow._tick.isActive())
+            clock[0] = 101.0
+            flow.on_progress(85, 1_300_000, 1_500_000)
+            self.assertNotEqual(flow.progress.speed_text, "Ждём ответа сервера…")
+
+            clock[0] = 101.0 + plans.DOWNLOAD_WAITING_SECONDS
+            flow._on_tick()
+            self.assertEqual(flow.progress.speed_text, "Ждём ответа сервера…")
+            self.assertEqual(flow.progress.eta_text, "Осталось: —")
+
+            clock[0] += 1
+            flow.on_progress(90, 1_350_000, 1_500_000)
+            self.assertNotEqual(flow.progress.speed_text, "Ждём ответа сервера…")
+
+            flow.on_downloaded()
+            self.assertFalse(flow._tick.isActive())
+
 
 class ReleaseHistoryHtmlTests(unittest.TestCase):
     def test_every_version_is_listed_with_date_lists_and_links(self) -> None:
