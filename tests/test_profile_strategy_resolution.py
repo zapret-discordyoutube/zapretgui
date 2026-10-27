@@ -233,6 +233,17 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
             "--out-range=-d8",
             "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
         )
+        # Default v1 (game filter) keeps the user's own zapret.moe strategy (2026-10-26).
+        own_strategies = {
+            "Default v1 (game filter).txt": (
+                (
+                    "--out-range=-d8",
+                    "--payload=tls_client_hello,http_req",
+                    "--lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2",
+                ),
+                "hostfakesplit_multi",
+            ),
+        }
         preset_paths = sorted(Path("src/presets/builtin/winws2").glob("*.txt"))
 
         self.assertGreater(len(preset_paths), 0)
@@ -249,6 +260,32 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                 self.assertIs(profile, preset.profiles[0])
                 self.assertEqual(profile.match.filter_lines, ["--filter-tcp=443"])
                 self.assertEqual(profile.match.hostlist_lines, ["--hostlist=lists/zapret-moe.txt"])
+                strategy, strategy_id = own_strategies.get(path.name, (expected_strategy, "alt9"))
+                self.assertEqual(normalize_lines(profile.strategy.strategy_lines), strategy)
+                self.assertEqual(self._resolved_strategy_id(profile), strategy_id)
+
+    def test_signal_follows_zapret_moe_and_uses_alt9_in_every_builtin_preset(self) -> None:
+        expected_strategy = (
+            "--out-range=-d8",
+            "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
+        )
+        preset_paths = sorted(Path("src/presets/builtin/winws2").glob("*.txt"))
+
+        self.assertGreater(len(preset_paths), 0)
+        for path in preset_paths:
+            with self.subTest(preset=path.name):
+                preset = parse_preset_text(
+                    path.read_text(encoding="utf-8"),
+                    engine="winws2",
+                    source_name=path.name,
+                )
+                matches = [profile for profile in preset.profiles if profile.display_name == "Signal"]
+                self.assertEqual(len(matches), 1)
+                profile = matches[0]
+                self.assertIs(profile, preset.profiles[1])
+                self.assertTrue(profile.enabled)
+                self.assertEqual(profile.match.filter_lines, ["--filter-tcp=443"])
+                self.assertEqual(profile.match.hostlist_lines, ["--hostlist=lists/signal.txt"])
                 self.assertEqual(normalize_lines(profile.strategy.strategy_lines), expected_strategy)
                 self.assertEqual(self._resolved_strategy_id(profile), "alt9")
 

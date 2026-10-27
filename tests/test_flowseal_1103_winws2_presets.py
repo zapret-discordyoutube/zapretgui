@@ -87,27 +87,30 @@ IPSET_UDP_HYBRID = "Cloudflare UDP"
 # 2026-10-06: the pins were refreshed once for another format-wide edit — every builtin preset
 # got the «Сервис · роль» profile names (`--name=YouTube · видео (googlevideo.com)` instead of
 # `--name=googlevideo.com (CDN сервера)`); strategy lines were not touched.
+# 2026-10-27: refreshed again for two more format-wide edits: profile #1 git.zapret.moe became
+# zapret.moe with lists/zapret-moe.txt (2026-10-16), and every builtin preset got the Signal
+# profile as #2. Undoing exactly those two edits reproduces the previous pins for all 20 files.
 OLD_PORT_SHA256 = {
-    "general 1.9.9 (game filter).txt": "a7a766a48f4d5602e9eebf90c01fcf918a4294b466f70e63abdddb3eddb9e7e9",
-    "general ALT10 1.9.9 (game filter).txt": "c38358a8a84ee08178f9fd8683da416e5affe08c13776edf15a8deb900230d79",
-    "general ALT11 1.9.9 (game filter).txt": "806d7ca2822aebff9db3caebf9f68ec7b6b02a6e899c4226c4c969afd87da2ea",
-    "general ALT1 1.9.9 (game filter).txt": "da0dadcfb8db7ff574dc5cc694b13f75d04c5aa31e67c8e1ac160864c93ebaf6",
-    "general ALT12 1.9.9 (game filter).txt": "84cea74e9d45c0bc1bd1c1732ccacb53c334be0dae71bb0636c0ddd02c12e11c",
-    "general ALT2 1.9.9 (game filter).txt": "34b950600bb434548da46ae6f740f9a83889d3a47303ae72374027695c1a5b8c",
-    "general ALT3 1.9.9 (game filter).txt": "9ad033034376152c96c7221e5aa287d91aa5b2df7e56fd1aeb7dc71f0825adc5",
-    "general ALT4 1.9.9 (game filter).txt": "20afb6079a3211dc1926100cf9b9376b5b0824df63507dfb253483e9bd7dc86d",
-    "general ALT6 1.9.9 (game filter).txt": "4735394c5b8f71e1f8344118c6d0f55a1ab4788ee82e6b213894d15409def703",
-    "general ALT7 1.9.9 (game filter).txt": "1cdfcc4ca0ec63fcddcdbbda76c33b8beece907c548b2abfd54182a79faad6a9",
-    "general ALT8 1.9.9 (game filter).txt": "8ad7ad89fe947413ac310e667168454a556c7e6cf1383237cc58b6e7f5d4d085",
-    "general ALT9 1.9.9 (game filter).txt": "925a033a680a05287e22066733e88e9e6a0c6e67dcf8b8e8d7ffc5f71ca35a9a",
-    "general EXP 1.10.0 (game filter).txt": "e7244560693e438e6cd9fd6893c19e1a73001936d45ee15f256933897604beb0",
-    "general FAKE TLS AUTO 1.9.9 (game filter).txt": "bfe6553f3c3542b30e973ff2d864c6d9f02208c45cf82d933f45abcb7237c1b9",
-    "general FAKE TLS AUTO ALT 1.9.9 (game filter).txt": "4b7f68c70b1d160b1278ca97e723f1f45301aa2df85750e93591b969327282ba",
-    "general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt": "72e744cda439f618efefedc3caa4923b17e7c7409b5f975d3998c0ddddd10764",
-    "general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt": "ddafb3a2827f3c8dc17d86ef993cbce40dc8f93e43cf51881a592bad8fc91f27",
-    "general SIMPLE FAKE 1.9.9 (game filter).txt": "764ea7fb6fbe90291ff5b196f1d3a4791292e009ef87760909953a5c4f3e002f",
-    "general SIMPLE FAKE ALT 1.9.9 (game filter).txt": "b2cca01a45ee92421e648b6842be16def35abd2192306c93ef312de2954039c3",
-    "general SIMPLE FAKE ALT2 1.9.9 (game filter).txt": "d4c9f22ba726154035affbfbe349b85c731adcb3f677f40ddcc6cd7300b052aa",
+    "general 1.9.9 (game filter).txt": "558c2a9ae40231d02beb9805f68cd7cab685fdd9445c8ed2c89e76fb41ad317d",
+    "general ALT10 1.9.9 (game filter).txt": "d0ed19e41bd87fe6ab36337666bad992ef34e0c3419eb8e4967126c79ffb6219",
+    "general ALT11 1.9.9 (game filter).txt": "7e548c5bff9fa65e15b16322bc202bfe985067b7f7f8a2b31c4c71340d3c5323",
+    "general ALT1 1.9.9 (game filter).txt": "5cc81f4d54f40ca0c2878b82296128ecb20f9bade63c93445d2583880cf4d0d5",
+    "general ALT12 1.9.9 (game filter).txt": "326189065b19dc5f3edb8a5522b50f19ba78865a44afc5808afce0ce6fd71cc3",
+    "general ALT2 1.9.9 (game filter).txt": "03fad4b24f1d0120d81b84120487191e5a47d8d3bb22147039edcae10dd322d8",
+    "general ALT3 1.9.9 (game filter).txt": "d93ba9e73106ec9934e320733bc8edef7b5b786a65a10ad7b39d6d084e16d444",
+    "general ALT4 1.9.9 (game filter).txt": "2e6504a425437eeb641173d57a1116b903b1c57edb78a4e168bf8552511412b7",
+    "general ALT6 1.9.9 (game filter).txt": "127317e39396f461d81ce3f93cc42590a62db482dd343c522fc6816c358b780e",
+    "general ALT7 1.9.9 (game filter).txt": "69a27ad333dd9d98a8a0fef0650f21a539d5701bd01b47bcb21880722235cd3c",
+    "general ALT8 1.9.9 (game filter).txt": "0e1ae26d3a05404b6c04aa07b556c5da9b6a50ece025ccfb82114659e4411dac",
+    "general ALT9 1.9.9 (game filter).txt": "cc6e00f3f1a0c1ca107aae80ba0280d29b59e87d57997c19471ceb3986e21142",
+    "general EXP 1.10.0 (game filter).txt": "b2049cf977386e9d98f60ea098a49b37df0ad37ed7c7eea53e103c8784a547a4",
+    "general FAKE TLS AUTO 1.9.9 (game filter).txt": "1a817bf6e6989dd79ab989d3086a5d252fcfde2c93fc9c72b82b61252e226e40",
+    "general FAKE TLS AUTO ALT 1.9.9 (game filter).txt": "200ba872f87fc91abb78d2ef4a50aa5582e4432e0b7e6d35019c1775c5b2011a",
+    "general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt": "d72de4e6a7c62a1b3acf626e78c4b45bc59811e2408bdecb7b2b1c06f3bb7fcb",
+    "general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt": "2d452b9f99f4785a8cf0e3debff5b23e1c6d9b9387cf49031cd698b659298616",
+    "general SIMPLE FAKE 1.9.9 (game filter).txt": "f6f8114d3f1dedf4a34b8ef9b09ece3e56c391721f33fc2fb6e709774fe133d5",
+    "general SIMPLE FAKE ALT 1.9.9 (game filter).txt": "372b4f4644221fc61441b73c3a882924f14e22afff232c8405cae10a1ddd4ff8",
+    "general SIMPLE FAKE ALT2 1.9.9 (game filter).txt": "a2bddabafd8fcb23e255a9bd5529dd0fe56f7cb8fe3e1c6fa52647b0a268b069",
 }
 _BATCH_SYNTAX = re.compile(r"%[A-Za-z_]+%|\^|\"|(?:^|\s)start(?:\s|$)|call service\.bat|winws\.exe", re.MULTILINE)
 
@@ -213,7 +216,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
             }
         for name, preset in self.presets.items():
             with self.subTest(name=name):
-                self.assertEqual(len(preset.profiles), 99)
+                self.assertEqual(len(preset.profiles), 100)
                 self.assertEqual([(p.display_name, tuple(p.match.all_lines())) for p in preset.profiles], expected)
                 if catalog_pairs is not None:
                     offenders = [
@@ -233,6 +236,9 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
                     _strategy(first),
                     ("--out-range=-d8", "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4"),
                 )
+                second = preset.profiles[1]
+                self.assertEqual(second.display_name, "Signal")
+                self.assertEqual(_strategy(second), _strategy(first))
                 backend = _profile(preset, "Бэкенд Google")
                 youtube = _profile(preset, "YouTube · сайт и приложение")
                 self.assertEqual(_strategy(backend), _strategy(youtube))
@@ -380,7 +386,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
 
     def test_fooling_and_repeats_only_on_fake_sending_instances(self) -> None:
         for name, preset in self.presets.items():
-            for profile in preset.profiles[1:]:  # profile #1 zapret.moe is a fixed GUI convention
+            for profile in preset.profiles[2:]:  # profiles #1 zapret.moe and #2 Signal are fixed GUI conventions
                 for line in _lua(profile):
                     with self.subTest(name=name, profile=profile.display_name, line=line):
                         if re.search(r":(tcp_seq|tcp_ts|tcp_md5)[=:]|:tcp_md5$", line):

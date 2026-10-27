@@ -1,5 +1,5 @@
 # Preset: general ALT3
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # IconColor: #e6c300ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -85,6 +85,14 @@
 --name=zapret.moe
 --filter-tcp=443
 --hostlist=lists/zapret-moe.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
+
+--name=Signal
+--filter-tcp=443
+--hostlist=lists/signal.txt
 --out-range=-d8
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
 

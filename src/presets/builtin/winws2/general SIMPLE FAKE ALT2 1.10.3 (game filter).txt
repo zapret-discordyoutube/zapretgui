@@ -1,5 +1,5 @@
 # Preset: general SIMPLE FAKE ALT2 1.10.3 (game filter)
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # IconColor: #60cdff
 # Description: Flowseal 1.10.3 SIMPLE FAKE ALT2, adapted to ZapretGUI profiles
 
@@ -25,6 +25,14 @@
 --name=zapret.moe
 --filter-tcp=443
 --hostlist=lists/zapret-moe.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
+
+--name=Signal
+--filter-tcp=443
+--hostlist=lists/signal.txt
 --out-range=-d8
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
 

@@ -1,5 +1,5 @@
 # Preset: Universal V5
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # IconColor: #a371f7
 # Description: Основной пресет. Десинк применяется точечно и только к реально заблокированным сервисам; работающие сайты, RU-трафик и личный прокси проходят нетронутыми. Покрытие: YouTube, Discord, Telegram, соцсети, Google, AI, LinkedIn, торренты, Twitch, EpicGames/Fortnite, Amazon.
 
@@ -86,6 +86,14 @@
 --name=zapret.moe
 --filter-tcp=443
 --hostlist=lists/zapret-moe.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
+
+--name=Signal
+--filter-tcp=443
+--hostlist=lists/signal.txt
 --out-range=-d8
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
 

@@ -1,5 +1,5 @@
 # Preset: Preset X v2 (game filter)
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # Created: 2026-03-01T22:21:19.070430
 # IconColor: #60cdff
 # Description:
@@ -83,6 +83,14 @@
 --name=zapret.moe
 --filter-tcp=443
 --hostlist=lists/zapret-moe.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
+
+--name=Signal
+--filter-tcp=443
+--hostlist=lists/signal.txt
 --out-range=-d8
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
 
