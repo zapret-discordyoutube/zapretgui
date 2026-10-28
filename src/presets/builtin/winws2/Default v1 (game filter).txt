@@ -1,5 +1,5 @@
 # Preset: Default v1 (game filter)
-# BuiltinVersion: 2.46
+# BuiltinVersion: 2.47
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -98,7 +98,7 @@
 --filter-tcp=443
 --hostlist=lists/signal.txt
 --out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+--lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 --new
 
@@ -131,7 +131,8 @@
 --hostlist=lists/googlevideo.txt
 --out-range=-n8
 --payload=tls_client_hello
---lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
+--lua-desync=fake:blob=stun_pat:tcp_ack=-66000:tcp_ts_up:repeats=3
+--lua-desync=multisplit:pos=1,midsld
 
 --new
 
@@ -140,7 +141,8 @@
 --hostlist=lists/youtube.txt
 --out-range=-d8
 --payload=tls_client_hello
---lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
+--lua-desync=fake:blob=stun_pat:tcp_ack=-66000:tcp_ts_up:repeats=3
+--lua-desync=multisplit:pos=1,midsld
 
 --new
 
