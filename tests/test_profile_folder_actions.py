@@ -154,6 +154,33 @@ class ProfileFolderActionTests(unittest.TestCase):
         self.assertEqual(state["folders"]["telegram"]["name"], "Telegram")
         self.assertEqual(state["folders"]["whatsapp"]["name"], "WhatsApp")
 
+    def test_untouched_matrix_and_simplex_move_from_sites_to_messengers(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
+                state = load_profile_folder_state()
+                for key in ("uid:matrix", "uid:simplex", "uid:rutor"):
+                    state["items"][key] = {"folder_key": "sites", "order": None, "rating": 0}
+                # Этот Matrix пользователь сам переставил внутри «Сайтов».
+                state["items"]["uid:matrix-ordered"] = {"folder_key": "sites", "order": 0, "rating": 0}
+                save_profile_folder_state(state)
+
+                self.assertTrue(
+                    move_untouched_profiles_to_split_folders(
+                        {
+                            "uid:matrix": "messengers",
+                            "uid:simplex": "messengers",
+                            "uid:rutor": "sites",
+                            "uid:matrix-ordered": "messengers",
+                        }
+                    )
+                )
+                state = load_profile_folder_state()
+
+        self.assertEqual(state["items"]["uid:matrix"]["folder_key"], "messengers")
+        self.assertEqual(state["items"]["uid:simplex"]["folder_key"], "messengers")
+        self.assertEqual(state["items"]["uid:rutor"]["folder_key"], "sites")
+        self.assertEqual(state["items"]["uid:matrix-ordered"]["folder_key"], "sites")
+
     def test_voice_profile_arranged_by_user_is_left_where_it_is(self) -> None:
         with TemporaryDirectory() as temp_dir:
             with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
