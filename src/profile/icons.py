@@ -70,6 +70,9 @@ _KNOWN_ICONS: dict[str, ProfileIconSpec] = {
     # zapret.moe — сайты проекта, главный из них git.zapret.moe работает на Forgejo.
     "zapret-moe": ProfileIconSpec("simple:forgejo:FJ", "#FB923C"),
     "signal": ProfileIconSpec("simple:signal:SG", "#3B45FD"),
+    # У Matrix и SimpleX фирменные значки чёрные — берём серый, как у Notion.
+    "matrix": ProfileIconSpec("simple:matrix:MX", "#B0B6BE"),
+    "simplex": ProfileIconSpec("simple:simplex:SX", "#B0B6BE"),
     "lordfilm": ProfileIconSpec("fa5s.film", "#F59E0B"),
     "obsidian": ProfileIconSpec("simple:obsidian:OB", "#7C3AED"),
     "rutracker": ProfileIconSpec("fa5s.magnet", "#6AA2FF"),

@@ -1124,6 +1124,9 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     "gemini.txt",
                     "zapret-moe.txt",
                     "signal.txt",
+                    "matrix.txt",
+                    "simplex.txt",
+                    "ipset-simplex.txt",
                     "linkedin.txt",
                     "notion.txt",
                 ):
@@ -1181,6 +1184,9 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     "gemini.txt",
                     "zapret-moe.txt",
                     "signal.txt",
+                    "matrix.txt",
+                    "simplex.txt",
+                    "ipset-simplex.txt",
                     "linkedin.txt",
                     "notion.txt",
                 ):

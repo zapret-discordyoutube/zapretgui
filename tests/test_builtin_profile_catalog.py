@@ -271,6 +271,8 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
         expected_profiles = {
             "zapret.moe": ("--filter-tcp=443", "--hostlist=lists/zapret-moe.txt"),
             "Signal": ("--filter-tcp=443", "--hostlist=lists/signal.txt"),
+            "Matrix": ("--filter-tcp=443", "--hostlist=lists/matrix.txt"),
+            "SimpleX": ("--filter-tcp=443", "--hostlist=lists/simplex.txt"),
             "Apple": ("--filter-tcp=80,443-65535", "--hostlist=lists/apple.txt"),
             "Gemini": ("--filter-tcp=80,443", "--hostlist=lists/gemini.txt"),
             "Notion": ("--filter-tcp=80,443", "--hostlist=lists/notion.txt"),
@@ -295,6 +297,8 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
         expected_lists = {
             "zapret-moe.txt": ["zapret.moe"],
             "signal.txt": ["signal.org"],
+            "matrix.txt": ["matrix.org", "vector.im", "element.io"],
+            "simplex.txt": ["simplex.chat", "simplex.im", "simplexonflux.com"],
             "apple.txt": [
                 "apple.com",
                 "icloud.com",
@@ -1962,7 +1966,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             not in catalog_pairs
         ]
 
-        self.assertEqual(len(preset.profiles), 100)
+        self.assertEqual(len(preset.profiles), 102)
         self.assertEqual(offenders, [])
         self.assertIn(
             "--lua-init=fake_unknown_256=string.rep(string.char(0),256);"

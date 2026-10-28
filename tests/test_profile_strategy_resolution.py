@@ -300,6 +300,37 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                 self.assertEqual(normalize_lines(profile.strategy.strategy_lines), strategy)
                 self.assertEqual(self._resolved_strategy_id(profile), strategy_id)
 
+    def test_matrix_and_simplex_follow_signal_and_use_alt9_in_every_builtin_preset(self) -> None:
+        expected_strategy = (
+            "--out-range=-d8",
+            "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
+        )
+        expected_profiles = (
+            ("Matrix", ["--hostlist=lists/matrix.txt"], []),
+            ("SimpleX", ["--hostlist=lists/simplex.txt"], []),
+        )
+        preset_paths = sorted(Path("src/presets/builtin/winws2").glob("*.txt"))
+
+        self.assertGreater(len(preset_paths), 0)
+        for path in preset_paths:
+            preset = parse_preset_text(
+                path.read_text(encoding="utf-8"),
+                engine="winws2",
+                source_name=path.name,
+            )
+            for position, (name, hostlist_lines, ipset_lines) in enumerate(expected_profiles, start=2):
+                with self.subTest(preset=path.name, profile=name):
+                    matches = [profile for profile in preset.profiles if profile.display_name == name]
+                    self.assertEqual(len(matches), 1)
+                    profile = matches[0]
+                    self.assertIs(profile, preset.profiles[position])
+                    self.assertTrue(profile.enabled)
+                    self.assertEqual(profile.match.filter_lines, ["--filter-tcp=443"])
+                    self.assertEqual(profile.match.hostlist_lines, hostlist_lines)
+                    self.assertEqual(profile.match.ipset_lines, ipset_lines)
+                    self.assertEqual(normalize_lines(profile.strategy.strategy_lines), expected_strategy)
+                    self.assertEqual(self._resolved_strategy_id(profile), "alt9")
+
     def test_youtube_profiles_precede_ru_pass_in_every_builtin_preset(self) -> None:
         # AS12389 остаётся в ipset-ru: внутри него могут находиться российские
         # кэш-серверы Google/YouTube. Поэтому специальные YouTube-профили должны

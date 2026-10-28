@@ -139,6 +139,15 @@ class ProfileIconTests(unittest.TestCase):
         self.assertEqual(tcp_icon.icon_name, "simple:anydesk:AD")
         self.assertEqual(udp_icon.icon_name, "simple:anydesk:AD")
 
+    def test_matrix_and_simplex_profiles_use_brand_icons(self) -> None:
+        matrix = resolve_profile_icon("Matrix", ("--filter-tcp=443", "--hostlist=lists/matrix.txt"))
+        simplex = resolve_profile_icon("SimpleX", ("--filter-tcp=443", "--hostlist=lists/simplex.txt"))
+        simplex_ip = resolve_profile_icon("SimpleX", ("--filter-tcp=443", "--ipset=lists/ipset-simplex.txt"))
+
+        self.assertEqual(matrix.icon_name, "simple:matrix:MX")
+        self.assertEqual(simplex.icon_name, "simple:simplex:SX")
+        self.assertEqual(simplex_ip.icon_name, "simple:simplex:SX")
+
     def test_hetzner_profile_uses_hoster_icon(self) -> None:
         icon = resolve_profile_icon(
             "Hetzner TCP",
