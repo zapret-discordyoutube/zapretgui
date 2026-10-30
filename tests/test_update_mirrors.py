@@ -243,6 +243,70 @@ class MirrorReportTests(unittest.TestCase):
         self.assertEqual(mirrors.MirrorList(lambda _url: None, report=broken).hosts(), list(mirrors.BOOTSTRAP_HOSTS))
 
 
+class RandomNamesAndEntryListsTests(unittest.TestCase):
+    """2026-10-30: random-label mirrors are handed out; when every known name is shut, the entry pages give the names."""
+
+    def setUp(self) -> None:
+        mirrors._learned.clear()
+        self.addCleanup(mirrors._learned.clear)
+
+    def test_a_random_name_from_the_server_list_is_kept_and_learned(self) -> None:
+        document = _document(("git.zapret.moe", True), ("cwdnvtsqdc.zapret.moe", False), ("git2.zapret.moe", False),
+                             preferred="cwdnvtsqdc.zapret.moe")
+        self.assertEqual(mirrors.ordered_hosts(document), ["cwdnvtsqdc.zapret.moe", "git2.zapret.moe", "git.zapret.moe"])
+        self.assertEqual(mirrors.family_of("cwdnvtsqdc.zapret.moe"), "git")
+        path = "/zapretdiscordyoutube/zapretgui/releases"
+        self.assertEqual(mirrors.with_host(f"https://git.zapret.moe{path}", "cwdnvtsqdc.zapret.moe"), f"https://cwdnvtsqdc.zapret.moe{path}")
+        self.assertEqual(mirrors.canonical_url(f"https://cwdnvtsqdc.zapret.moe{path}"), f"https://git.zapret.moe{path}")
+
+    def test_an_unknown_random_name_or_a_foreign_host_is_never_substituted(self) -> None:
+        url = "https://git.zapret.moe/a"
+        self.assertEqual(mirrors.with_host(url, "qwertyuiop.zapret.moe"), url)          # never listed
+        mirrors.learn("git", ["evil.example", "x.evil.zapret.moe.example"])
+        self.assertEqual(mirrors.with_host(url, "evil.example"), url)
+        self.assertEqual(mirrors.family_of("evil.example"), "")
+
+    def test_a_name_with_another_family_prefix_is_refused(self) -> None:
+        document = _document(("wiki7.zapret.moe", False), ("git2.zapret.moe", False))
+        self.assertEqual(mirrors.ordered_hosts(document), ["git2.zapret.moe"])
+        self.assertFalse(mirrors.listed_family("wiki7.zapret.moe", "git"))
+        self.assertTrue(mirrors.listed_family("jzesawgjsz.zapret.moe", "wiki"))
+
+    def test_entry_page_hosts(self) -> None:
+        page = {"schema": 1, "families": {"git": {"name": "Zapret Git", "hosts": ["cwdnvtsqdc.zapret.moe", "git2.zapret.moe", "evil.example"]}}}
+        self.assertEqual(mirrors.entry_hosts(page), ["cwdnvtsqdc.zapret.moe", "git2.zapret.moe"])
+        self.assertEqual(mirrors.entry_hosts({"schema": 2, "families": {}}), [])
+        self.assertEqual(mirrors.entry_hosts(page, "wiki"), [])
+
+    def test_when_every_known_name_is_shut_the_entry_page_gives_new_names(self) -> None:
+        page = {"schema": 1, "families": {"git": {"hosts": ["cwdnvtsqdc.zapret.moe"]}}}
+        served = _document(("git.zapret.moe", True), ("cwdnvtsqdc.zapret.moe", False), preferred="cwdnvtsqdc.zapret.moe")
+        asked = []
+
+        def fetch(url):
+            asked.append(url)
+            if url == mirrors.ENTRY_LISTS[0]:
+                return json.dumps(page).encode()
+            if url == f"https://cwdnvtsqdc.zapret.moe{mirrors.MIRRORS_PATH}":
+                return json.dumps(served).encode()
+            raise ConnectionResetError("shut")
+
+        mirror_list = mirrors.MirrorList(fetch)
+        self.assertEqual(mirror_list.choose(), "cwdnvtsqdc.zapret.moe")
+        self.assertEqual(mirror_list.hosts()[0], "cwdnvtsqdc.zapret.moe")
+        self.assertTrue(set(mirrors.ENTRY_LISTS) <= set(asked))                            # both pages asked at once, under the deadline
+
+    def test_entry_pages_are_not_asked_while_a_known_name_answers(self) -> None:
+        asked = []
+
+        def fetch(url):
+            asked.append(url)
+            return json.dumps(_document(("git2.zapret.moe", False))).encode()
+
+        mirrors.MirrorList(fetch).choose()
+        self.assertFalse(set(asked) & set(mirrors.ENTRY_LISTS))
+
+
 if __name__ == "__main__":
     unittest.main()
 

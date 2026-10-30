@@ -19,6 +19,14 @@
 подставляется открытое — ``with_host``. Подставить можно только имя того же
 семейства: адрес вики под именем git не превращается. Модуль без Qt и сторонних
 библиотек.
+
+С 2026-10-30 людям раздаются зеркала со случайными именами (``cwdnvtsqdc.zapret.moe``):
+по такому имени семейство не узнать, поэтому модуль запоминает семейство имени из
+списка, которому доверяет (``/_sites/mirrors.json`` с нашего сайта по проверенному
+TLS или входная страница), и только для имени из одной метки под ``zapret.moe``:
+чужой хост так не подставить. Если не отвечает ни одно известное имя (все
+закрыты), список берётся со входных страниц на больших платформах
+(``ENTRY_LISTS``: Google Apps Script и gist GitHub), и гонка идёт по их именам.
 """
 
 from __future__ import annotations
@@ -51,14 +59,46 @@ GOOD_TTL_S = 1800.0
 RACE_DEADLINE_S = 4.0
 RACE_STAGGER_S = 0.25
 MAX_RACERS = 8
+# Входные страницы (pve-admin servers.md «Entry pages»): их пишет zapret-beacon при каждой смене
+# зеркал, адреса постоянные. Схема 1: {"families": {"git": {"hosts": [...]}, "wiki": {...}}}.
+ENTRY_LISTS = (
+    "https://script.google.com/macros/s/AKfycbzcEPk67WW6fYC0vPVm397QyDFHd4m-SrfKDBnfvG8jAD-n_HXVv8AqQnEHZ6A42oIh/exec?format=json",
+    "https://gist.githubusercontent.com/fuckyourkn/ecb9b6a03f53bddcdd47023ebc12d4f9/raw/targets.json",
+)
 
 _HOST_RE = re.compile(r"^(git|wiki)\d*\.zapret\.moe$", re.IGNORECASE)
+
+
+# Любое имя из одной метки под zapret.moe: так выглядят и нумерованные, и случайные зеркала.
+_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.zapret\.moe$")
+# Семейство случайного имени, узнанное из доверенного списка (имя -> семейство).
+_learned: dict[str, str] = {}
+_learned_lock = threading.Lock()
 
 
 def family_of(host: str | None) -> str:
     """Семейство имени (``git`` или ``wiki``); пусто, если это не имя сайта проекта."""
     match = _HOST_RE.fullmatch(str(host or ""))
-    return match.group(1).lower() if match else ""
+    if match:
+        return match.group(1).lower()
+    return _learned.get(str(host or "").lower(), "")
+
+
+def listed_family(name: str, family: str) -> bool:
+    """Можно ли принять имя из списка семейства: одна метка под zapret.moe, и имя с
+    приставкой (git7, wiki3) — только своего семейства."""
+    if family not in FAMILIES or not _NAME_RE.fullmatch(name):
+        return False
+    match = _HOST_RE.fullmatch(name)
+    return match is None or match.group(1).lower() == family
+
+
+def learn(family: str, names: list[str]) -> None:
+    """Запомнить семейство имён из доверенного списка (принимаются только ``listed_family``)."""
+    with _learned_lock:
+        for name in names:
+            if listed_family(name, family) and not _HOST_RE.fullmatch(name):
+                _learned[name] = family
 
 
 def canonical_host(family: str) -> str:
@@ -153,13 +193,28 @@ def ordered_hosts(document: Any, family: str = "git") -> list[str]:
     blocked_names: list[str] = []
     for item in items:
         name = str(item.get("name") or "").strip().lower()
-        if family_of(name) != family or name in open_names or name in blocked_names:
+        if not listed_family(name, family) or name in open_names or name in blocked_names:
             continue
         (blocked_names if item.get("blocked") is True else open_names).append(name)
     if preferred in open_names:
         open_names.remove(preferred)
         open_names.insert(0, preferred)
-    return (open_names + blocked_names)[:MAX_PUBLISHED_HOSTS]
+    ordered = (open_names + blocked_names)[:MAX_PUBLISHED_HOSTS]
+    learn(family, ordered)
+    return ordered
+
+
+def entry_hosts(document: Any, family: str = "git") -> list[str]:
+    """Имена семейства со входной страницы (схема 1, ``families.<семейство>.hosts``) в её порядке."""
+    try:
+        if document["schema"] != 1:
+            return []
+        hosts = [str(h).strip().lower() for h in document["families"][family]["hosts"]]
+    except (KeyError, TypeError, AttributeError):
+        return []
+    ordered = list(dict.fromkeys(h for h in hosts if listed_family(h, family)))[:MAX_PUBLISHED_HOSTS]
+    learn(family, ordered)
+    return ordered
 
 
 def reader_host(fetch: Callable[[str], bytes | None], family: str = "git") -> str:
@@ -301,6 +356,15 @@ class MirrorList:
         """Гонка по именам: запоминает победителя и список сервера (или неудачу)."""
         started = time.monotonic()
         winner, ordered, failures = self._race()
+        if winner is None:
+            # Все известные имена молчат: новые имена — со входных страниц на больших платформах.
+            listed = self._entry_names(failures)
+            fresh = [name for name in listed if name not in self._candidates()]
+            if fresh:
+                winner, ordered, more = self._race(fresh[:MAX_RACERS])
+                failures.extend(more)
+                if winner is not None and not ordered:
+                    ordered = listed
         now = self._clock()
         if winner is None:
             self._hosts, self._expires_at = list(bootstrap_hosts(self._family)), now + FALLBACK_TTL_S
@@ -321,6 +385,46 @@ class MirrorList:
             + (f"; не ответили: {'; '.join(failures)}" if failures else "")
         )
 
+    def _entry_names(self, failures: list[str]) -> list[str]:
+        """Имена семейства со входных страниц: страницы спрашиваются параллельно, не дольше
+        ``RACE_DEADLINE_S``, берётся первая в порядке ``ENTRY_LISTS``, давшая имена."""
+        answers: queue.Queue = queue.Queue()
+
+        def ask(index: int, url: str) -> None:
+            try:
+                body = self._fetch(url)
+                answers.put((index, entry_hosts(json.loads(body), self._family) if body else [], None))
+            except Exception as exc:  # noqa: BLE001 — любая причина идёт в журнал
+                answers.put((index, [], f"{type(exc).__name__}: {str(exc)[:120]}"))
+
+        for index, url in enumerate(ENTRY_LISTS):
+            threading.Thread(target=ask, args=(index, url), name="site-entry-list", daemon=True).start()
+        got: dict[int, list[str]] = {}
+        deadline = time.monotonic() + RACE_DEADLINE_S
+        while len(got) < len(ENTRY_LISTS):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            try:
+                index, names, failure = answers.get(timeout=left)
+            except queue.Empty:
+                break
+            got[index] = names
+            host = urlsplit(ENTRY_LISTS[index]).hostname
+            if failure or not names:
+                failures.append(f"входная страница {host}: {failure or f'имён семейства {self._family} нет'}")
+            # первая по порядку страница с именами, если все страницы до неё уже ответили пусто
+            for first in range(len(ENTRY_LISTS)):
+                if first not in got:
+                    break
+                if got[first]:
+                    self._say(f"имена со входной страницы {urlsplit(ENTRY_LISTS[first]).hostname}: {', '.join(got[first])}")
+                    return got[first]
+        failures.extend(f"входная страница {urlsplit(url).hostname}: нет ответа за {RACE_DEADLINE_S:.0f} с"
+                        for index, url in enumerate(ENTRY_LISTS) if index not in got)
+        named = [got[i] for i in sorted(got) if got[i]]
+        return named[0] if named else []
+
     def _candidates(self) -> list[str]:
         """Кого спрашивать: имена из прошлого списка сервера, иначе запасной список."""
         names = list(self._hosts) if self._hosts else []
@@ -331,9 +435,9 @@ class MirrorList:
             names.insert(0, self._good)
         return names[:MAX_RACERS]
 
-    def _race(self) -> tuple[str | None, list[str], list[str]]:
+    def _race(self, names: list[str] | None = None) -> tuple[str | None, list[str], list[str]]:
         """(победитель, имена из его списка, причины неудач). Не дольше ``RACE_DEADLINE_S``."""
-        names = self._candidates()
+        names = names if names is not None else self._candidates()
         answers: queue.Queue = queue.Queue()
         stop = threading.Event()
 
@@ -392,12 +496,16 @@ __all__ = [
     "WIKI_BOOTSTRAP_HOSTS",
     "bootstrap_hosts",
     "canonical_host",
+    "ENTRY_LISTS",
     "canonical_url",
+    "entry_hosts",
     "family_of",
     "host_of",
     "is_git_host",
     "is_rewritable",
     "is_site_host",
+    "learn",
+    "listed_family",
     "ordered_hosts",
     "reader_host",
     "with_host",
