@@ -808,6 +808,36 @@ class HostsPageTests(unittest.TestCase):
         self.assertFalse(any("manager" in name or "runtime" in name for name in names))
 
 
+class HostsHelpLinkTests(unittest.TestCase):
+    """Ссылка «Как это работает?» на статью о «Редакторе hosts» — та же, что на других страницах."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_help_link_stands_in_the_summary_and_opens_the_hosts_article(self) -> None:
+        from PyQt6.QtCore import QUrl
+
+        from config.urls import HOSTS_INFO_URL
+        from hosts.ui.page import HostsPage
+        from ui.widgets.site_link_button import SiteLinkButton
+
+        snapshot = _snapshot("")
+        feature = SimpleNamespace(
+            peek_page_snapshot=lambda: snapshot,
+            create_snapshot_worker=lambda request_id, parent=None: None,
+            create_apply_worker=lambda request_id, selection, adobe, parent=None: None,
+        )
+        page = HostsPage(deps=SimpleNamespace(hosts_feature=feature, open_file_page=lambda: None))
+        self.addCleanup(page.deleteLater)
+
+        self.assertEqual(HOSTS_INFO_URL, "https://wiki.zapret.moe/Zapret/hosts")
+        self.assertIsInstance(page.help_button, SiteLinkButton)
+        self.assertEqual(page.help_button.getUrl(), QUrl(HOSTS_INFO_URL))
+        self.assertTrue(page.summary_card.isAncestorOf(page.help_button))
+        self.assertEqual(page.help_button.accessibleName(), "Как это б#&^ь работает?")
+
+
 class HostsFileCommandsTests(unittest.TestCase):
     def _hosts_path(self, content: bytes | None):
         import tempfile

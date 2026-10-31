@@ -13,6 +13,7 @@ PROFILE_INFO_URL = "https://wiki.zapret.moe/Zapret2/profile"  # URL о проф�
 FILTER_INFO_URL = "https://wiki.zapret.moe/Zapret2/filter"  # URL об условиях профиля (фильтрах)
 WINWS_LOG_ANALYZER_INFO_URL = "https://wiki.zapret.moe/Zapret2/log-analyzer"  # URL об анализаторе логов winws2
 BLOCKCHECK_INFO_URL = "https://wiki.zapret.moe/Zapret/Blockcheck"  # Пошаговая статья о BlockCheck и его вкладках (кнопка «Как это работает?» на странице)
+HOSTS_INFO_URL = "https://wiki.zapret.moe/Zapret/hosts"  # Пошаговая статья о «Редакторе hosts» (ссылка «Как это работает?» на странице)
 ANDROID_URL = "https://wiki.zapret.moe/Zapret/android"  # URL инструкции для Android
 PREMIUM_GUIDE_URL = "https://wiki.zapret.moe/Zapret/premium"  # Гайд по Zapret Premium: как привязать компьютер к подписке бота
 GIT_SITE_URL = "https://git.zapret.moe/"  # Git-сайт проекта: исходный код и выпуски программ
@@ -58,7 +59,7 @@ ONBOARDING_WIKI_URLS = {
     "list_entries": "https://wiki.zapret.moe/Zapret2/find-site-domains",
     "fakes": "https://wiki.zapret.moe/Zapret2/blob",
     "fakes_blob": "https://wiki.zapret.moe/Zapret2/blob",
-    "hosts_summary": "https://wiki.zapret.moe/Zapret/hosts",
+    "hosts_summary": HOSTS_INFO_URL,
     "blockcheck_start": f"{BLOCKCHECK_INFO_URL}#шаг-1-запустите-проверку",
     "blockcheck_domains": f"{BLOCKCHECK_INFO_URL}#шаг-1-запустите-проверку",
     "blockcheck_summary": f"{BLOCKCHECK_INFO_URL}#шаг-3-прочитайте-итог",
@@ -75,7 +76,7 @@ ONBOARDING_WIKI_URLS = {
     "dns_spoofing_check": f"{BLOCKCHECK_INFO_URL}#вкладка-dns-подмена",
     "log_analyzer_source": WINWS_LOG_ANALYZER_INFO_URL,
     "dpi_mode": "https://wiki.zapret.moe/Zapret2/Zapret2#чем-zapret-2-отличается-от-обычного-zapret-winws-nfqws",
-    "geo_blocks": "https://wiki.zapret.moe/Zapret/hosts",
+    "geo_blocks": HOSTS_INFO_URL,
     "diagnostics": WINWS_LOG_ANALYZER_INFO_URL,
     "finish": "https://wiki.zapret.moe/Zapret/zapret_not_working",
 }

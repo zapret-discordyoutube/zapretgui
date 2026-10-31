@@ -106,7 +106,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         page = _make_page()
         self.addCleanup(page.deleteLater)
 
-        # Ссылка на инструкцию стоит в ряду заголовка и ведёт на статью о подборе стратегии.
+        # Ссылка на инструкцию стоит в ряду заголовка и ведёт на пошаговую статью о BlockCheck.
         self.assertEqual(page.layout.indexOf(page._title_header), 0)
         self.assertIs(page.title_label.parentWidget(), page._title_header)
         self.assertEqual(
@@ -114,7 +114,11 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
             QUrl("https://wiki.zapret.moe/Zapret/Blockcheck"),
         )
         self.assertEqual(page._help_button.accessibleName(), "Как это б#&^ь работает?")
-        self.assertIn("инструкцию", page._help_button.accessibleDescription())
+        self.assertIn("статью о BlockCheck", page._help_button.accessibleDescription())
+        # Открывается под открытым именем вики: основное имя режут (utils.site_links).
+        from ui.widgets.site_link_button import SiteLinkButton
+
+        self.assertIsInstance(page._help_button, SiteLinkButton)
 
         # На вложенном экране заголовок не нужен: вместе с ним уходит и ссылка.
         page._set_page_header_visible(False)

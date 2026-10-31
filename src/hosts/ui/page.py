@@ -37,12 +37,14 @@ from qfluentwidgets import (
 )
 
 from app.ui_texts import tr as tr_catalog
+from config.urls import HOSTS_INFO_URL
 from hosts.draft import MIXED, HostsDraft
 from hosts.hosts_blocks import BLOCK_ZAPRETGUI
 from hosts.page_plans import describe_checked_at
 from hosts.page_snapshot import CATEGORY_AI, CATEGORY_DIRECT, CATEGORY_OTHER, HostsPageSnapshot
 from hosts.ui.profile_icons import profile_icon
 from hosts.ui.services_tiles import HostsChoice, HostsTile, HostsTilesGrid, split_service_title
+from ui.widgets.title_help_link import make_help_link
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import SettingsCard
@@ -239,6 +241,18 @@ class HostsPage(BasePage):
         summary_row.addLayout(summary_text, 1)
         self.summary_status = _StatusPill(self.summary_card)
         summary_row.addWidget(self.summary_status, 0, Qt.AlignmentFlag.AlignVCenter)
+        # Ссылка на пошаговую статью — та же, что на других страницах. Справа от сводки:
+        # место справа от заголовка занимают кнопки «Файл hosts», «DNS для всех», «Выключить все».
+        self.help_button = make_help_link(
+            HOSTS_INFO_URL,
+            tooltip="Открыть инструкцию: как пользоваться «Редактором hosts»",
+            description=(
+                "Открывает в браузере пошаговую статью о «Редакторе hosts»: когда hosts помогает, "
+                "как включить сервис и выбрать DNS-профиль."
+            ),
+            parent=self.summary_card,
+        )
+        summary_row.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.summary_card.main_layout.addLayout(summary_row)
         top_layout.addWidget(self.summary_card)
         self.add_widget(self.top_panel)

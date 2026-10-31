@@ -351,8 +351,8 @@ class BlockcheckPage(BasePage):
         header = add_title_help_link(
             self,
             BLOCKCHECK_INFO_URL,
-            tooltip="Открыть инструкцию: как подобрать стратегию",
-            description="Открывает в браузере инструкцию о том, как подобрать стратегию.",
+            tooltip="Открыть инструкцию: как пользоваться BlockCheck и его вкладками",
+            description="Открывает в браузере пошаговую статью о BlockCheck: как проверить сеть, прочитать итог и подобрать стратегию.",
         )
         if header is not None:
             self._title_header, self._help_button = header
