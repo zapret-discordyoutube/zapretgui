@@ -554,6 +554,37 @@ class AppearanceWorkerQueueTests(unittest.TestCase):
 
         page._apply_windows_accent.assert_not_called()
 
+    def test_windows_accent_result_ignored_after_follow_switch_was_turned_off(self) -> None:
+        from ui.pages.appearance_page import AppearancePage
+
+        page = AppearancePage.__new__(AppearancePage)
+        page._cleanup_in_progress = False
+        page._windows_accent_load_runtime = Mock()
+        page._windows_accent_load_runtime.is_current.return_value = True
+        page._windows_accent_load_pending = False
+        page._follow_windows_accent_cb = SimpleNamespace(isChecked=lambda: False)
+        page._apply_windows_accent = Mock()
+
+        AppearancePage._on_windows_accent_loaded(page, 11, SimpleNamespace(hex_color="#111111"))
+
+        page._apply_windows_accent.assert_not_called()
+
+    def test_windows_accent_result_applied_while_follow_switch_is_on(self) -> None:
+        from ui.pages.appearance_page import AppearancePage
+
+        page = AppearancePage.__new__(AppearancePage)
+        page._cleanup_in_progress = False
+        page._windows_accent_load_runtime = Mock()
+        page._windows_accent_load_runtime.is_current.return_value = True
+        page._windows_accent_load_pending = False
+        page._follow_windows_accent_cb = SimpleNamespace(isChecked=lambda: True)
+        page._apply_windows_accent = Mock()
+        plan = SimpleNamespace(hex_color="#111111")
+
+        AppearancePage._on_windows_accent_loaded(page, 11, plan)
+
+        page._apply_windows_accent.assert_called_once_with(plan)
+
     def test_windows_accent_error_ignored_when_new_load_is_pending(self) -> None:
         from ui.pages import appearance_page
         from ui.pages.appearance_page import AppearancePage

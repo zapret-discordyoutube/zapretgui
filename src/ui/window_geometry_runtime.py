@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
@@ -83,6 +85,11 @@ class WindowGeometryRuntime:
         self._last_persisted_maximized: bool | None = None
         self._geometry_save_runtime = OneShotWorkerRuntime()
         self._geometry_save_state = LatestValueWorkerState(self._geometry_save_runtime, empty_value=None)
+        # Фоновая запись и запись при закрытии не перемешиваются: при закрытии
+        # номер записи растёт, и фоновая запись, начатая раньше, уже не пишет.
+        # Ждать приходится только запись, которая идёт прямо сейчас (миллисекунды).
+        self._geometry_write_lock = threading.Lock()
+        self._geometry_write_generation = 0
         self._last_non_minimized_zoomed = False
 
         self._geometry_save_timer = QTimer(host)
@@ -483,20 +490,46 @@ class WindowGeometryRuntime:
         if force:
             self._stop_geometry_save_worker_for_sync()
 
-        try:
-            geometry, is_maximized = self._snapshot_for_persist()
-            self.store.save_maximized(is_maximized)
-            self._last_persisted_maximized = is_maximized
-            if geometry is None:
+        with self._geometry_write_guard_for_sync():
+            try:
+                geometry, is_maximized = self._snapshot_for_persist()
+                self.store.save_maximized(is_maximized)
+                self._last_persisted_maximized = is_maximized
+                if geometry is None:
+                    return
+                x, y, width, height = geometry
+                width = max(int(width), self.min_width)
+                height = max(int(height), self.min_height)
+                normalized = (int(x), int(y), int(width), int(height))
+                self.store.save_geometry(*normalized)
+                self._last_persisted_geometry = normalized
+            except Exception as e:
+                log(f"Ошибка синхронного сохранения геометрии окна: {e}", "DEBUG")
+
+    @contextmanager
+    def _geometry_write_guard_for_sync(self):
+        lock = self.__dict__.get("_geometry_write_lock")
+        if lock is None:
+            yield
+            return
+        with lock:
+            self._geometry_write_generation = int(self.__dict__.get("_geometry_write_generation", 0)) + 1
+            yield
+
+    def _geometry_write_guard(self):
+        """Для фоновой записи: даёт писать, только если с её начала не было записи при закрытии."""
+        lock = self.__dict__.get("_geometry_write_lock")
+        started_generation = int(self.__dict__.get("_geometry_write_generation", 0))
+
+        @contextmanager
+        def _guard():
+            if lock is None:
+                yield True
                 return
-            x, y, width, height = geometry
-            width = max(int(width), self.min_width)
-            height = max(int(height), self.min_height)
-            normalized = (int(x), int(y), int(width), int(height))
-            self.store.save_geometry(*normalized)
-            self._last_persisted_geometry = normalized
-        except Exception as e:
-            log(f"Ошибка синхронного сохранения геометрии окна: {e}", "DEBUG")
+            with lock:
+                yield int(self.__dict__.get("_geometry_write_generation", 0)) == started_generation
+
+        return _guard
 
     def _stop_geometry_save_worker_for_sync(self) -> None:
         self._geometry_save_state_obj().reset()
@@ -546,6 +579,7 @@ class WindowGeometryRuntime:
                 request_id,
                 geometry=geometry,
                 maximized=bool(maximized),
+                write_guard=self._geometry_write_guard(),
                 parent=self.host,
             ),
             on_loaded=self._on_geometry_save_finished,

@@ -45,6 +45,7 @@ class WindowGeometryFeature:
         *,
         geometry: tuple[int, int, int, int] | None,
         maximized: bool,
+        write_guard=None,
         parent=None,
     ):
         from app.window_geometry_workers import WindowGeometrySaveWorker
@@ -55,6 +56,7 @@ class WindowGeometryFeature:
             maximized=bool(maximized),
             get_window_geometry=self.get_window_geometry,
             set_window_geometry=self.set_window_geometry,
+            write_guard=write_guard,
             parent=parent,
         )
 

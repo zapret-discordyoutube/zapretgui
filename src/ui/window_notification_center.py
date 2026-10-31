@@ -10,6 +10,7 @@ from log.log import global_logger, log
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
+from ui.queued_worker_state import QueuedWorkerState
 from ui.window_notification_actions import WindowNotificationActionHandler, WindowNotificationRuntimeActions
 
 
@@ -318,9 +319,13 @@ class WindowNotificationCenter(QObject):
 
     def _request_notification_action(self, action_name: str, action_fn, *, bar=None, context=None) -> None:
         request = (str(action_name or "").strip(), action_fn, bar, dict(context or {}))
-        self._notification_action_state_obj().request_or_start(
+        # Действия кнопок уведомлений независимы («Продолжить запуск», «Отключить
+        # прокси»): каждое выполняется по очереди, ни одно не заменяет другое.
+        state = self._notification_action_state_obj()
+        state.start_or_queue(
             request,
             lambda value: self._run_notification_action_worker(*value),
+            state.append,
         )
 
     def _run_notification_action_worker(self, action_name: str, action_fn, bar, context: dict[str, object]) -> None:
@@ -365,8 +370,6 @@ class WindowNotificationCenter(QObject):
         context = self._notification_action_context.pop(int(request_id), {})
         if not self._notification_action_runtime.is_current(request_id):
             return
-        if self._notification_action_state_obj().has_pending():
-            return
 
         action = str(action_name or context.get("action_name") or "")
         bar = context.get("bar")
@@ -407,8 +410,6 @@ class WindowNotificationCenter(QObject):
         context = self._notification_action_context.pop(int(request_id), {})
         if not self._notification_action_runtime.is_current(request_id):
             return
-        if self._notification_action_state_obj().has_pending():
-            return
         action = str(action_name or context.get("action_name") or "")
         bar = context.get("bar")
         if action == "disable_proxy":
@@ -445,31 +446,15 @@ class WindowNotificationCenter(QObject):
             self._finish_launch_conflict_action((False, error), context=context, bar=bar)
 
     def _on_notification_action_worker_finished(self, _worker) -> None:
-        self._notification_action_state_obj().schedule_pending_after_finish(
+        state = self._notification_action_state_obj()
+        state.schedule_next_after_finish(
             _worker,
             is_current_worker_finish=self._is_current_worker_finish,
             single_shot=QTimer.singleShot,
-            run_scheduled=self._run_scheduled_notification_action_worker_start,
-            cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
+            start=lambda value: self._run_notification_action_worker(*value),
+            queue_item=state.append,
+            is_cleanup_in_progress=lambda: bool(self.__dict__.get("_cleanup_in_progress", False)),
         )
-
-    def _schedule_notification_action_worker_start(self, request) -> None:
-        if request is None:
-            return
-        self._notification_action_state_obj().schedule_start(
-            QTimer.singleShot,
-            lambda value=request: self._run_scheduled_notification_action_worker_start(value),
-            cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-            pending_when_already_scheduled=request,
-        )
-
-    def _run_scheduled_notification_action_worker_start(self, request=None) -> None:
-        pending = self._notification_action_state_obj().take_pending_for_scheduled_start(
-            cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False)
-        )
-        next_request = pending if pending is not None else request
-        if next_request is not None:
-            self._run_notification_action_worker(*next_request)
 
     def _external_open_url_state_obj(self) -> LatestValueWorkerState:
         state = self.__dict__.get("_external_open_url_state")
@@ -504,38 +489,15 @@ class WindowNotificationCenter(QObject):
     def _external_open_url_start_scheduled(self, value: bool) -> None:
         self._external_open_url_state_obj().start_scheduled = bool(value)
 
-    def _notification_action_state_obj(self) -> LatestValueWorkerState:
+    def _notification_action_state_obj(self) -> QueuedWorkerState:
         state = self.__dict__.get("_notification_action_state")
         runtime = self.__dict__.get("_notification_action_runtime")
         if state is None:
-            pending = self.__dict__.pop("_notification_action_pending", None)
-            start_scheduled = bool(self.__dict__.pop("_notification_action_start_scheduled", False))
-            state = LatestValueWorkerState(
-                runtime,
-                empty_value=None,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
+            state = QueuedWorkerState(runtime)
             self.__dict__["_notification_action_state"] = state
         elif getattr(state, "runtime", None) is None and runtime is not None:
             state.runtime = runtime
         return state
-
-    @property
-    def _notification_action_pending(self):
-        return self._notification_action_state_obj().pending
-
-    @_notification_action_pending.setter
-    def _notification_action_pending(self, value) -> None:
-        self._notification_action_state_obj().pending = value
-
-    @property
-    def _notification_action_start_scheduled(self) -> bool:
-        return bool(self._notification_action_state_obj().start_scheduled)
-
-    @_notification_action_start_scheduled.setter
-    def _notification_action_start_scheduled(self, value: bool) -> None:
-        self._notification_action_state_obj().start_scheduled = bool(value)
 
     def _is_current_worker_finish(self, runtime, worker) -> bool:
         if self.__dict__.get("_cleanup_in_progress", False):

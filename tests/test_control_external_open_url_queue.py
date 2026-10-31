@@ -221,7 +221,8 @@ class ControlExternalOpenUrlQueueTests(unittest.TestCase):
             [("https://example.org/new", "Ошибка", "Не удалось открыть: {error}")],
         )
 
-    def test_external_open_url_result_is_ignored_when_new_request_is_pending(self) -> None:
+    def test_external_open_url_error_is_shown_even_when_another_link_is_queued(self) -> None:
+        # Ссылки в очереди откроются все: ошибка первой не должна теряться из-за второй.
         page = _Page()
         page._cleanup_in_progress = False
         page._external_open_url_pending = [
@@ -240,9 +241,9 @@ class ControlExternalOpenUrlQueueTests(unittest.TestCase):
             error_default="Не удалось открыть: {error}",
         )
 
-        page._show_external_open_url_error.assert_not_called()
+        page._show_external_open_url_error.assert_called_once_with("Ошибка", "Не удалось открыть: {error}", "old error")
 
-    def test_external_open_url_error_is_ignored_when_new_request_is_pending(self) -> None:
+    def test_external_open_url_failure_is_shown_even_when_another_link_is_queued(self) -> None:
         page = _Page()
         page._cleanup_in_progress = False
         page._external_open_url_pending = [
@@ -260,7 +261,7 @@ class ControlExternalOpenUrlQueueTests(unittest.TestCase):
             error_default="Не удалось открыть: {error}",
         )
 
-        page._show_external_open_url_error.assert_not_called()
+        page._show_external_open_url_error.assert_called_once_with("Ошибка", "Не удалось открыть: {error}", "old error")
 
 
 if __name__ == "__main__":

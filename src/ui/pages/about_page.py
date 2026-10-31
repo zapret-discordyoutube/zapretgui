@@ -533,8 +533,6 @@ class AboutPage(BasePage):
     ) -> None:
         if not self._about_open_runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
             return
-        if self._about_open_state_obj().has_pending():
-            return
         if result.ok:
             return
         self._show_about_open_error(
@@ -552,8 +550,6 @@ class AboutPage(BasePage):
         raw_error_message: str,
     ) -> None:
         if not self._about_open_runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
-            return
-        if self._about_open_state_obj().has_pending():
             return
         self._show_about_open_error(str(error), error_default=error_default, raw_error_message=raw_error_message)
 

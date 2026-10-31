@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
@@ -17,6 +19,7 @@ class WindowGeometrySaveWorker(QThread):
         maximized: bool,
         get_window_geometry,
         set_window_geometry,
+        write_guard=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -25,6 +28,9 @@ class WindowGeometrySaveWorker(QThread):
         self._maximized = bool(maximized)
         self._get_window_geometry = get_window_geometry
         self._set_window_geometry = set_window_geometry
+        # write_guard() — контекст, который отвечает, можно ли ещё писать: при
+        # закрытии окно уже записало свежую геометрию, старая её не затирает.
+        self._write_guard = write_guard
 
     def run(self) -> None:
         try:
@@ -37,13 +43,17 @@ class WindowGeometrySaveWorker(QThread):
             else:
                 x, y, width, height = self._geometry
 
-            self._set_window_geometry(
-                x=x,
-                y=y,
-                width=width,
-                height=height,
-                maximized=self._maximized,
-            )
+            guard = self._write_guard() if self._write_guard is not None else nullcontext(True)
+            with guard as allowed:
+                if not allowed:
+                    return
+                self._set_window_geometry(
+                    x=x,
+                    y=y,
+                    width=width,
+                    height=height,
+                    maximized=self._maximized,
+                )
         except Exception as exc:
             log(f"WindowGeometrySaveWorker: не удалось сохранить геометрию: {exc}", "WARNING")
             self.failed.emit(str(exc))

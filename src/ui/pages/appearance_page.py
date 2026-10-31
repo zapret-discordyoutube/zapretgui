@@ -1606,6 +1606,11 @@ class AppearancePage(BasePage):
             return
         if self._windows_accent_load_has_pending():
             return
+        toggle = self._follow_windows_accent_cb
+        if toggle is not None and not toggle.isChecked():
+            # «Акцент из Windows» выключили, пока цвет читался: применять его
+            # поздно — иначе переключатель «выкл», а цвет и настройка от Windows.
+            return
         self._apply_windows_accent(plan)
 
     def _on_windows_accent_failed(self, request_id: int, error: str) -> None:

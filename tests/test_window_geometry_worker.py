@@ -214,6 +214,55 @@ class WindowGeometryWorkerTests(unittest.TestCase):
         )
         worker_runtime.cancel.assert_called_once_with()
 
+    def test_background_save_started_before_close_does_not_overwrite_close_save(self) -> None:
+        import threading
+
+        import ui.window_geometry_runtime as runtime
+        from app.window_geometry_workers import WindowGeometrySaveWorker
+
+        geometry_runtime = runtime.WindowGeometryRuntime.__new__(runtime.WindowGeometryRuntime)
+        geometry_runtime._geometry_write_lock = threading.Lock()
+        geometry_runtime._geometry_write_generation = 0
+        writes: list[tuple] = []
+        worker = WindowGeometrySaveWorker(
+            1,
+            geometry=(10, 20, 800, 600),
+            maximized=False,
+            get_window_geometry=lambda: {},
+            set_window_geometry=lambda **kwargs: writes.append(("old", kwargs["width"])),
+            write_guard=geometry_runtime._geometry_write_guard(),
+        )
+
+        # Окно закрывается и пишет свежий размер раньше, чем фоновая запись дошла до диска.
+        with runtime.WindowGeometryRuntime._geometry_write_guard_for_sync(geometry_runtime):
+            writes.append(("close", 1024))
+        worker.run()
+
+        self.assertEqual(writes, [("close", 1024)])
+
+    def test_background_save_writes_when_nothing_newer_was_saved(self) -> None:
+        import threading
+
+        import ui.window_geometry_runtime as runtime
+        from app.window_geometry_workers import WindowGeometrySaveWorker
+
+        geometry_runtime = runtime.WindowGeometryRuntime.__new__(runtime.WindowGeometryRuntime)
+        geometry_runtime._geometry_write_lock = threading.Lock()
+        geometry_runtime._geometry_write_generation = 0
+        writes: list[int] = []
+        worker = WindowGeometrySaveWorker(
+            1,
+            geometry=(10, 20, 800, 600),
+            maximized=False,
+            get_window_geometry=lambda: {},
+            set_window_geometry=lambda **kwargs: writes.append(kwargs["width"]),
+            write_guard=geometry_runtime._geometry_write_guard(),
+        )
+
+        worker.run()
+
+        self.assertEqual(writes, [800])
+
 
 if __name__ == "__main__":
     unittest.main()

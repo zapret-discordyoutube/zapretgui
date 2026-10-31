@@ -260,7 +260,8 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(page._support_open_pending, [second])
 
-    def test_support_open_result_is_ignored_when_new_action_is_pending(self) -> None:
+    def test_support_open_result_error_is_shown_even_when_another_action_is_queued(self) -> None:
+        # Очередь ссылок выполняет все действия: ошибка первого не теряется из-за второго.
         page = SupportPage.__new__(SupportPage)
         page._support_open_runtime = SimpleNamespace(is_current=Mock(return_value=True))
         page._support_open_pending = [("discord", "discord.error", "discord {error}")]
@@ -275,9 +276,9 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
             error_default="telegram {error}",
         )
 
-        page._show_support_open_error.assert_not_called()
+        page._show_support_open_error.assert_called_once_with("telegram.error", "telegram {error}", "old error")
 
-    def test_support_open_error_is_ignored_when_new_action_is_pending(self) -> None:
+    def test_support_open_failure_is_shown_even_when_another_action_is_queued(self) -> None:
         page = SupportPage.__new__(SupportPage)
         page._support_open_runtime = SimpleNamespace(is_current=Mock(return_value=True))
         page._support_open_pending = [("discord", "discord.error", "discord {error}")]
@@ -292,7 +293,7 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
             error_default="telegram {error}",
         )
 
-        page._show_support_open_error.assert_not_called()
+        page._show_support_open_error.assert_called_once_with("telegram.error", "telegram {error}", "old error")
 
     def test_support_cleanup_stops_open_worker_without_blocking_gui(self) -> None:
         runtime = Mock()
@@ -443,7 +444,7 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(page._about_open_pending, [second])
 
-    def test_about_open_result_is_ignored_when_new_action_is_pending(self) -> None:
+    def test_about_open_result_error_is_shown_even_when_another_action_is_queued(self) -> None:
         page = AboutPage.__new__(AboutPage)
         page._cleanup_in_progress = False
         page._about_open_runtime = SimpleNamespace(is_current=Mock(return_value=True))
@@ -458,9 +459,9 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
             raw_error_message="",
         )
 
-        page._show_about_open_error.assert_not_called()
+        page._show_about_open_error.assert_called_once_with("old error", error_default="telegram {error}", raw_error_message="")
 
-    def test_about_open_error_is_ignored_when_new_action_is_pending(self) -> None:
+    def test_about_open_failure_is_shown_even_when_another_action_is_queued(self) -> None:
         page = AboutPage.__new__(AboutPage)
         page._cleanup_in_progress = False
         page._about_open_runtime = SimpleNamespace(is_current=Mock(return_value=True))
@@ -475,7 +476,7 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
             raw_error_message="",
         )
 
-        page._show_about_open_error.assert_not_called()
+        page._show_about_open_error.assert_called_once_with("old error", error_default="telegram {error}", raw_error_message="")
 
     def test_about_cleanup_stops_open_worker_without_blocking_gui(self) -> None:
         runtime = Mock()

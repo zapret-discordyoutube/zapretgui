@@ -321,13 +321,21 @@ class WindowNotificationActionsContractTests(unittest.TestCase):
         self.assertIn("ExternalNotificationActionWorker", feature_source)
         self.assertNotIn("ui.window_notification_action_workers", center_source)
 
+    @staticmethod
+    def _queue_action(center, request) -> None:
+        WindowNotificationCenter._notification_action_state_obj(center).append(request)
+
+    @staticmethod
+    def _queued_actions(center) -> list:
+        return list(WindowNotificationCenter._notification_action_state_obj(center).pending)
+
     def test_notification_action_pending_restarts_after_event_loop_turn(self) -> None:
         import ui.window_notification_center as notification_center
 
         center = WindowNotificationCenter.__new__(WindowNotificationCenter)
         action_fn = Mock()
         bar = object()
-        center._notification_action_pending = ("disable_proxy", action_fn, bar, {"reason": "test"})
+        self._queue_action(center, ("disable_proxy", action_fn, bar, {"reason": "test"}))
         center._run_notification_action_worker = Mock()
         single_shot = Mock(side_effect=lambda _delay, _callback: None)
 
@@ -354,7 +362,7 @@ class WindowNotificationActionsContractTests(unittest.TestCase):
         action_fn = Mock()
         bar = object()
         center._notification_action_runtime = SimpleNamespace(request_id=2)
-        center._notification_action_pending = ("disable_proxy", action_fn, bar, {"reason": "test"})
+        self._queue_action(center, ("disable_proxy", action_fn, bar, {"reason": "test"}))
         center._run_notification_action_worker = Mock()
         single_shot = Mock()
 
@@ -366,10 +374,7 @@ class WindowNotificationActionsContractTests(unittest.TestCase):
 
         single_shot.assert_not_called()
         center._run_notification_action_worker.assert_not_called()
-        self.assertEqual(
-            center._notification_action_pending,
-            ("disable_proxy", action_fn, bar, {"reason": "test"}),
-        )
+        self.assertEqual(self._queued_actions(center), [("disable_proxy", action_fn, bar, {"reason": "test"})])
 
     def test_stale_notification_action_worker_object_finish_does_not_restart_pending_action(self) -> None:
         import ui.window_notification_center as notification_center
@@ -380,7 +385,7 @@ class WindowNotificationActionsContractTests(unittest.TestCase):
         action_fn = Mock()
         bar = object()
         center._notification_action_runtime = SimpleNamespace(request_id=2, worker=current_worker)
-        center._notification_action_pending = ("disable_proxy", action_fn, bar, {"reason": "test"})
+        self._queue_action(center, ("disable_proxy", action_fn, bar, {"reason": "test"}))
         center._run_notification_action_worker = Mock()
         single_shot = Mock()
 
@@ -389,51 +394,45 @@ class WindowNotificationActionsContractTests(unittest.TestCase):
 
         single_shot.assert_not_called()
         center._run_notification_action_worker.assert_not_called()
-        self.assertEqual(
-            center._notification_action_pending,
-            ("disable_proxy", action_fn, bar, {"reason": "test"}),
-        )
+        self.assertEqual(self._queued_actions(center), [("disable_proxy", action_fn, bar, {"reason": "test"})])
 
-    def test_notification_action_scheduled_start_keeps_latest_request(self) -> None:
+    def test_queued_notification_actions_all_run_in_order(self) -> None:
+        # «Продолжить запуск», пока идёт другое действие, и ещё одна кнопка:
+        # ни одно действие не заменяет другое — все выполняются по очереди.
         import ui.window_notification_center as notification_center
 
         center = WindowNotificationCenter.__new__(WindowNotificationCenter)
-        old_action_fn = Mock()
-        new_action_fn = Mock()
-        old_bar = object()
-        new_bar = object()
-        center._notification_action_pending = None
-        center._notification_action_start_scheduled = False
+        center._notification_action_runtime = Mock()
+        center._notification_action_runtime.is_running.return_value = True
         center._run_notification_action_worker = Mock()
-        single_shot = Mock(side_effect=lambda _delay, _callback: None)
+        first = ("launch_conflict_resume", Mock(), object(), {"request_id": 7})
+        second = ("disable_proxy", Mock(), object(), {})
+        WindowNotificationCenter._request_notification_action(center, first[0], first[1], bar=first[2], context=first[3])
+        WindowNotificationCenter._request_notification_action(center, second[0], second[1], bar=second[2], context=second[3])
+        center._run_notification_action_worker.assert_not_called()
 
-        with patch.object(notification_center, "QTimer", SimpleNamespace(singleShot=single_shot), create=True):
-            WindowNotificationCenter._schedule_notification_action_worker_start(
-                center,
-                ("disable_proxy", old_action_fn, old_bar, {"reason": "old"}),
-            )
-            WindowNotificationCenter._schedule_notification_action_worker_start(
-                center,
-                ("disable_proxy", new_action_fn, new_bar, {"reason": "new"}),
-            )
+        center._notification_action_runtime.is_running.return_value = False
+        callbacks = []
+        single_shot = Mock(side_effect=lambda _delay, callback: callbacks.append(callback))
+        with patch.object(notification_center, "QTimer", SimpleNamespace(singleShot=single_shot), create=True), \
+                patch.object(center, "_is_current_worker_finish", return_value=True, create=True):
+            WindowNotificationCenter._on_notification_action_worker_finished(center, object())
+            callbacks.pop(0)()
+            WindowNotificationCenter._on_notification_action_worker_finished(center, object())
+            callbacks.pop(0)()
 
-        single_shot.assert_called_once()
-
-        single_shot.call_args.args[1]()
-
-        center._run_notification_action_worker.assert_called_once_with(
-            "disable_proxy",
-            new_action_fn,
-            new_bar,
-            {"reason": "new"},
+        self.assertEqual(
+            [call.args[0] for call in center._run_notification_action_worker.call_args_list],
+            ["launch_conflict_resume", "disable_proxy"],
         )
 
-    def test_notification_action_result_is_ignored_when_new_action_is_pending(self) -> None:
+    def test_notification_action_result_is_shown_even_when_another_action_is_queued(self) -> None:
         center = WindowNotificationCenter.__new__(WindowNotificationCenter)
         center._notification_action_runtime = Mock()
         center._notification_action_runtime.is_current.return_value = True
-        center._notification_action_pending = ("disable_proxy", Mock(), object(), {"reason": "new"})
-        center._notification_action_context = {4: {"action_name": "disable_proxy", "bar": object()}}
+        self._queue_action(center, ("disable_proxy", Mock(), object(), {"reason": "new"}))
+        bar = object()
+        center._notification_action_context = {4: {"action_name": "disable_proxy", "bar": bar}}
         center._notify_disable_proxy_result = Mock()
 
         WindowNotificationCenter._on_notification_action_finished(
@@ -443,15 +442,28 @@ class WindowNotificationActionsContractTests(unittest.TestCase):
             (False, "old result"),
         )
 
-        center._notify_disable_proxy_result.assert_not_called()
+        center._notify_disable_proxy_result.assert_called_once_with((False, "old result"), bar=bar)
         self.assertNotIn(4, center._notification_action_context)
 
-    def test_notification_action_error_is_ignored_when_new_action_is_pending(self) -> None:
+    def test_launch_conflict_resume_finishes_even_when_another_action_is_queued(self) -> None:
         center = WindowNotificationCenter.__new__(WindowNotificationCenter)
         center._notification_action_runtime = Mock()
         center._notification_action_runtime.is_current.return_value = True
-        center._notification_action_pending = ("disable_proxy", Mock(), object(), {"reason": "new"})
-        center._notification_action_context = {4: {"action_name": "disable_proxy", "bar": object()}}
+        self._queue_action(center, ("disable_proxy", Mock(), object(), {}))
+        center._notification_action_context = {5: {"action_name": "launch_conflict_resume", "bar": None}}
+        center._finish_launch_conflict_action = Mock()
+
+        WindowNotificationCenter._on_notification_action_finished(center, 5, "launch_conflict_resume", (True, ""))
+
+        center._finish_launch_conflict_action.assert_called_once()
+
+    def test_notification_action_error_is_shown_even_when_another_action_is_queued(self) -> None:
+        center = WindowNotificationCenter.__new__(WindowNotificationCenter)
+        center._notification_action_runtime = Mock()
+        center._notification_action_runtime.is_current.return_value = True
+        self._queue_action(center, ("disable_proxy", Mock(), object(), {"reason": "new"}))
+        bar = object()
+        center._notification_action_context = {4: {"action_name": "disable_proxy", "bar": bar}}
         center._notify_disable_proxy_result = Mock()
 
         WindowNotificationCenter._on_notification_action_failed(
@@ -461,7 +473,7 @@ class WindowNotificationActionsContractTests(unittest.TestCase):
             "old error",
         )
 
-        center._notify_disable_proxy_result.assert_not_called()
+        center._notify_disable_proxy_result.assert_called_once_with((False, "old error"), bar=bar)
         self.assertNotIn(4, center._notification_action_context)
 
     def test_launch_conflict_notification_action_runs_heavy_part_through_worker(self) -> None:
