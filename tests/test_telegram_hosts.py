@@ -99,6 +99,22 @@ class TelegramHostsTextTests(unittest.TestCase):
         self.assertNotIn(TELEGRAM_HOSTS_MARKER, cleaned)
         self.assertEqual(telegram_hosts_status_from_text(cleaned).present, 0)
 
+    def test_status_sees_telegram_name_that_is_not_first_on_its_line(self) -> None:
+        status = telegram_hosts_status_from_text(f"0.0.0.0 ads.example.net web.telegram.org\n{_block()}")
+        # Windows возьмёт первую строку: web.telegram.org ведёт на 0.0.0.0.
+        self.assertEqual(status.present, status.total - 1)
+
+    def test_add_moves_telegram_name_out_of_shared_line(self) -> None:
+        added = add_telegram_hosts_to_text("0.0.0.0 ads.example.net web.telegram.org # ads\n")
+        self.assertIn("0.0.0.0 ads.example.net # ads\n", added)
+        self.assertTrue(telegram_hosts_status_from_text(added).is_complete)
+
+    def test_remove_keeps_other_names_on_relay_line(self) -> None:
+        text = _USER_LINES + f"{TELEGRAM_RELAY_IP} web.telegram.org mydev.local\n"
+        removed = remove_telegram_hosts_from_text(text)
+        self.assertIn(f"{TELEGRAM_RELAY_IP} mydev.local\n", removed)
+        self.assertNotIn("web.telegram.org", removed)
+
     def test_remove_after_add_restores_original(self) -> None:
         self.assertEqual(remove_telegram_hosts_from_text(add_telegram_hosts_to_text(_USER_LINES)), _USER_LINES)
 

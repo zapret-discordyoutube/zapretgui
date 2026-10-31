@@ -41,6 +41,31 @@ MAX_PROCESSES = [
 ]
 
 
+
+_MAX_HOSTS_BEGIN = "# MAX BLOCKED BY ZAPRET GUI"
+_MAX_HOSTS_END = "# END MAX BLOCK"
+
+
+def _remove_max_hosts_block(content: str) -> str:
+    """Текст hosts без блока MAX. Блок пишется без пустых строк внутри: если его
+    конечную метку стёрли руками, он кончается на первой пустой строке, а
+    строки пользователя после неё остаются."""
+    new_lines: list[str] = []
+    skip = False
+    for line in content.splitlines(keepends=True):
+        if _MAX_HOSTS_BEGIN in line:
+            skip = True
+            continue
+        if skip and _MAX_HOSTS_END in line:
+            skip = False
+            continue
+        if skip and not line.strip():
+            skip = False
+        if not skip:
+            new_lines.append(line)
+    return "".join(new_lines)
+
+
 class MaxBlockerManager:
     """Управление блокировкой программы MAX"""
     
@@ -381,7 +406,8 @@ class MaxBlockerManager:
         """
         Добавляет блокировку доменов MAX в файл hosts
         """
-        hosts_path = r"C:\Windows\System32\drivers\etc\hosts"
+        from hosts.hosts import safe_read_hosts_file, safe_write_hosts_file
+
         blocked_domains = [
             "max.ru",
             "download.max.ru",
@@ -392,74 +418,61 @@ class MaxBlockerManager:
             "oneme.com",
             "download.oneme.com",
         ]
-        
+
         try:
-            # Читаем текущий hosts файл
-            with open(hosts_path, 'r', encoding='utf-8-sig') as f:
-                content = f.read()
-            
-            # Маркер для наших записей
-            marker = "# MAX BLOCKED BY ZAPRET GUI"
-            
-            # Проверяем, есть ли уже наши записи
-            if marker in content:
+            # Общий читатель hosts: путь берётся из SystemRoot (Windows может
+            # стоять не на C:), а файл в cp1251 тоже читается.
+            content = safe_read_hosts_file()
+            if content is None:
+                log("Файл hosts не читается: блокировка MAX не добавлена", "❌ ERROR")
+                return False
+
+            if _MAX_HOSTS_BEGIN in content:
                 return True
-            
-            # Добавляем блокировки
-            new_entries = [f"\n{marker}"]
+
+            new_entries = [_MAX_HOSTS_BEGIN]
             for domain in blocked_domains:
                 new_entries.append(f"127.0.0.1 {domain}")
                 new_entries.append(f"::1 {domain}")
-            new_entries.append(f"# END MAX BLOCK\n")
-            
-            # Записываем обратно
-            with open(hosts_path, 'a', encoding='utf-8-sig') as f:
-                f.write('\n'.join(new_entries))
-            
+            new_entries.append(_MAX_HOSTS_END)
+
+            prefix = content
+            if prefix and not prefix.endswith("\n"):
+                prefix += "\n"
+            if not safe_write_hosts_file(prefix + "\n" + "\n".join(new_entries) + "\n"):
+                return False
+
             log("Домены MAX добавлены в hosts файл", "✅ INFO")
             return True
-            
+
         except Exception as e:
             log(f"Ошибка изменения hosts файла: {e}", "❌ ERROR")
             return False
-    
+
     def remove_from_hosts_file(self) -> bool:
         """
         Удаляет блокировку доменов MAX из файла hosts
         """
-        hosts_path = r"C:\Windows\System32\drivers\etc\hosts"
-        
+        from hosts.hosts import safe_read_hosts_file, safe_write_hosts_file
+
         try:
-            with open(hosts_path, 'r', encoding='utf-8-sig') as f:
-                lines = f.readlines()
-            
-            # Фильтруем строки, удаляя наши блокировки
-            marker_start = "# MAX BLOCKED BY ZAPRET GUI"
-            marker_end = "# END MAX BLOCK"
-            
-            new_lines = []
-            skip = False
-            
-            for line in lines:
-                if marker_start in line:
-                    skip = True
-                elif marker_end in line:
-                    skip = False
-                    continue
-                elif not skip:
-                    new_lines.append(line)
-            
-            # Записываем обратно
-            with open(hosts_path, 'w', encoding='utf-8-sig') as f:
-                f.writelines(new_lines)
-            
+            content = safe_read_hosts_file()
+            if content is None:
+                log("Файл hosts не читается: блокировка MAX не снята", "❌ ERROR")
+                return False
+            new_content = _remove_max_hosts_block(content)
+            if new_content == content:
+                return True
+            if not safe_write_hosts_file(new_content):
+                return False
+
             log("Домены MAX удалены из hosts файла", "✅ INFO")
             return True
-            
+
         except Exception as e:
             log(f"Ошибка изменения hosts файла: {e}", "❌ ERROR")
             return False
-    
+
     def enable_blocking(self) -> Tuple[bool, str]:
         """
         Включает полную блокировку MAX

@@ -463,6 +463,68 @@ class HostsFileManagerTests(unittest.TestCase):
                 os.chmod(hosts_path, stat.S_IREAD | stat.S_IWRITE)
                 hosts_module.invalidate_hosts_file_cache()
 
+    def test_managed_block_without_end_marker_keeps_user_lines_below(self) -> None:
+        from hosts import hosts as hosts_module
+
+        lines = [
+            "127.0.0.1 localhost\n",
+            "\n",
+            f"{hosts_module._MANAGED_HOSTS_BEGIN}\n",
+            f"{hosts_module._MANAGED_HOSTS_NOTICE}\n",
+            "1.1.1.1 managed.example\n",
+            "\n",
+            "10.0.0.1 my.lan\n",
+        ]
+
+        kept, removed = hosts_module._remove_managed_hosts_block(lines)
+
+        self.assertEqual(removed, 1)
+        self.assertIn("10.0.0.1 my.lan\n", kept)
+        self.assertIn("127.0.0.1 localhost\n", kept)
+        self.assertNotIn("1.1.1.1 managed.example\n", kept)
+        self.assertEqual(
+            hosts_module._iter_managed_hosts_block_rows(lines),
+            [("managed.example", "1.1.1.1")],
+        )
+
+    def test_cp1251_hosts_file_is_accessible(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from hosts import hosts as hosts_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            hosts_path = Path(tmp) / "hosts"
+            hosts_path.write_bytes("# мой комментарий\n127.0.0.1 localhost\n".encode("cp1251"))
+            with patch.object(hosts_module, "HOSTS_PATH", hosts_path):
+                hosts_module.invalidate_hosts_file_cache()
+                try:
+                    self.assertEqual(hosts_module.check_hosts_file_name(), (True, None))
+                    self.assertTrue(hosts_module.HostsManager().is_hosts_file_accessible())
+                finally:
+                    hosts_module.invalidate_hosts_file_cache()
+
+    def test_failed_write_restores_previous_hosts(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from hosts import hosts as hosts_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            hosts_path = Path(tmp) / "hosts"
+            hosts_path.write_text("10.0.0.1 manual.example\n", encoding="utf-8")
+            with patch.object(hosts_module, "HOSTS_PATH", hosts_path):
+                hosts_module.invalidate_hosts_file_cache()
+                try:
+                    with patch.object(hosts_module.os, "fsync", side_effect=OSError(28, "No space left")):
+                        self.assertFalse(hosts_module.safe_write_hosts_file("changed\n"))
+                    self.assertEqual(hosts_path.read_text(encoding="utf-8"), "10.0.0.1 manual.example\n")
+                    # Строка, которую нельзя закодировать, не трогает файл вовсе.
+                    self.assertFalse(hosts_module.safe_write_hosts_file("bad \udcff\n"))
+                    self.assertEqual(hosts_path.read_text(encoding="utf-8"), "10.0.0.1 manual.example\n")
+                finally:
+                    hosts_module.invalidate_hosts_file_cache()
+
     def test_ipv6_detection_uses_winapi_on_windows(self) -> None:
         from hosts import ipv6_detection
 

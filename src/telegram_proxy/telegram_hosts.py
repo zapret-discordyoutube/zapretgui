@@ -95,15 +95,37 @@ class TelegramHostsStatus:
         return self.present <= 0
 
 
-def _parse_entry(line: str) -> tuple[str, str] | None:
-    """Возвращает (ip, домен в нижнем регистре) для строки записи или None."""
-    stripped = line.strip()
-    if not stripped or stripped.startswith("#"):
+def _parse_entry(line: str) -> tuple[str, list[str]] | None:
+    """Возвращает (ip, домены в нижнем регистре) для строки записи или None.
+
+    В одной строке hosts может быть несколько имён («0.0.0.0 a.com b.com»)
+    и комментарий в конце — учитываются все имена до «#».
+    """
+    stripped = line.split("#", 1)[0].strip()
+    if not stripped:
         return None
     parts = stripped.split()
     if len(parts) < 2:
         return None
-    return parts[0], parts[1].lower()
+    return parts[0], [part.lower() for part in parts[1:]]
+
+
+def _line_without_domains(line: str, ip: str, domains: list[str], drop: set[str]) -> str | None:
+    """Строка hosts без имён из ``drop``. None — других имён в строке не осталось.
+
+    Если в строке есть имена не Telegram, они остаются на месте с прежним IP
+    и комментарием: чужие записи пользователя не теряются.
+    """
+    kept = [domain for domain in domains if domain not in drop]
+    if not kept:
+        return None
+    if len(kept) == len(domains):
+        return line
+    _body, sep, comment = line.partition("#")
+    newline = "\n" if line.endswith("\n") else ""
+    tail = f" #{comment.rstrip(chr(10)).rstrip(chr(13))}" if sep else ""
+    indent = line[: len(line) - len(line.lstrip())]
+    return f"{indent}{ip} {' '.join(kept)}{tail}{newline}"
 
 
 def telegram_hosts_status_from_text(content: str) -> TelegramHostsStatus:
@@ -121,8 +143,9 @@ def telegram_hosts_status_from_text(content: str) -> TelegramHostsStatus:
         entry = _parse_entry(line)
         if entry is None:
             continue
-        ip, domain = entry
-        first_ip.setdefault(domain, ip)
+        ip, domains = entry
+        for domain in domains:
+            first_ip.setdefault(domain, ip)
     present = sum(
         1 for domain in _TELEGRAM_DOMAINS_LOWER if first_ip.get(domain) == TELEGRAM_RELAY_IP
     )
@@ -141,16 +164,21 @@ def _trim_trailing_blank_lines(lines: list[str]) -> None:
 def add_telegram_hosts_to_text(content: str) -> str:
     """Убирает старые строки доменов Telegram и дописывает блок в конец.
 
-    Строки доменов Telegram на любой IP заменяются блоком, иначе Windows
-    может взять старую запись. Повторный вызов даёт тот же текст.
+    Имена Telegram на любой IP убираются из своих строк (остальные имена этих
+    строк остаются), иначе Windows может взять старую запись. Повторный вызов
+    даёт тот же текст.
     """
     new_lines: list[str] = []
     for line in str(content or "").splitlines(keepends=True):
         if line.strip() == TELEGRAM_HOSTS_MARKER:
             continue
         entry = _parse_entry(line)
-        if entry is not None and entry[1] in _TELEGRAM_DOMAINS_LOWER:
-            continue
+        if entry is not None:
+            ip, domains = entry
+            rest = _line_without_domains(line, ip, domains, _TELEGRAM_DOMAINS_LOWER)
+            if rest is None:
+                continue
+            line = rest
         new_lines.append(line)
 
     _trim_trailing_blank_lines(new_lines)
@@ -165,10 +193,11 @@ def add_telegram_hosts_to_text(content: str) -> str:
 
 
 def remove_telegram_hosts_from_text(content: str) -> str:
-    """Убирает строку-маркер и строки «relay IP → домен Telegram».
+    """Убирает строку-маркер и имена Telegram из строк с relay IP.
 
-    Остальные строки, в том числе домены Telegram на другом IP, остаются.
-    Если убирать нечего, возвращается исходный текст без изменений.
+    Остальные строки, в том числе домены Telegram на другом IP и чужие имена в
+    одной строке с relay IP, остаются. Если убирать нечего, возвращается
+    исходный текст без изменений.
     """
     text = str(content or "")
     new_lines: list[str] = []
@@ -178,13 +207,14 @@ def remove_telegram_hosts_from_text(content: str) -> str:
             removed = True
             continue
         entry = _parse_entry(line)
-        if (
-            entry is not None
-            and entry[0] == TELEGRAM_RELAY_IP
-            and entry[1] in _TELEGRAM_DOMAINS_LOWER
-        ):
-            removed = True
-            continue
+        if entry is not None and entry[0] == TELEGRAM_RELAY_IP:
+            ip, domains = entry
+            rest = _line_without_domains(line, ip, domains, _TELEGRAM_DOMAINS_LOWER)
+            if rest != line:
+                removed = True
+            if rest is None:
+                continue
+            line = rest
         new_lines.append(line)
 
     if not removed:

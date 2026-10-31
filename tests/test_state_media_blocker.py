@@ -41,6 +41,28 @@ class StateMediaBlockerTests(unittest.TestCase):
         self.assertNotIn("tass.ru", restored)
         self.assertNotIn("zapretgui:russian-state-media-block", restored)
 
+    def test_block_without_end_marker_keeps_user_lines_after_blank_line(self) -> None:
+        blocked = build_hosts_content_with_state_media_block("127.0.0.1 localhost\n", enabled=True)
+        damaged = "\n".join(
+            line for line in blocked.splitlines() if "russian-state-media-block end" not in line
+        ) + "\n\n10.0.0.1 my.lan\n"
+
+        restored = build_hosts_content_with_state_media_block(damaged, enabled=False)
+
+        self.assertIn("10.0.0.1 my.lan", restored)
+        self.assertNotIn("tass.ru", restored)
+
+    def test_max_block_without_end_marker_keeps_user_lines(self) -> None:
+        from windows_features.max_blocker import _remove_max_hosts_block
+
+        content = "127.0.0.1 localhost\n\n# MAX BLOCKED BY ZAPRET GUI\n127.0.0.1 max.ru\n\n10.0.0.1 my.lan\n"
+
+        cleaned = _remove_max_hosts_block(content)
+
+        self.assertNotIn("max.ru", cleaned)
+        self.assertIn("10.0.0.1 my.lan\n", cleaned)
+        self.assertIn("127.0.0.1 localhost\n", cleaned)
+
     def test_manager_writes_hosts_and_persists_memory(self) -> None:
         written: list[str] = []
         manager = RussianStateMediaBlockerManager(

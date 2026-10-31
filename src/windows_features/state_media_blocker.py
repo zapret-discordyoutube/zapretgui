@@ -57,6 +57,10 @@ def _remove_block(lines: list[str]) -> tuple[list[str], bool]:
             inside_block = False
             removed = True
             continue
+        if inside_block and not line.strip():
+            # Конечную метку стёрли руками: блок пишется без пустых строк, значит
+            # он кончился здесь. Дальше — строки пользователя, их не трогаем.
+            inside_block = False
         if not inside_block:
             new_lines.append(line)
     return new_lines, removed

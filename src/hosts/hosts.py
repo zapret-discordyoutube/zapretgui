@@ -49,25 +49,55 @@ def _parse_hosts_mapping_line(line: str) -> tuple[str, list[str], str] | None:
     return ip, domains, comment
 
 
+def _managed_hosts_block_ranges(lines: list[str]) -> list[tuple[int, int]]:
+    """Где в hosts лежат блоки ZapretGUI: пары (начало, конец не включая).
+
+    Блок закрывается своей конечной меткой. Если метку стёрли руками, блок
+    кончается на первой пустой строке: программа пишет блок без пустых строк
+    внутри. Иначе всё до конца файла, включая строки пользователя, считалось
+    бы блоком и удалялось бы при следующей записи.
+    """
+    ranges: list[tuple[int, int]] = []
+    index = 0
+    total = len(lines)
+    while index < total:
+        if lines[index].strip() != _MANAGED_HOSTS_BEGIN:
+            index += 1
+            continue
+        start = index
+        end = total
+        blank_at: int | None = None
+        for probe in range(start + 1, total):
+            stripped = lines[probe].strip()
+            if stripped == _MANAGED_HOSTS_END:
+                end = probe + 1
+                break
+            if stripped == _MANAGED_HOSTS_BEGIN:
+                end = blank_at if blank_at is not None else probe
+                break
+            if not stripped and blank_at is None:
+                blank_at = probe
+        else:
+            if blank_at is not None:
+                end = blank_at
+        ranges.append((start, end))
+        index = end
+    return ranges
+
+
 def _remove_managed_hosts_block(lines: list[str]) -> tuple[list[str], int]:
     """Удаляет блок ZapretGUI из hosts и возвращает строки без него."""
     new_lines: list[str] = []
     removed_entries = 0
-    inside_block = False
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped == _MANAGED_HOSTS_BEGIN:
-            inside_block = True
-            continue
-        if inside_block:
+    position = 0
+    for start, end in _managed_hosts_block_ranges(lines):
+        new_lines.extend(lines[position:start])
+        for line in lines[start:end]:
+            stripped = line.strip()
             if stripped and not stripped.startswith("#"):
                 removed_entries += 1
-            if stripped == _MANAGED_HOSTS_END:
-                inside_block = False
-            continue
-        new_lines.append(line)
-
+        position = end
+    new_lines.extend(lines[position:])
     return new_lines, removed_entries
 
 
@@ -148,20 +178,14 @@ def _format_hosts_entries_count(count: int) -> str:
 def _iter_managed_hosts_block_rows(lines: list[str]) -> list[tuple[str, str]]:
     """Возвращает строки (domain, ip), которые лежат внутри блока ZapretGUI."""
     rows: list[tuple[str, str]] = []
-    inside_block = False
-
-    for line in lines:
+    ranges = _managed_hosts_block_ranges(lines)
+    if not ranges:
+        return rows
+    start, end = ranges[0]
+    for line in lines[start + 1:end]:
         stripped = line.strip()
-        if stripped == _MANAGED_HOSTS_BEGIN:
-            inside_block = True
-            continue
-        if not inside_block:
-            continue
-        if stripped == _MANAGED_HOSTS_END:
-            break
         if not stripped or stripped.startswith("#"):
             continue
-
         parsed = _parse_hosts_mapping_line(stripped)
         if parsed is None:
             continue
@@ -354,14 +378,9 @@ def check_hosts_file_name():
     # Сначала проверяем правильный файл hosts
     hosts_lower = hosts_dir / "hosts"
     if hosts_lower.exists():
-        # Дополнительно проверяем кодировку файла
-        try:
-            hosts_lower.read_text(encoding="utf-8-sig")
-            return True, None
-        except UnicodeDecodeError:
-            # Файл существует, но с проблемами кодировки
-            log("Файл hosts существует, но содержит некорректные символы", level="⚠ WARNING")
-            return False, "Файл hosts содержит некорректные символы и не может быть прочитан в UTF-8"
+        # Кодировку здесь не проверяем: safe_read_hosts_file читает и UTF-8, и
+        # cp1251/cp866 (комментарий по-русски в «ANSI»), а запись идёт в UTF-8.
+        return True, None
     
     # Если правильного файла нет, проверяем есть ли неправильный HOSTS
     hosts_upper = hosts_dir / "HOSTS"
@@ -448,7 +467,30 @@ def safe_write_hosts_file(content):
             log("Файл hosts защищён от записи (только чтение). Используйте кнопку «Восстановить права доступа».", "WARNING")
             return False
 
-        HOSTS_PATH.write_text(content, encoding="utf-8-sig", newline='\n')
+        # Текст кодируется целиком ДО открытия файла: ошибка кодировки не должна
+        # оставить hosts обрезанным. Сам файл пишется на месте, а не подменой:
+        # у системного hosts свои права доступа, подмена их бы потеряла.
+        data = str(content or "").replace("\r\n", "\n").encode("utf-8-sig")
+        previous: bytes | None = None
+        if HOSTS_PATH.exists():
+            previous = HOSTS_PATH.read_bytes()
+        try:
+            with open(HOSTS_PATH, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except PermissionError:
+            raise
+        except Exception:
+            # Запись оборвалась после обрезки файла (например, нет места):
+            # возвращаем прежнее содержимое, чтобы не оставить hosts пустым.
+            if previous is not None:
+                try:
+                    with open(HOSTS_PATH, "wb") as handle:
+                        handle.write(previous)
+                except Exception as restore_error:
+                    log(f"Не удалось вернуть прежний hosts: {restore_error}", "❌ ERROR")
+            raise
         _set_hosts_cache(content, _get_hosts_sig(HOSTS_PATH))
         return True
     except PermissionError:
