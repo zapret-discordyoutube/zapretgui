@@ -109,7 +109,9 @@ def _split_preamble_and_profile_indices(
     saw_profile = False
 
     def _push_profile(new_line: int | None, indexes: list[int]) -> None:
-        if indexes:
+        # Профиль из одной строки «--new» (за ней сразу следующий «--new») тоже
+        # профиль: иначе строка пропала бы из текста при сохранении.
+        if indexes or new_line is not None:
             profiles.append((new_line, list(indexes)))
 
     for index, raw in enumerate(body_lines):
@@ -134,9 +136,11 @@ def _split_preamble_and_profile_indices(
             current_new_line = None
         current.append(index)
 
-    if current:
+    if current or current_new_line is not None:
         if saw_profile:
             if current_new_line is not None and not _has_profile_content([body_lines[i] for i in current]):
+                # Пустой «--new» в конце — часть хвоста файла: сохраняется как есть.
+                footer.append(current_new_line)
                 footer.extend(current)
             else:
                 _push_profile(current_new_line, current)

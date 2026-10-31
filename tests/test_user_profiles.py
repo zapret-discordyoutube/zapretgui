@@ -851,6 +851,68 @@ class UserProfilesTests(unittest.TestCase):
             self.assertIn("--filter-udp=443", store.files_by_method[ZAPRET1_MODE]["three.txt"])
             self.assertIn("--ipset=lists/ipset-new-site.txt", store.files_by_method[ZAPRET1_MODE]["three.txt"])
 
+    def test_update_user_profile_rolls_back_hostlist_rename_when_ipset_rename_fails(self) -> None:
+        from profile.user_profiles import service as user_profiles_service
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            paths = AppPaths(user_root=root, local_root=root)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                profile_id = create_user_profile(paths, name="My Site", protocol="tcp", ports="443")
+                user_dir = root / "lists" / "user"
+                (user_dir / "my-site.txt").write_text("site.example\n", encoding="utf-8")
+                real_rename = user_profiles_service.rename_profile_user_list_file
+
+                def _rename(lists_root, old_name, new_name):
+                    if new_name.startswith("ipset-"):
+                        raise PermissionError("locked")
+                    return real_rename(lists_root, old_name, new_name)
+
+                with patch.object(user_profiles_service, "rename_profile_user_list_file", side_effect=_rename):
+                    with self.assertRaises(PermissionError):
+                        user_profiles_service.update_user_profile(
+                            paths, profile_id, name="Renamed", protocol="tcp", ports="443"
+                        )
+
+                self.assertEqual((user_dir / "my-site.txt").read_text(encoding="utf-8"), "site.example\n")
+                self.assertFalse((user_dir / "renamed.txt").exists())
+                row = read_settings()["user_profiles"]["profiles"][profile_id]
+                self.assertEqual(row["hostlist"], "lists/my-site.txt")
+
+    def test_rename_does_not_take_name_of_leftover_list_file(self) -> None:
+        from profile.user_profiles import service as user_profiles_service
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            paths = AppPaths(user_root=root, local_root=root)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                profile_id = create_user_profile(paths, name="My Site", protocol="tcp", ports="443")
+                user_dir = root / "lists" / "user"
+                # Остаток профиля «Renamed», удалённого, пока его файл был занят.
+                (user_dir / "ipset-renamed.txt").write_text("9.9.9.9\n", encoding="utf-8")
+
+                _old, new = user_profiles_service.update_user_profile(
+                    paths, profile_id, name="Renamed", protocol="tcp", ports="443"
+                )
+
+                self.assertEqual(new["hostlist"], "lists/renamed-2.txt")
+                self.assertEqual((user_dir / "ipset-renamed.txt").read_text(encoding="utf-8"), "9.9.9.9\n")
+
+    def test_delete_user_profile_keeps_settings_change_when_file_is_locked(self) -> None:
+        from profile.user_profiles import service as user_profiles_service
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            paths = AppPaths(user_root=root, local_root=root)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                profile_id = create_user_profile(paths, name="My Site", protocol="tcp", ports="443")
+                with patch.object(
+                    user_profiles_service, "delete_profile_user_list_file", side_effect=PermissionError("locked")
+                ):
+                    user_profiles_service.delete_user_profile(paths, profile_id)
+
+                self.assertNotIn(profile_id, read_settings()["user_profiles"]["profiles"])
+
     def test_update_user_profile_keeps_profile_identity_folder_and_ratings(self) -> None:
         from profile.models import build_profile_logical_key
         from settings.store import get_profile_identity_registry, set_profile_identity_registry

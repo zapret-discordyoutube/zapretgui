@@ -321,6 +321,29 @@ class AutoSplitTests(unittest.TestCase):
         self.assertEqual(store.text, text.replace("--name=YouTube\n", "--name=YouTube\n--skip\n"))
 
 
+class UnconfirmedWriteTests(unittest.TestCase):
+    def test_enable_toggle_raises_when_file_does_not_match_after_write(self) -> None:
+        text = "--name=YouTube\n--filter-tcp=443\n--hostlist=lists/youtube.txt\n--lua-desync=pass\n"
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = _PresetStore(text)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service = _service(root, store)
+                key = service.list_profiles().items[0].key
+                with patch.object(service, "_commit_preset", return_value="profile_still_enabled"):
+                    with self.assertRaisesRegex(RuntimeError, "Пресет не сохранён"):
+                        service.set_profile_enabled(key, False)
+
+
+class PayloadFilterValidationTests(unittest.TestCase):
+    def test_every_payload_name_is_checked(self) -> None:
+        from profile.winws2_transport import validate_winws2_payload_filter
+
+        self.assertTrue(validate_winws2_payload_filter("all"))
+        self.assertFalse(validate_winws2_payload_filter("all,bogus"))
+        self.assertFalse(validate_winws2_payload_filter("bogus,all"))
+
+
 class WssizeToggleTests(unittest.TestCase):
     def _profile_services(self, text: str):
         store = _PresetStore(text)
@@ -474,6 +497,26 @@ class TemplateAppendPositionTests(unittest.TestCase):
                 self.assertIn("# хвост пресета", text)
 
 
+class LoneNewLineTests(unittest.TestCase):
+    """Строка «--new» без содержимого — тоже текст пресета: сохранение её не теряет."""
+
+    def test_trailing_new_line_survives_save(self) -> None:
+        for text in (
+            "--name=A\n--filter-tcp=443\n--lua-desync=pass\n\n--new\n# tail\n",
+            "--filter-tcp=443\n--lua-desync=pass\n--new\n",
+        ):
+            with self.subTest(text=text):
+                saved = serialize_preset(parse_preset_text(text, engine="winws2"))
+                self.assertEqual(saved.count("--new"), 1)
+                self.assertIn("--lua-desync=pass", saved)
+
+    def test_adjacent_new_lines_survive_save(self) -> None:
+        text = "--filter-tcp=443\n--lua-desync=pass\n--new\n--new\n--filter-tcp=80\n--lua-desync=pass\n"
+        saved = serialize_preset(parse_preset_text(text, engine="winws2"))
+        self.assertEqual(saved.count("--new"), 2)
+        self.assertIn("--filter-tcp=80", saved)
+
+
 class BlockcheckApplyTests(unittest.TestCase):
     def _apply(self, store: _PresetStore, **kwargs):
         from app.feature_facades.profile import ProfileFeature
@@ -543,7 +586,7 @@ class BlockcheckApplyTests(unittest.TestCase):
                 "--wf-tcp-out=80,443",
                 "--name=YouTube",
                 "--filter-tcp=80,443",
-                "--hostlist-domains=www.youtube.com",
+                "--hostlist-domains=rutracker.org",
                 "--out-range=-d8",
                 "--payload=tls_client_hello",
                 "--lua-desync=multisplit:pos=1",
@@ -554,7 +597,8 @@ class BlockcheckApplyTests(unittest.TestCase):
         )
         store = _PresetStore(text)
 
-        result = self._apply(store)
+        # Сайт без спутников: у YouTube свой profile — это youtube + googlevideo + ytimg.
+        result = self._apply(store, scan_target="rutracker.org")
 
         self.assertEqual(result.operation, "updated")
         self.assertEqual(
@@ -564,7 +608,7 @@ class BlockcheckApplyTests(unittest.TestCase):
                     "--wf-tcp-out=80,443",
                     "--name=YouTube",
                     "--filter-tcp=80,443",
-                    "--hostlist-domains=www.youtube.com",
+                    "--hostlist-domains=rutracker.org",
                     "--out-range=-d8",
                     "--payload=tls_client_hello,http_req",
                     "--lua-desync=fake:blob=tls_google",
@@ -579,7 +623,7 @@ class BlockcheckApplyTests(unittest.TestCase):
                 "--wf-tcp-out=80,443",
                 "--name=YouTube",
                 "--filter-tcp=80,443",
-                "--hostlist-domains=www.youtube.com",
+                "--hostlist-domains=rutracker.org",
                 "--out-range=-d8",
                 "--payload=http_req",
                 "--lua-desync=multisplit:pos=1",
@@ -588,7 +632,8 @@ class BlockcheckApplyTests(unittest.TestCase):
         )
         store = _PresetStore(text)
 
-        result = self._apply(store)
+        # Сайт без спутников: у YouTube свой profile — это youtube + googlevideo + ytimg.
+        result = self._apply(store, scan_target="rutracker.org")
 
         self.assertEqual(result.operation, "updated")
         self.assertEqual(

@@ -93,7 +93,12 @@ def update_user_profile(
             raise ValueError("Пользовательский profile не найден")
         _validate_unique_profile_name(profiles, system_names, clean_name, exclude_profile_id=clean_profile_id)
         old_row = _row_fields(row)
-        new_stem = _unique_file_stem(profiles, _slugify(clean_name), exclude_profile_id=clean_profile_id)
+        new_stem = _unique_file_stem(
+            profiles,
+            _slugify(clean_name),
+            exclude_profile_id=clean_profile_id,
+            paths=paths,
+        )
         updated_row = {
             "name": clean_name,
             "protocol": clean_protocol,
@@ -102,7 +107,13 @@ def update_user_profile(
             "ipset": f"lists/ipset-{new_stem}.txt",
         }
         _rename_user_list_file(paths, old_row["hostlist"], updated_row["hostlist"])
-        _rename_user_list_file(paths, old_row["ipset"], updated_row["ipset"])
+        try:
+            _rename_user_list_file(paths, old_row["ipset"], updated_row["ipset"])
+        except Exception:
+            # Настройки откатятся вместе с исключением — файл hostlist должен
+            # вернуться к старому имени, иначе profile укажет на пустоту.
+            _rename_user_list_file(paths, updated_row["hostlist"], old_row["hostlist"])
+            raise
         profiles[clean_profile_id] = updated_row
         section["version"] = 1
         section["profiles"] = profiles
@@ -131,9 +142,23 @@ def delete_user_profile(paths: AppPaths, profile_id: str) -> dict[str, str]:
 
     update_user_profiles_settings(_mutate)
     row = removed["row"]
-    _delete_user_list_file(paths, row["hostlist"])
-    _delete_user_list_file(paths, row["ipset"])
+    # Profile уже удалён из настроек. Файл, занятый другой программой, остаётся
+    # на месте: его имя не займёт новый profile (см. _unique_file_stem).
+    for value in (row["hostlist"], row["ipset"]):
+        try:
+            _delete_user_list_file(paths, value)
+        except OSError as exc:
+            _log_skipped_list_file_delete(value, exc)
     return row
+
+
+def _log_skipped_list_file_delete(value: str, exc: Exception) -> None:
+    try:
+        from log.log import log
+
+        log(f"Файл списка {value} не удалён: {exc}", "WARNING")
+    except Exception:
+        pass
 
 
 def _log_skipped_user_profile(profile_id: object, exc: Exception) -> None:
@@ -295,25 +320,54 @@ def _unique_profile_id(profiles: dict, base: str) -> str:
     return candidate
 
 
-def _unique_file_stem(profiles: dict, base: str, *, exclude_profile_id: str = "") -> str:
+def _row_file_stems(row: dict) -> set[str]:
+    stems: set[str] = set()
+    for field in ("hostlist", "ipset"):
+        value = str(row.get(field) or "").replace("\\", "/").strip()
+        if not value:
+            continue
+        name = Path(value).name
+        stem = name[:-4] if name.lower().endswith(".txt") else Path(name).stem
+        if stem.startswith("ipset-"):
+            stem = stem[6:]
+        if stem:
+            stems.add(stem.casefold())
+    return stems
+
+
+def _unique_file_stem(
+    profiles: dict,
+    base: str,
+    *,
+    exclude_profile_id: str = "",
+    paths: AppPaths | None = None,
+) -> str:
     used: set[str] = set()
+    own: set[str] = set()
     excluded = str(exclude_profile_id or "").strip()
     for profile_id, row in profiles.items():
-        if str(profile_id or "").strip() == excluded or not isinstance(row, dict):
+        if not isinstance(row, dict):
             continue
-        for field in ("hostlist", "ipset"):
-            value = str(row.get(field) or "").replace("\\", "/").strip()
-            if not value:
-                continue
-            name = Path(value).name
-            stem = name[:-4] if name.lower().endswith(".txt") else Path(name).stem
-            if stem.startswith("ipset-"):
-                stem = stem[6:]
-            if stem:
-                used.add(stem.casefold())
+        if str(profile_id or "").strip() == excluded:
+            own |= _row_file_stems(row)
+            continue
+        used |= _row_file_stems(row)
+
+    user_dir = Path(paths.user_root) / "lists" / "user" if paths is not None else None
+
+    def _taken(candidate: str) -> bool:
+        if candidate.casefold() in used:
+            return True
+        if user_dir is None or candidate.casefold() in own:
+            return False
+        # Файл списка мог остаться от профиля, который удалили, пока файл был
+        # занят (антивирус, редактор): занимать это имя нельзя — перенос в него
+        # упал бы на полпути.
+        return (user_dir / f"{candidate}.txt").exists() or (user_dir / f"ipset-{candidate}.txt").exists()
+
     candidate = base
     counter = 2
-    while candidate.casefold() in used:
+    while _taken(candidate):
         candidate = f"{base}-{counter}"
         counter += 1
     return candidate

@@ -120,9 +120,10 @@ class ProfileServiceWriteVerificationTests(unittest.TestCase):
 
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 service = self._service(store, root)
-                result = service.set_profile_enabled("profile:0", True)
-
-        self.assertIsNone(result)
+                # Неподтверждённая запись — ошибка: окно не должно показать
+                # «включено», которого на диске нет.
+                with self.assertRaisesRegex(RuntimeError, "Пресет не сохранён"):
+                    service.set_profile_enabled("profile:0", True)
 
     def test_update_profile_raw_text_reports_failure_when_write_is_silently_dropped(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -131,19 +132,18 @@ class ProfileServiceWriteVerificationTests(unittest.TestCase):
 
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 service = self._service(store, root)
-                result = service.update_profile_raw_text(
-                    "profile:0",
-                    "\n".join(
-                        (
-                            "--name=SpeedTest",
-                            "--filter-tcp=443",
-                            "--hostlist=lists/speedtest.txt",
-                            "--lua-desync=split",
-                        )
-                    ),
-                )
-
-        self.assertIsNone(result)
+                with self.assertRaisesRegex(RuntimeError, "Пресет не сохранён"):
+                    service.update_profile_raw_text(
+                        "profile:0",
+                        "\n".join(
+                            (
+                                "--name=SpeedTest",
+                                "--filter-tcp=443",
+                                "--hostlist=lists/speedtest.txt",
+                                "--lua-desync=split",
+                            )
+                        ),
+                    )
 
     def test_save_selected_preset_writes_when_file_diverged_from_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:

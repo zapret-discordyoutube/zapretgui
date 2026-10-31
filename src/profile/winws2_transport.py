@@ -89,12 +89,11 @@ def validate_winws2_payload_filter(value: object) -> bool:
     raw = str(value or "").strip().lower()
     if not raw:
         return False
+    # Проверяются все имена списка: «all,опечатка» — такая же ошибка, как «опечатка».
     for item in raw.split(","):
         name = item.strip()
         if not name or name not in _VALID_PAYLOAD_NAMES:
             return False
-        if name == "all":
-            return True
     return True
 
 
