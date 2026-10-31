@@ -55,6 +55,7 @@ from qfluentwidgets import (
     CheckBox,
     ComboBox,
     CaptionLabel,
+    FlowLayout,
     BodyLabel,
     IndeterminateProgressBar,
     PrimaryPushButton,
@@ -406,10 +407,19 @@ class BlockcheckPage(BasePage):
         self._add_tab_widget(self._summary_panel)
         # Имя осталось от отдельной карточки управления: теперь управление стоит в панели итога.
         self._control_card = self._summary_panel
+        # Первая строка — только кнопки и полоса хода. Выбор набора с галочкой — своей
+        # строкой под ними и переносится в узком окне, строка состояния — отдельно: в одну
+        # строку всё не помещалось уже при окне 1280 px, галочка сжималась до пустого
+        # квадрата, а текст состояния наезжал на неё.
         row = self._summary_panel.actions
+        self._scope_host = QWidget()
+        scope_flow = FlowLayout(self._scope_host, needAni=False)
+        scope_flow.setContentsMargins(0, 0, 0, 0)
+        scope_flow.setHorizontalSpacing(10)
+        scope_flow.setVerticalSpacing(6)
         self._scope_label = BodyLabel(tr_catalog("page.blockcheck.scope", default="Что проверить:"))
         set_state_text(self._scope_label, f"Поле BlockCheck: {self._scope_label.text()}")
-        row.addWidget(self._scope_label)
+        scope_flow.addWidget(self._scope_label)
         self._scope_combo = ComboBox()
         # userData — именованным: второй позиционный аргумент у qfluentwidgets —
         # значок, и значение терялось (старый выбор режима всегда давал «Полную»).
@@ -429,7 +439,7 @@ class BlockcheckPage(BasePage):
         self._scope_combo.setMinimumWidth(320)
         self._update_scope_combo_accessibility()
         self._scope_combo.currentIndexChanged.connect(self._update_scope_combo_accessibility)
-        row.addWidget(self._scope_combo)
+        scope_flow.addWidget(self._scope_combo)
         # Сервер проекта открывает закрытый сайт из Нидерландов: так видно, заблокирован он
         # или не работает сам. Само соединение с сервером выдаёт программу провайдеру,
         # поэтому без галочки запрос туда не уходит (utils.probe_gate, решение 2026-10-16).
@@ -445,14 +455,21 @@ class BlockcheckPage(BasePage):
         )
         set_tooltip(self._outside_box, outside_description)
         set_control_accessibility(self._outside_box, name="Сверить с сервером в Нидерландах", description=outside_description)
-        row.addWidget(self._outside_box)
-        row.addSpacing(8)
+        scope_flow.addWidget(self._outside_box)
+        # FlowLayout ставит элементы строки по верхнему краю: подпись и галочку
+        # выравниваем по высоте выпадающего списка.
+        control_height = self._scope_combo.sizeHint().height()
+        self._scope_label.setFixedHeight(control_height)
+        self._scope_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self._outside_box.setMinimumHeight(control_height)
+        self._summary_panel.controls.addWidget(self._scope_host)
 
         self._status_label = CaptionLabel(
             tr_catalog("page.blockcheck.ready", default="Сайты, хостинги и звонки — так, как их открыл бы браузер")
         )
         self._set_status_text(self._status_label.text())
-        row.addWidget(self._status_label, 1)
+        self._status_label.setWordWrap(True)
+        self._summary_panel.controls.addWidget(self._status_label)
 
         # start=False: иначе анимация крутится и у скрытой полосы, пока жива страница.
         self._progress_bar = IndeterminateProgressBar(start=False)
@@ -464,6 +481,7 @@ class BlockcheckPage(BasePage):
             description="Показывает, что проверка BlockCheck выполняется.",
         )
         set_state_text(self._progress_bar, "Ход BlockCheck: не выполняется")
+        row.addStretch(1)
         row.addWidget(self._progress_bar)
 
         self._start_btn = PrimaryPushButton(tr_catalog("page.blockcheck.start", default="Проверить"))

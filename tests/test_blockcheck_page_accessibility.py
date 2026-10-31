@@ -201,10 +201,22 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(
             [actions.itemAt(index).widget() for index in range(3)], [page._start_btn, page._paired_btn, page._stop_btn]
         )
-        self.assertIs(page._scope_combo.parentWidget(), page._summary_panel.hero)
+        # В строке кнопок — только кнопки и полоса хода. Выбор набора с галочкой и строка
+        # состояния стоят ниже своими строками: в одну строку всё не помещалось при окне
+        # 1280 px — галочка сжималась до пустого квадрата, а текст состояния наезжал на неё.
+        row_widgets = {actions.itemAt(index).widget() for index in range(actions.count())} - {None}
+        self.assertEqual(row_widgets, {page._start_btn, page._paired_btn, page._stop_btn, page._progress_bar})
+        self.assertIs(page._scope_combo.parentWidget(), page._scope_host)
+        self.assertIs(page._outside_box.parentWidget(), page._scope_host)
+        self.assertIs(page._scope_host.parentWidget(), page._summary_panel.hero)
+        self.assertTrue(page._status_label.wordWrap())
         # «Свои домены» — тоже управление проверкой: стоят в шапке, под кнопками, а не под результатами.
         self.assertIs(page._domains_card.parentWidget(), page._summary_panel.hero)
-        self.assertIs(page._summary_panel.controls.itemAt(0).widget(), page._domains_card)
+        controls = page._summary_panel.controls
+        self.assertEqual(
+            [controls.itemAt(index).widget() for index in range(controls.count())],
+            [page._scope_host, page._status_label, page._domains_card],
+        )
         # Подложка — только у шапки и у самих карточек: разделы с карточками её не рисуют.
         from qfluentwidgets import CardWidget
 
