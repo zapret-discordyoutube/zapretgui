@@ -12,7 +12,7 @@ PRESET_INFO_URL = "https://wiki.zapret.moe/Zapret2/preset"  # URL о пресе�
 PROFILE_INFO_URL = "https://wiki.zapret.moe/Zapret2/profile"  # URL о профилях
 FILTER_INFO_URL = "https://wiki.zapret.moe/Zapret2/filter"  # URL об условиях профиля (фильтрах)
 WINWS_LOG_ANALYZER_INFO_URL = "https://wiki.zapret.moe/Zapret2/log-analyzer"  # URL об анализаторе логов winws2
-BLOCKCHECK_INFO_URL = "https://wiki.zapret.moe/Zapret2/find-game-strategy"  # URL о подборе стратегии (страница BlockCheck)
+BLOCKCHECK_INFO_URL = "https://wiki.zapret.moe/Zapret/Blockcheck"  # Пошаговая статья о BlockCheck и его вкладках (кнопка «Как это работает?» на странице)
 ANDROID_URL = "https://wiki.zapret.moe/Zapret/android"  # URL инструкции для Android
 PREMIUM_GUIDE_URL = "https://wiki.zapret.moe/Zapret/premium"  # Гайд по Zapret Premium: как привязать компьютер к подписке бота
 GIT_SITE_URL = "https://git.zapret.moe/"  # Git-сайт проекта: исходный код и выпуски программ
@@ -59,7 +59,20 @@ ONBOARDING_WIKI_URLS = {
     "fakes": "https://wiki.zapret.moe/Zapret2/blob",
     "fakes_blob": "https://wiki.zapret.moe/Zapret2/blob",
     "hosts_summary": "https://wiki.zapret.moe/Zapret/hosts",
-    "strategy_scan": BLOCKCHECK_INFO_URL,
+    "blockcheck_start": f"{BLOCKCHECK_INFO_URL}#шаг-1-запустите-проверку",
+    "blockcheck_domains": f"{BLOCKCHECK_INFO_URL}#шаг-1-запустите-проверку",
+    "blockcheck_summary": f"{BLOCKCHECK_INFO_URL}#шаг-3-прочитайте-итог",
+    "blockcheck_cards": f"{BLOCKCHECK_INFO_URL}#шаг-4-посмотрите-карточки-сайтов",
+    "blockcheck_checks": f"{BLOCKCHECK_INFO_URL}#шаг-4-посмотрите-карточки-сайтов",
+    "blockcheck_card_detail": f"{BLOCKCHECK_INFO_URL}#шаг-5-откройте-подробности-карточки",
+    "blockcheck_history": f"{BLOCKCHECK_INFO_URL}#шаг-6-сравните-до-и-после",
+    "blockcheck_past_check": f"{BLOCKCHECK_INFO_URL}#шаг-6-сравните-до-и-после",
+    "blockcheck_report": f"{BLOCKCHECK_INFO_URL}#шаг-6-сравните-до-и-после",
+    "strategy_scan": f"{BLOCKCHECK_INFO_URL}#вкладка-подбор-стратегии",
+    "strategy_scan_result": f"{BLOCKCHECK_INFO_URL}#вкладка-подбор-стратегии",
+    "domain_lookup": f"{BLOCKCHECK_INFO_URL}#вкладка-проверка-домена",
+    "dns_servers_check": f"{BLOCKCHECK_INFO_URL}#вкладка-dns-серверы",
+    "dns_spoofing_check": f"{BLOCKCHECK_INFO_URL}#вкладка-dns-подмена",
     "log_analyzer_source": WINWS_LOG_ANALYZER_INFO_URL,
     "dpi_mode": "https://wiki.zapret.moe/Zapret2/Zapret2#чем-zapret-2-отличается-от-обычного-zapret-winws-nfqws",
     "geo_blocks": "https://wiki.zapret.moe/Zapret/hosts",

@@ -111,7 +111,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertIs(page.title_label.parentWidget(), page._title_header)
         self.assertEqual(
             page._help_button.getUrl(),
-            QUrl("https://wiki.zapret.moe/Zapret2/find-game-strategy"),
+            QUrl("https://wiki.zapret.moe/Zapret/Blockcheck"),
         )
         self.assertEqual(page._help_button.accessibleName(), "Как это б#&^ь работает?")
         self.assertIn("инструкцию", page._help_button.accessibleDescription())
