@@ -313,6 +313,15 @@ class ReleaseWatcherTests(unittest.TestCase):
         self.assertEqual(harness.released, [])
         self.assertNotIn(watch.QUICK_ANSWER_PAUSE_SECONDS, harness.pauses)
 
+    def test_two_days_without_any_server_do_not_kill_the_listener(self) -> None:
+        # ~1025 неудачных кругов: 2 ** n в float переполнялось, поток умирал.
+        failures = [OSError("нет сети")] * 2 * 1100
+        harness = _Harness(self, failures + [_news("21.1.7.119")])
+        harness.run()
+
+        self.assertEqual(harness.released, ["21.1.7.119"])
+        self.assertLessEqual(max(harness.pauses), watch.MAX_ROUND_PAUSE_SECONDS)
+
     def test_older_or_same_version_is_not_news(self) -> None:
         # Отставшее зеркало: «можно» с версией не новее известной.
         harness = _Harness(self, [_quiet(), _news("21.1.7.118"), _news("21.1.7.90")])

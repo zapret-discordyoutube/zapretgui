@@ -250,7 +250,10 @@ class ReleaseWatcher:
                     else:
                         self._set_reachable(False)
                         rounds = failed_in_a_row // len(endpoints)
-                        pause = min(FIRST_ROUND_PAUSE_SECONDS * 2 ** (rounds - 1), MAX_ROUND_PAUSE_SECONDS)
+                        # Степень ограничена: после ~1000 неудачных кругов (двое суток
+                        # без сети) 2 ** n в float переполнялось и роняло поток.
+                        doubling = min(max(rounds - 1, 0), 30)
+                        pause = min(FIRST_ROUND_PAUSE_SECONDS * 2 ** doubling, MAX_ROUND_PAUSE_SECONDS)
                         if rounds == 1:
                             log(
                                 "Очередь обновлений на сервере сейчас недоступна "

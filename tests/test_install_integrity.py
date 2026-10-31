@@ -165,6 +165,52 @@ class VerifyInstallationTests(unittest.TestCase):
             self.assertIs(deep_report.cause, IntegrityCause.CORRUPTED)
             self.assertEqual(deep_report.corrupted, ("exe/WinDivert.dll",))
 
+    def test_file_locked_by_antivirus_is_not_reported_missing(self) -> None:
+        from install_integrity import verify as verify_module
+        from utils.file_digest import sha256_file as real_sha256
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_dir = _build_install_tree(root)
+
+            def locked(path):
+                if Path(path).name == "winws2.exe":
+                    raise PermissionError(32, "The process cannot access the file")
+                return real_sha256(path)
+
+            with (
+                patch.object(verify_module, "sha256_file", side_effect=locked),
+                patch.object(verify_module.time, "sleep"),
+            ):
+                report = verify_full(root=root, manifest_dir=runtime_dir)
+
+            self.assertTrue(report.ok)
+
+    def test_file_locked_only_for_a_moment_is_still_checked(self) -> None:
+        from install_integrity import verify as verify_module
+        from utils.file_digest import sha256_file as real_sha256
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_dir = _build_install_tree(root)
+            (root / "exe" / "winws2.exe").write_bytes(b"WINWS2-BINARY")
+            calls = {"n": 0}
+
+            def briefly_locked(path):
+                if Path(path).name == "winws2.exe":
+                    calls["n"] += 1
+                    if calls["n"] == 1:
+                        raise PermissionError(32, "busy")
+                return real_sha256(path)
+
+            with (
+                patch.object(verify_module, "sha256_file", side_effect=briefly_locked),
+                patch.object(verify_module.time, "sleep"),
+            ):
+                report = verify_full(root=root, manifest_dir=runtime_dir)
+
+            self.assertEqual(report.corrupted, ("exe/winws2.exe",))
+
     def test_missing_manifest_never_blocks_launch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

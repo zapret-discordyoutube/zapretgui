@@ -65,13 +65,16 @@ class DpiGuard:
         if not self.is_running():
             return False
         log(f"Остановка DPI для обновления ({reason})", UPDATE_LOG_LEVEL)
-        result = self._shutdown_sync(
-            reason=str(reason),
-            include_cleanup=True,
-            update_runtime_state=bool(update_runtime_state),
-        )
-        # Даже частичная остановка — повод потом запустить DPI обратно.
-        self._stopped_by_us = True
+        try:
+            result = self._shutdown_sync(
+                reason=str(reason),
+                include_cleanup=True,
+                update_runtime_state=bool(update_runtime_state),
+            )
+        finally:
+            # Даже частичная остановка — повод потом запустить DPI обратно, в том
+            # числе если она оборвалась исключением на полпути (winws уже погашен).
+            self._stopped_by_us = True
         if bool(getattr(result, "still_running", False)):
             raise DpiStopError("DPI не остановился")
         if self._on_stopped is not None:

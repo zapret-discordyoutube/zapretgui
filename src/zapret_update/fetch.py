@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import http.client
 import os
 import ssl
 import threading
@@ -211,7 +212,14 @@ def fetch_plan(
     parts_dir, ready_dir = work / "parts", work / "ready"
     parts_dir.mkdir(parents=True, exist_ok=True)
     ready_dir.mkdir(parents=True, exist_ok=True)
-    tracker = _Progress(plan.download_size, progress)
+    # Одинаковые по содержимому файлы (два пустых __init__.py, две копии DLL)
+    # качаются один раз: у них одно имя куска и один готовый файл, и два потока
+    # писали бы в один .part одновременно.
+    unique: dict[str, Want] = {}
+    for want in plan.want:
+        unique.setdefault(want.entry.sha256, want)
+    wants = list(unique.values())
+    tracker = _Progress(sum(want.download_size for want in wants), progress)
     ranking = _Ranking(sources)
     result: dict[str, Path] = {}
     # Окончательная ошибка одного файла останавливает остальные: без него
@@ -267,7 +275,10 @@ def fetch_plan(
                         tracker.add(-part.stat().st_size)
                         part.unlink()
                     errors.append(f"{source.label}: {exc}")
-                except (OSError, urllib.error.URLError, ValueError) as exc:
+                except (OSError, urllib.error.URLError, ValueError, http.client.HTTPException) as exc:
+                    # HTTPException (BadStatusLine, IncompleteRead) — не OSError: без
+                    # него ломаный ответ одного зеркала отменял всё обновление,
+                    # а не переключал на следующее.
                     ranking.failed(index)
                     errors.append(f"{source.label}: {exc}")
             if round_index < ROUNDS - 1:
@@ -283,7 +294,7 @@ def fetch_plan(
 
     errors: list[BaseException] = []
     with ThreadPoolExecutor(max_workers=max(1, threads)) as pool:
-        for future in [pool.submit(guarded, want) for want in plan.want]:
+        for future in [pool.submit(guarded, want) for want in wants]:
             try:
                 future.result()
             except BaseException as exc:  # noqa: BLE001 — собрать и отдать главную

@@ -119,6 +119,23 @@ class DpiGuardTests(unittest.TestCase):
 
         self.assertEqual(dpi.restarts, 1)
 
+    def test_stop_that_raised_halfway_is_still_restored(self) -> None:
+        dpi = _Dpi()
+
+        def broken_shutdown(**kwargs):
+            dpi.stops.append(kwargs)
+            dpi.running = False  # winws уже погашен, дальше — исключение
+            raise RuntimeError("post-stop hook failed")
+
+        dpi.shutdown_sync = broken_shutdown
+        guard = dpi.guard()
+
+        with self.assertRaises(RuntimeError):
+            guard.stop(reason="test")
+        guard.restore()
+
+        self.assertEqual(dpi.restarts, 1)
+
     def test_nothing_is_restarted_while_program_exits(self) -> None:
         dpi = _Dpi()
         guard = dpi.guard(allow_restore=lambda: False)

@@ -8,6 +8,7 @@ from __future__ import annotations
 """
 
 import os
+import time
 from pathlib import Path
 
 from utils.file_digest import sha256_file
@@ -73,6 +74,21 @@ def _classify(
     return IntegrityCause.REMOVED_AFTER_INSTALL
 
 
+_LOCKED_FILE_RETRY_DELAYS_S = (0.2, 0.5, 1.0)
+
+
+def _sha256_with_retry(target: Path) -> str:
+    """Хэш файла; короткую блокировку чтения (антивирус) пережидает."""
+    for delay in _LOCKED_FILE_RETRY_DELAYS_S:
+        try:
+            return sha256_file(target)
+        except FileNotFoundError:
+            raise
+        except OSError:
+            time.sleep(delay)
+    return sha256_file(target)
+
+
 def verify_installation(
     *,
     root: str | os.PathLike[str] | None = None,
@@ -117,8 +133,8 @@ def verify_installation(
             continue
 
         try:
-            actual = sha256_file(target)
-        except OSError:
+            actual = _sha256_with_retry(target)
+        except FileNotFoundError:
             findings.append(
                 IntegrityFinding(
                     path=entry.path,
@@ -127,6 +143,11 @@ def verify_installation(
                     engines=entry.engines,
                 )
             )
+            continue
+        except OSError:
+            # Файл на месте и нужного размера, но его держит другая программа
+            # (обычно антивирус проверяет свежие файлы после обновления). Это не
+            # повреждение: без него «пропал» запускал бы ненужную переустановку.
             continue
 
         if actual != entry.sha256:
