@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from blockcheck.ui.result_cards_model import build_cards
 from blockcheck_words import report_with_words
-from diagnostics import engine, report_text
+from diagnostics import engine, report_text, service_view
 from diagnostics import transfer_probe as tp
 from diagnostics import volume_probe as vp
 from diagnostics.tls_probe import KIND_OK, ProbeResult
@@ -96,18 +96,18 @@ class ReportTransferTests(unittest.TestCase):
 
     def test_road_and_tag_come_from_the_verdict(self) -> None:
         pause = tp.judge(_samples(9, 42, 7, 12, 9, 9, 2_861))
-        road = report_text._transfer_road(pause)
+        road = service_view._transfer_road(pause)
 
         self.assertEqual((road["key"], road["state"], road["word"]), ("transfer", "warn", "с паузами"))
-        fast = report_text._transfer_road(tp.judge(_samples(20, 25, 30)))
+        fast = service_view._transfer_road(tp.judge(_samples(20, 25, 30)))
         self.assertEqual((fast["state"], fast["word"]), ("ok", "быстро"))
 
         class _Service:
             control = False
 
-        tags = report_text.service_tags(_Service(), [self._probe(pause)])
+        tags = service_view.service_tags(_Service(), [self._probe(pause)])
         self.assertIn(("pause", "warn"), [(tag["key"], tag["state"]) for tag in tags])
-        self.assertFalse([tag for tag in report_text.service_tags(_Service(), [self._probe(tp.judge(_samples(20, 25, 30)))]) if tag["key"] == "pause"])
+        self.assertFalse([tag for tag in service_view.service_tags(_Service(), [self._probe(tp.judge(_samples(20, 25, 30)))]) if tag["key"] == "pause"])
 
 
 class CardTransferTests(unittest.TestCase):

@@ -147,7 +147,11 @@ class ProtocolCardsTests(unittest.TestCase):
         self.assertIn(("запись в hosts устарела", "warn"), card.chips)
         rows = {line.name: line.text for line in card.sections[0].lines}
         self.assertEqual(rows["Адрес сервера"], "104.244.42.1")
-        self.assertEqual(rows["Какие адреса пробовали"], "151.101.130.146 — нет соединения, 104.244.42.1 — открылся")
+        # Адреса с разным исходом: за списком идёт пояснение (с 21.10), список — первым.
+        self.assertTrue(
+            rows["Какие адреса пробовали"].startswith("151.101.130.146 — нет соединения, 104.244.42.1 — открылся"),
+            rows["Какие адреса пробовали"],
+        )
         self.assertIn("записанный в нём адрес не работает", rows["Файл hosts"])
         self.assertIn("браузер пойдёт по записи", rows["Файл hosts"])
         self.assertEqual(rows["TLS 1.3"], "сброшено")

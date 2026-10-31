@@ -968,8 +968,25 @@ class StrategySearch:
         for crash_try in range(1 + CRASH_RETRIES):
             if self.cancelled:
                 return _StrategyRun(rules.VERDICT_CANCELLED)
-            session = self._env.start_session(config_text)
-            start = session.start()
+            session = None
+            try:
+                session = self._env.start_session(config_text)
+                start = session.start()
+            except OSError as exc:
+                # Антивирус занял файл пробы или не дал запустить winws2: это сбой
+                # одной стратегии, а не всего подбора.
+                if session is not None:
+                    try:
+                        session.stop()
+                    except Exception:
+                        pass
+                crash_reason = f"не удалось запустить: {exc}"
+                self._events.log(f"  winws2 не запустился: {crash_reason}")
+                if crash_reason == previous_crash:
+                    return _StrategyRun(rules.VERDICT_CRASH, [], crash_reason, repeatable_crash=True)
+                previous_crash = crash_reason
+                self._env.recover_after_crash()
+                continue
             if self.cancelled:
                 session.stop()
                 return _StrategyRun(rules.VERDICT_CANCELLED)

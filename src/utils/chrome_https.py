@@ -110,6 +110,8 @@ class _Progress:
     body: bytearray | None = None
     # Сколько байт заголовков ответа пришло: у HEAD, кроме них, ничего нет.
     header_size: int = 0
+    # Заголовок Date окончательного ответа: по нему проверка сверяет часы компьютера.
+    server_date: str = ""
     # Чтение прервали мы сами: набрали сколько нужно (``stopped_by_us``) или нажали «Стоп».
     stopped_by_us: bool = False
     cancelled: bool = False
@@ -300,6 +302,8 @@ class ChromeConnection:
                     unpack[:] = [zlib.decompressobj(16 + zlib.MAX_WBITS)]
                 elif kind == b"deflate":
                     unpack[:] = [zlib.decompressobj()]
+            if line[:5].lower() == b"date:":
+                progress.server_date = line[5:].strip().decode("ascii", errors="ignore")
             if line.startswith(b"HTTP/"):
                 parts = line.split()
                 # Перед окончательным ответом бывают промежуточные (100, 103): ждём настоящий.
@@ -418,6 +422,7 @@ def chrome_get(
             elapsed_ms=(time.perf_counter() - started) * 1000,
             detail=detail,
             body=bytes(progress.body),
+            server_date=progress.server_date,
             **extra,
         )
 

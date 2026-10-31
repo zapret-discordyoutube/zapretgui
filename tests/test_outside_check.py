@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import socket
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -47,6 +50,40 @@ class AskTests(unittest.TestCase):
         _found, post = self._ask(hosts, _answer())
 
         self.assertEqual(len(json.loads(post.call_args.args[1])["hosts"]), oc.MAX_HOSTS)
+
+
+class StopTests(unittest.TestCase):
+    def test_stop_breaks_a_hanging_tls_handshake(self) -> None:
+        # Сервер принимает соединение и молчит: рукопожатие TLS ждало бы 30 с.
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        accepted: list[socket.socket] = []
+        threading.Thread(target=lambda: accepted.append(server.accept()[0]), daemon=True).start()
+        real_socket = socket.socket
+
+        class _LocalSocket(real_socket):
+            def connect(self, _address):
+                return super().connect(("127.0.0.1", port))
+
+        cancel = SocketCancel()
+        result: list[object] = []
+        try:
+            with patch.object(oc.socket, "socket", _LocalSocket):
+                worker = threading.Thread(target=lambda: result.append(oc._post("127.0.0.1", b"{}", cancel)), daemon=True)
+                started = time.monotonic()
+                worker.start()
+                time.sleep(0.3)
+                cancel.cancel()
+                worker.join(5)
+            self.assertFalse(worker.is_alive())
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(result, [None])
+        finally:
+            server.close()
+            for conn in accepted:
+                conn.close()
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ from diagnostics import (
     report_text,
     selectivity,
     self_check,
+    service_view,
     speed_check,
     subnet_whitelist,
     system_state,
@@ -251,14 +252,13 @@ def clock_skew(run: Run) -> float | None:
         return None
     result = net_access.get(run, _CLOCK_HOST, addresses[0], "/generate_204", read_limit=1)
     local = time.time()
-    for line in result.body.split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]:
-        name, _colon, value = line.partition(b":")
-        if name.strip().lower() == b"date":
-            try:
-                return local - parsedate_to_datetime(value.decode("ascii", errors="ignore").strip()).timestamp()
-            except (TypeError, ValueError):
-                return None
-    return None
+    # Время сервера — в заголовке Date, а не в теле ответа (у /generate_204 тела нет).
+    if not result.server_date:
+        return None
+    try:
+        return local - parsedate_to_datetime(result.server_date).timestamp()
+    except (TypeError, ValueError):
+        return None
 
 
 def check_system(
@@ -768,7 +768,7 @@ def check_crowd(run: Run, collected: dict[str, list[Probe]], services, *, tools=
         # Слово итога и исходы по строкам — готовыми словами: экран их только показывает.
         "status": crowd_probe.STATUS[verdict.code],
         "rows": crowd_probe.rows(facts),
-        "text": report_text.sentence(verdict.text),
+        "text": service_view.sentence(verdict.text),
         "advice": verdict.advice,
         # Факты как есть: исход одиночного соединения до пачки, каждого из пачки и одиночного после.
         "before": facts.before,

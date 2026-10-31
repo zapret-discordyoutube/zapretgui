@@ -525,6 +525,29 @@ class StrategyVerdictTests(unittest.TestCase):
         self.assertEqual(env.history_saved[2], ["broken"])
         self.assertEqual(report.working_strategies, [])
 
+    def test_blocked_start_of_one_strategy_does_not_stop_the_scan(self) -> None:
+        # Антивирус не дал создать процесс winws2 (или занял файл пробы):
+        # это сбой одной стратегии, остальные проверяются дальше.
+        env = FakeEnv(network=blocked_unless("good"), candidates=[cand("blocked"), cand("good")])
+        original = env.start_session
+
+        def start_session(config_text):
+            session = original(config_text)
+            if session.strategy == "blocked":
+                def start():
+                    raise PermissionError(5, "Access is denied")
+
+                session.start = start
+            return session
+
+        env.start_session = start_session
+        report, events = run(env)
+
+        self.assertEqual(report.fatal_error, "")
+        verdicts = {result.strategy_id: result.verdict for result in events.results}
+        self.assertEqual(verdicts["blocked"], rules.VERDICT_CRASH)
+        self.assertEqual(verdicts["good"], rules.VERDICT_WORKING)
+
     def test_one_time_start_failure_is_retried_and_not_remembered(self) -> None:
         env = FakeEnv(network=blocked_unless(), candidates=[cand("racy")])
         env.start_fails["racy"] = 1

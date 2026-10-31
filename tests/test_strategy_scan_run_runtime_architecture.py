@@ -37,6 +37,21 @@ class StrategyScanRunRuntimeArchitectureTest(unittest.TestCase):
         self.assertTrue(stopped)
         page._on_stop.assert_called_once_with()
 
+    def test_stop_while_queued_drops_the_scan_without_touching_zapret(self) -> None:
+        page = StrategyScanPage.__new__(StrategyScanPage)
+        page._strategy_scan_run_runtime = Mock()
+        page._strategy_scan_run_runtime.is_queued.return_value = True
+        worker = Mock()
+        page._scan_worker = worker
+        page._on_finished = Mock()
+
+        StrategyScanPage._on_stop(page)
+
+        # Подбор не начинался: возвращать Zapret нечего, а из очереди он снят.
+        worker.cancel_runtime_restore.assert_called_once_with()
+        page._strategy_scan_run_runtime.stop.assert_called_once_with()
+        page._on_finished.assert_called_once_with(None)
+
 
 if __name__ == "__main__":
     unittest.main()

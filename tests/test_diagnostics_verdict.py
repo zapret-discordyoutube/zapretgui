@@ -1091,10 +1091,12 @@ class SystemStateInReportTests(unittest.TestCase):
 
 
 class ClockSkewTests(unittest.TestCase):
-    def _skew(self, body: bytes | None, addresses=("142.250.1.1",)):
+    """Время сервера приходит в заголовке Date; тело ответа (у /generate_204 оно пустое) ни при чём."""
+
+    def _skew(self, server_date: str, addresses=("142.250.1.1",), body: bytes = b""):
         run = engine._Run(None, workers=4)
         self.addCleanup(run.close)
-        result = ProbeResult(ip="142.250.1.1", kind=KIND_OK, status=204, body=body or b"")
+        result = ProbeResult(ip="142.250.1.1", kind=KIND_OK, status=204, body=body, server_date=server_date)
         with (
             patch.object(net_access, "doh_lookup", return_value=(bool(addresses), tuple(addresses))),
             patch.object(net_access, "chrome_get", return_value=result) as get,
@@ -1105,18 +1107,17 @@ class ClockSkewTests(unittest.TestCase):
     def test_skew_is_local_time_minus_server_date(self) -> None:
         from email.utils import formatdate
 
-        body = b"HTTP/1.1 204 No Content\r\nDate: " + formatdate(1_800_000_000 - 7200, usegmt=True).encode() + b"\r\n\r\n"
-        skew, get = self._skew(body)
+        skew, get = self._skew(formatdate(1_800_000_000 - 7200, usegmt=True))
 
         self.assertEqual(skew, 7200.0)
         self.assertEqual(get.call_args.args[:3], ("www.google.com", "142.250.1.1", "/generate_204"))
 
     def test_no_address_no_date_or_bad_date_is_unknown(self) -> None:
-        self.assertIsNone(self._skew(b"", addresses=())[0])
-        self.assertIsNone(self._skew(b"HTTP/1.1 204 No Content\r\nServer: x\r\n\r\n")[0])
-        self.assertIsNone(self._skew(b"HTTP/1.1 204 No Content\r\nDate: yesterday\r\n\r\n")[0])
+        self.assertIsNone(self._skew("", addresses=())[0])
+        self.assertIsNone(self._skew("")[0])
+        self.assertIsNone(self._skew("yesterday")[0])
         # Строка «Date:» в теле ответа — не заголовок.
-        self.assertIsNone(self._skew(b"HTTP/1.1 200 OK\r\nServer: x\r\n\r\nDate: Mon, 01 Jan 2024 00:00:00 GMT")[0])
+        self.assertIsNone(self._skew("", body=b"Date: Mon, 01 Jan 2024 00:00:00 GMT")[0])
 
 
 class FullCheckTests(unittest.TestCase):

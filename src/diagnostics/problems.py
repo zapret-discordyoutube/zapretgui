@@ -23,7 +23,7 @@ from diagnostics import (
     block_kind,
     ipv6_check,
     quic_probe,
-    report_text,
+    service_view,
     subnet_whitelist,
     system_state,
     telegram_check,
@@ -341,12 +341,12 @@ def collect_problems(
                 # Telegram закрывают по адресу: стратегия тут бессильна, а у программы есть свой прокси.
                 action = "telegram_proxy"
             causes = tuple(
-                dict.fromkeys(report_text.sentence(probe.cause.text) + "." for probe in broken if probe.cause is not None)
+                dict.fromkeys(service_view.sentence(probe.cause.text) + "." for probe in broken if probe.cause is not None)
             )
             # Чужой сертификат: кто именно ответил вместо сайта и что с этим делать — первым делом.
-            causes += tuple(dict.fromkeys(report_text.sentence(probe.unstable) + "." for probe in shaky))
+            causes += tuple(dict.fromkeys(service_view.sentence(probe.unstable) + "." for probe in shaky))
             certs = [probe.cert for probe in broken if probe.cert is not None]
-            causes = tuple(dict.fromkeys(report_text.sentence(item.text) + "." for item in certs)) + causes
+            causes = tuple(dict.fromkeys(service_view.sentence(item.text) + "." for item in certs)) + causes
             advice = tuple(dict.fromkeys(item.advice for item in certs if item.advice)) + advice
             problems.append(
                 problem(

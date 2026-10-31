@@ -20,6 +20,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from diagnostics.block_kind import KIND_OTHER, KINDS, kind_info
+from diagnostics import block_kind, protocol_probe, quic_probe, transfer_probe, volume_probe
+from diagnostics.limits import DNS_ATTEMPTS, HTTPS_TIMEOUT, SOURCE_HOSTS, SOURCE_REFERENCE
+from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe
+from diagnostics.verdict import DnsState, Level, ReachState, describe_reach
 
 __all__ = [
     "INFO",
@@ -478,3 +482,246 @@ def render_text(sections: Iterable[ViewSection], indent: str = "") -> list[str]:
             body = f"{row.title}: {row.text}" if row.text else row.title
             lines.append(f"{indent}   {TEXT_ICONS.get(row.level, TEXT_ICONS[UNKNOWN])} {body}")
     return lines
+
+
+# --- Слова о сайте из фактов проверки -------------------------------------------
+# Строка «открывается ли адрес», короткий итог, слово итога сайта, дороги и метки.
+# ``report_text`` только собирает факты и берёт слова отсюда: один факт — одни
+# слова на карточке, в журнале и в истории.
+
+
+def fail_text(probe: Probe) -> str:
+    """Почему адрес не открылся — одной фразой."""
+    if probe.volume is not None and probe.volume.code == volume_probe.VOLUME_CUT:
+        return f"{probe.volume.text} — так провайдер обрывает загрузку"
+    if probe.reach_state == ReachState.CERT and probe.cert is not None:
+        return probe.cert.text
+    return describe_reach(probe.reach, timeout=HTTPS_TIMEOUT)
+
+
+SOURCE_NOTE = {
+    SOURCE_HOSTS: ", адрес из файла hosts",
+    SOURCE_REFERENCE: ", адрес по DNS-over-HTTPS",
+}
+
+
+def ips_text(ips: tuple[str, ...], limit: int = 3) -> str:
+    if not ips:
+        return "—"
+    shown = ", ".join(ips[:limit])
+    return f"{shown} и ещё {len(ips) - limit}" if len(ips) > limit else shown
+
+
+def not_probed(probe: Probe) -> bool:
+    """Адрес не проверялся вовсе (видеосервера YouTube найти не удалось): сказать нечего, кроме причины."""
+    return probe.reach is None and probe.reach_state == ReachState.UNKNOWN and bool(probe.discovery_note)
+
+
+def reach_text(probe: Probe) -> str:
+    """Одна строка: открывается ли адрес и почему нет."""
+    if not_probed(probe):
+        return "не проверялся"
+    result = probe.reach
+    source = SOURCE_NOTE.get(probe.reach_source, "")
+    if probe.reach_state == ReachState.OK and result is not None:
+        tls = f", {result.tls_version.replace('TLSv', 'TLS ')}" if result.tls_version else ""
+        if ":" in result.ip:
+            return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
+        stale = ""
+        if probe.hosts_stale:
+            what = probe.cert.text if probe.cert is not None else "адрес из файла hosts не работает, запись в нём устарела"
+            stale = f" — {what}; браузер пойдёт по этой записи и сайт не откроет"
+        again = " — со второй проверки, поодиночке: первый сбой дала нагрузка самой проверки" if probe.rechecked == RECHECK_OPENED else ""
+        if probe.unstable:
+            again = f" — но через раз: {probe.unstable}"
+        return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source}){stale}{again}"
+    text = fail_text(probe)
+    if result is None or not result.ip:
+        return text
+    addresses = len({ip for ip, _kind in probe.tried})
+    if addresses > 1:
+        tries = f", не ответил ни один из {addresses} адресов"
+    else:
+        tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
+    ipv6 = ", по IPv6 тоже не открылся" if probe.ipv6_result is not None else ""
+    again = ", повторная проверка поодиночке дала то же" if probe.rechecked == RECHECK_SAME else ""
+    return f"{text} ({result.ip}{source}{tries}{ipv6}{again})"
+
+
+def dns_detail(probe: Probe) -> str:
+    parts: list[str] = []
+    if probe.hosts_ips:
+        parts.append(f"hosts: {ips_text(probe.hosts_ips)}")
+    if probe.dns.ips:
+        flaky = f" (а {probe.dns_nxdomain} из {DNS_ATTEMPTS} раз — «сайта нет»)" if probe.dns_nxdomain else ""
+        parts.append(f"DNS системы: {ips_text(probe.dns.ips)}{flaky}")
+    else:
+        parts.append(f"DNS системы: нет адреса ({probe.dns.detail})")
+    if probe.reference_ips:
+        parts.append(f"эталон: {ips_text(probe.reference_ips)}")
+    elif not probe.reference_ok:
+        parts.append("эталон: недоступен")
+    return " · ".join(parts)
+
+
+def sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def short_text(probe: Probe) -> str:
+    if probe.reach_state != ReachState.OK:
+        return fail_text(probe)
+    if probe.reach is not None and ":" in probe.reach.ip:
+        return "открывается только по IPv6"
+    return "открывается"
+
+
+# Слово итога сайта, когда вид блокировки не назван: по уровню.
+_STATUS_BY_LEVEL = {
+    Level.OK: "Открывается",
+    Level.WARN: "Есть проблемы",
+    Level.FAIL: "Не открывается",
+    Level.UNKNOWN: "Не удалось проверить",
+}
+# Кто ответил вместо сайта — словом итога (код из ``cert_owner``).
+_STATUS_BY_CERT = {
+    "antivirus": "Сертификат подменяет антивирус",
+    "debug_proxy": "Сертификат подменяет прокси-отладчик",
+    "state_ca": "Сертификат государственного центра",
+    "hosts": "Адрес из hosts ведёт не туда",
+    "other_site": "Отвечает другой сайт",
+    "self_signed": "Самоподписанный сертификат",
+    "unknown_issuer": "Сертификат от неизвестного центра",
+}
+HINT_QUIC = (
+    "QUIC — быстрый способ соединения поверх UDP: им браузер открывает YouTube и многие крупные сайты. "
+    "Если он закрыт, браузер сам переходит на обычное соединение."
+)
+HINT_DNS = "DNS — справочная, которая по имени сайта выдаёт его адрес. Провайдер может подменять её ответы."
+_ROAD_LABELS = {
+    protocol_probe.PROTO_TLS12: "TLS 1.2",
+    protocol_probe.PROTO_TLS13: "TLS 1.3",
+    protocol_probe.PROTO_BROWSER: "Chrome",
+    protocol_probe.PROTO_HTTP: "HTTP",
+}
+
+
+def service_status(verdict, probes) -> str:
+    """Слово итога сайта — одно на всю программу: карточка, история и сравнение берут его отсюда.
+
+    Причина не у провайдера (чужой сертификат, запись в hosts) называется прямо:
+    общее «Есть проблемы» про неё ничего не говорит.
+    """
+    cert = next((probe.cert.code for probe in probes if probe.cert is not None), "")
+    if cert:
+        return _STATUS_BY_CERT.get(cert, "Чужой сертификат")
+    if any(probe.hosts_stale for probe in probes):
+        return "Мешает запись в hosts"
+    if verdict.kind and verdict.level in (Level.WARN, Level.FAIL) and verdict.kind in block_kind.KINDS:
+        if verdict.kind != block_kind.KIND_OTHER:
+            return sentence(block_kind.kind_info(verdict.kind).short)
+    return _STATUS_BY_LEVEL[verdict.level]
+
+
+def _road(key: str, label: str, state: str, word: str, text: str, hint: str) -> dict:
+    return {"key": key, "label": label, "state": state, "word": word, "text": text, "hint": hint}
+
+
+HINT_TRANSFER = (
+    "Передача — как быстро сайт начинает отвечать и не отвечает ли он паузами. Соединение может установиться "
+    "и пройти все проверки, а видео и крупные файлы всё равно идти рывками."
+)
+_TRANSFER_WORDS = {
+    transfer_probe.TRANSFER_OK: "быстро",
+    transfer_probe.TRANSFER_PAUSE: "с паузами",
+    transfer_probe.TRANSFER_SLOW_REPLY: "медленно",
+    transfer_probe.TRANSFER_SLOW_BODY: "медленно",
+}
+
+
+def _transfer_road(verdict) -> dict:
+    return _road(
+        "transfer", "Передача", verdict.level, _TRANSFER_WORDS.get(verdict.code, "—"), verdict.text, HINT_TRANSFER
+    )
+
+
+def service_roads(probes, dns_note: str = "") -> list[dict]:
+    """Дороги к сайту — всегда в одном порядке: TLS 1.2, TLS 1.3, Chrome, HTTP, QUIC, передача, DNS.
+
+    Каждая дорога приходит готовой: состояние, слово для метки, полная фраза и
+    пояснение, что это за дорога. Экран их только показывает. Пусто — дороги не
+    проверялись.
+    """
+    main = next((probe for probe in probes if probe.target.main), probes[0] if probes else None)
+    roads = [
+        _road(line.key, _ROAD_LABELS.get(line.key, line.title), line.state, line.word, line.text, protocol_probe.HINTS.get(line.key, ""))
+        for line in (main.protocols if main is not None else ())
+    ]
+    if not roads:
+        return []
+    quic = {probe.quic.code for probe in probes if probe.quic is not None}
+    if quic_probe.QUIC_BLOCKED_BY_NAME in quic:
+        roads.append(_road("quic", "QUIC", "warn", "закрыт", "QUIC к этому сайту режут: сайт откроется обычным способом, чуть медленнее", HINT_QUIC))
+    elif quic_probe.QUIC_OK in quic:
+        roads.append(_road("quic", "QUIC", "ok", "работает", "QUIC к этому сайту проходит", HINT_QUIC))
+    else:
+        roads.append(_road("quic", "QUIC", "unknown", "—", "у этого сайта QUIC не проверялся или сервер его не поддерживает", HINT_QUIC))
+    transfer = main.transfer if main is not None else None
+    if transfer is not None and transfer.code != transfer_probe.TRANSFER_UNKNOWN:
+        roads.append(_transfer_road(transfer))
+    dns = {probe.judgement.state for probe in probes if probe.judgement is not None}
+    if dns_note or DnsState.SPOOFED in dns:
+        roads.append(_road("dns", "DNS", "warn", "подменён", "ответ DNS подменён: лечится DNS с шифрованием в разделе «Настройка DNS»", HINT_DNS))
+    elif dns and DnsState.UNKNOWN not in dns:
+        roads.append(_road("dns", "DNS", "ok", "честный", "адрес сайта DNS выдаёт верно", HINT_DNS))
+    else:
+        roads.append(_road("dns", "DNS", "unknown", "—", "сверить ответ DNS не удалось", HINT_DNS))
+    return roads
+
+
+# Как именно блокируют — коротким словом для метки (код из ``block_cause``).
+_CAUSE_WORDS = {
+    "by_name": "блокировка по имени",
+    "name_whitelist": "проходят только разрешённые имена",
+    "by_address": "закрыт адрес",
+    "stub_page": "страница провайдера",
+    "address_closed": "адрес закрыт",
+    "address_silent": "адрес молчит",
+}
+
+
+def service_tags(service, probes) -> list[dict]:
+    """Метки сайта о том, чего в дорогах нет. Метку реестра РКН дописывает ``registry.annotate``."""
+    causes = dict.fromkeys(_CAUSE_WORDS[probe.cause.code] for probe in probes if probe.cause is not None and probe.cause.code in _CAUSE_WORDS)
+    tags = [{"key": "cause", "text": word, "state": "fail"} for word in causes]
+    if any(probe.volume is not None and probe.volume.code == volume_probe.VOLUME_CUT for probe in probes):
+        tags.append({"key": "cut16", "text": "обрыв на 16 КБ", "state": "warn"})
+    if any(probe.transfer is not None and probe.transfer.code == transfer_probe.TRANSFER_PAUSE for probe in probes):
+        tags.append({"key": "pause", "text": "паузы в ответах", "state": "warn"})
+    if any(probe.hosts_stale for probe in probes):
+        tags.append({"key": "hosts", "text": "запись в hosts устарела", "state": "warn"})
+    if service.control:
+        tags.append({"key": "control", "text": "контрольный", "state": "info"})
+    return tags
+
+
+def add_name_speed(site: dict, names: dict, speed_problems) -> None:
+    """Дописывает к записи сайта замер потока по имени; замедление или обрыв меняют итог.
+
+    ``speed_problems`` — проблемы скорости из ``problems.speed_problems``: из них
+    берутся советы.
+    """
+    site["names"] = names
+    if names.get("level") != "warn":
+        return
+    hurt = [str(item.get("host") or "") for item in names.get("items") or () if item.get("state") == "warn"]
+    if site.get("level") == "ok":
+        # Иначе итогом осталось бы «открывается», хотя пользоваться сайтом нельзя.
+        site["level"] = "warn"
+        site["status"] = "Поток режут"
+        site["headline"] = f"{site.get('label', '')} открывается, но поток данных режут по имени: {', '.join(hurt)}"
+    for problem in speed_problems:
+        advice = problem.get("advice") or ()
+        for item in [advice] if isinstance(advice, str) else advice:
+            if item and item not in site.setdefault("advice", []):
+                site["advice"].append(str(item))

@@ -138,11 +138,16 @@ def _kill_on_close_job(process: subprocess.Popen):
     handle = getattr(process, "_handle", None)
     if not handle or not winapi.is_available():
         return None
+    job = None
     try:
         job = winapi.create_kill_on_close_job()
         winapi.assign_process_to_job(job, int(handle))
         return job
     except Exception:
+        # Задание создалось, а браузер в него не сел (уже завершился):
+        # его дескриптор закрываем, иначе он висит до выхода программы.
+        if job is not None:
+            winapi.close_handle(job)
         return None
 
 

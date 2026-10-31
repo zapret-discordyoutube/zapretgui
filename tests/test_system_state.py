@@ -307,5 +307,35 @@ class CollectTests(unittest.TestCase):
                 self.assertNotIn(forbidden, source)
 
 
+
+class ClockSkewTests(unittest.TestCase):
+    def test_skew_is_read_from_the_date_header(self) -> None:
+        from email.utils import formatdate
+
+        from diagnostics import sections
+        from diagnostics.tls_probe import ProbeResult
+
+        server_now = 1_800_000_000.0
+        answer = ProbeResult(ip="142.250.74.4", kind="ok", status=204, server_date=formatdate(server_now, usegmt=True))
+        with (
+            patch.object(sections.net_access, "doh_lookup", return_value=("", ["142.250.74.4"])),
+            patch.object(sections.net_access, "get", return_value=answer),
+            patch.object(sections.time, "time", return_value=server_now + 3600.0),
+        ):
+            skew = sections.clock_skew(object())
+
+        self.assertAlmostEqual(skew, 3600.0, delta=1.0)
+
+    def test_answer_without_date_gives_no_skew(self) -> None:
+        from diagnostics import sections
+        from diagnostics.tls_probe import ProbeResult
+
+        with (
+            patch.object(sections.net_access, "doh_lookup", return_value=("", ["142.250.74.4"])),
+            patch.object(sections.net_access, "get", return_value=ProbeResult(ip="142.250.74.4", kind="ok")),
+        ):
+            self.assertIsNone(sections.clock_skew(object()))
+
+
 if __name__ == "__main__":
     unittest.main()

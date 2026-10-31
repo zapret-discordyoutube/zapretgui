@@ -44,13 +44,21 @@ class _Answer:
 
 def _post(ip: str, body: bytes, cancel: SocketCancel) -> bytes | None:
     raw = socket.socket(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM)
+    secure = None
     try:
         if not cancel.track(raw):
             return None
         raw.settimeout(TIMEOUT_S)
         raw.connect((ip, 443))
+        # wrap_socket забирает у raw его соединение: дальше «Стоп» обрывает только
+        # сокет TLS. Его отмечаем до рукопожатия, иначе рукопожатие и чтение
+        # ответа шли бы до таймаута (30 с на каждый адрес).
+        secure = client_context().wrap_socket(raw, server_hostname=SERVER_HOST, do_handshake_on_connect=False)
+        if not cancel.track(secure):
+            return None
+        secure.do_handshake()
         connection = http.client.HTTPSConnection(SERVER_HOST, 443, timeout=TIMEOUT_S, context=client_context())
-        connection.sock = client_context().wrap_socket(raw, server_hostname=SERVER_HOST)
+        connection.sock = secure
         connection.request("POST", PATH, body=body, headers={"Content-Type": "application/json", "User-Agent": "ZapretGUI"})
         response = connection.getresponse()
         if response.status != 200:
@@ -59,6 +67,9 @@ def _post(ip: str, body: bytes, cancel: SocketCancel) -> bytes | None:
     except (OSError, http.client.HTTPException):
         return None
     finally:
+        if secure is not None:
+            cancel.release(secure)
+            close_quietly(secure)
         cancel.release(raw)
         close_quietly(raw)
 

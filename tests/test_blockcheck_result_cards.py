@@ -521,7 +521,7 @@ class NewSectionsCardsTests(unittest.TestCase):
         self.assertTrue(any("GitHub" in line.name for section in calm_card.sections for line in section.lines))
 
     def test_site_row_tells_where_the_time_went(self) -> None:
-        from diagnostics.report_text import stages_text
+        from diagnostics.service_view import stages_text
 
         self.assertEqual(stages_text({"dns": 0.4, "reach": 6.2, "cause": 3.0, "roads": 1.0}), "соединение 6 с, причина 3 с, дороги 1 с")
         self.assertEqual(stages_text({"dns": 0.2}), "")

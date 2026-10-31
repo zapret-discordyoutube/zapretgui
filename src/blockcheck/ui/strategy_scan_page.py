@@ -767,6 +767,16 @@ class StrategyScanPage(BasePage):
             return False
 
     def _on_stop(self):
+        if self._strategy_scan_run_runtime.is_queued():
+            # Подбор ещё ждёт очереди фоновых задач и Zapret не останавливал:
+            # снимаем его из очереди. Иначе он стартовал бы после «Стопа»,
+            # остановил бы Zapret и запустил его заново.
+            cancel_restore = getattr(self.__dict__.get("_scan_worker"), "cancel_runtime_restore", None)
+            if cancel_restore is not None:
+                cancel_restore()
+            self._strategy_scan_run_runtime.stop()
+            self._on_finished(None)
+            return
         request_strategy_scan_stop(
             worker=self._strategy_scan_run_runtime.worker,
             schedule_stop_check=lambda expected_worker:

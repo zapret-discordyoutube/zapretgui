@@ -66,6 +66,8 @@ class ProbeResult:
     elapsed_ms: float = 0.0
     detail: str = ""
     body: bytes = b""
+    # Заголовок Date ответа сервера (как пришёл), "" — его не было.
+    server_date: str = ""
     # Почему не установилось соединение — вид сбоя ``utils.net_failure``: "timeout" —
     # ответа нет вовсе, "refused" — адрес сам отказал, "unreachable" — до адреса нет
     # дороги, "other" — прочая ошибка системы (например, запрет сетевого экрана).
