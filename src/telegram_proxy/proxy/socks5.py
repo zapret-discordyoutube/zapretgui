@@ -255,6 +255,23 @@ def build_udp_packet(target_host: str, target_port: int, payload: bytes) -> byte
     )
 
 
+def _abort_writer(writer: asyncio.StreamWriter) -> None:
+    """Сразу закрыть соединение с внешним прокси, не дожидаясь закрытия.
+
+    Нужен и при отмене задачи (таймаут ``wait_for`` — это CancelledError, а не
+    Exception): без него сокет оставался зарегистрирован в цикле событий и не
+    закрывался до конца работы программы.
+    """
+    try:
+        transport = writer.transport
+        if transport is not None:
+            transport.abort()
+        else:
+            writer.close()
+    except Exception:
+        pass
+
+
 async def _open_socks5_control_connection(
     proxy_host: str,
     proxy_port: int,
@@ -285,6 +302,21 @@ async def _open_socks5_control_connection(
         timeout=timeout,
     )
 
+    try:
+        return await _socks5_greeting(reader, writer, username=username, password=password, timeout=timeout)
+    except BaseException:
+        _abort_writer(writer)
+        raise
+
+
+async def _socks5_greeting(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    *,
+    username: str,
+    password: str,
+    timeout: float,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     has_creds = bool(username)
     if has_creds:
         writer.write(struct.pack("!BBBB", SOCKS_VER, 2, AUTH_NONE, AUTH_USERPASS))
@@ -374,12 +406,8 @@ async def open_udp_associate_via_socks5(
         if relay_host == "0.0.0.0":
             relay_host = str(proxy_host)
         return UdpAssociateSession(reader, writer, relay_host, relay_port)
-    except Exception:
-        try:
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            pass
+    except BaseException:
+        _abort_writer(writer)
         raise
 
 
@@ -419,10 +447,6 @@ async def connect_via_socks5(
         await writer.drain()
         await _read_socks5_reply_address(reader, timeout=timeout, command_name="CONNECT")
         return reader, writer
-    except Exception:
-        try:
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            pass
+    except BaseException:
+        _abort_writer(writer)
         raise

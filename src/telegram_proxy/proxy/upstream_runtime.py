@@ -87,6 +87,9 @@ class UpstreamConnectionExecutor:
         self._queued = 0
         self._rejected = 0
         self._tasks: dict[asyncio.Task, int] = {}
+        # Связки, по которым уже пришли данные от Telegram: сервер для них рабочий.
+        # Автоматическое переключение их не рвёт — только смена сервера человеком.
+        self._proven: set[asyncio.Task] = set()
         self._controller = UpstreamStateController(config, on_snapshot=on_snapshot, clock=clock)
 
     @property
@@ -194,6 +197,8 @@ class UpstreamConnectionExecutor:
         if opened.verdict_recorded:
             return
         opened.verdict_recorded = True
+        if opened.task is not None:
+            self._proven.add(opened.task)
         transition = self._controller.record_recv_ok(opened.attempt)
         self._handle_transition(transition, current_task=opened.task)
 
@@ -209,6 +214,7 @@ class UpstreamConnectionExecutor:
             self._controller.abandon_attempt(opened.attempt)
         if opened.task is not None:
             self._tasks.pop(opened.task, None)
+            self._proven.discard(opened.task)
 
     def apply_config(self, config: UpstreamProxyConfig) -> None:
         try:
@@ -216,7 +222,7 @@ class UpstreamConnectionExecutor:
         except RuntimeError:
             current = None
         transition = self._controller.replace_config(config, reason="выбран другой основной сервер")
-        self._handle_transition(transition, current_task=current)
+        self._handle_transition(transition, current_task=current, cut_proven=True)
 
     async def close(self) -> None:
         current = asyncio.current_task()
@@ -226,6 +232,7 @@ class UpstreamConnectionExecutor:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
+        self._proven.clear()
 
     async def _acquire_slot(self, started: float) -> None:
         if not self._semaphore.locked():
@@ -257,6 +264,7 @@ class UpstreamConnectionExecutor:
         transition: UpstreamTransition | None,
         *,
         current_task: asyncio.Task | None,
+        cut_proven: bool = False,
     ) -> None:
         if transition is None:
             return
@@ -271,8 +279,19 @@ class UpstreamConnectionExecutor:
         for task, generation in list(self._tasks.items()):
             if task.done():
                 self._tasks.pop(task, None)
+                self._proven.discard(task)
                 continue
-            if generation == transition.old_generation and task is not current_task:
+            if task is current_task:
+                continue
+            if cut_proven:
+                # Сервер сменил человек: рвутся все связки прежних серверов,
+                # включая оставленные при автоматическом переключении.
+                if generation != transition.generation:
+                    task.cancel()
+                continue
+            if task in self._proven:
+                continue
+            if generation == transition.old_generation:
                 task.cancel()
         if current_task is not None and current_task in self._tasks:
             self._tasks[current_task] = transition.generation

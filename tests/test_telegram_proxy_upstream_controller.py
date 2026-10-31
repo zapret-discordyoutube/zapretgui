@@ -280,6 +280,54 @@ class UpstreamConnectionExecutorTests(unittest.IsolatedAsyncioTestCase):
         for item in opened:
             runtime.release(item)
 
+    async def test_automatic_switch_keeps_relays_that_already_got_data(self) -> None:
+        clock = _Clock()
+        state = {"fail": False}
+
+        async def connector(*_args, **_kwargs):
+            if state["fail"]:
+                raise TimeoutError("dead")
+            return asyncio.StreamReader(), _Writer()
+
+        runtime = UpstreamConnectionExecutor(
+            _config(fallbacks=(_endpoint("uk", "Великобритания", "144.31.213.98"),)),
+            connector=connector,
+            clock=clock,
+        )
+        relay_started = asyncio.Event()
+        relay_finish = asyncio.Event()
+
+        async def working_relay():
+            opened = await runtime.open_connection("149.154.167.51", 443)
+            runtime.record_recv_ok(opened)  # Telegram уже прислал данные
+            relay_started.set()
+            try:
+                await relay_finish.wait()
+            finally:
+                runtime.release(opened)
+
+        relay = asyncio.create_task(working_relay())
+        await relay_started.wait()
+        clock.advance(CONNECT_FAILURE_OBSERVATION_WINDOW + 30)
+
+        state["fail"] = True
+        for _ in range(CONNECT_FAILURE_LIMIT):
+            with self.assertRaises(UpstreamConnectError):
+                await runtime.open_connection("149.154.167.51", 443)
+            clock.advance(CONNECT_FAILURE_OBSERVATION_WINDOW)
+        await asyncio.sleep(0)
+
+        self.assertEqual(runtime.snapshot().active_name, "Великобритания")
+        self.assertFalse(relay.cancelled())
+        self.assertFalse(relay.done())
+
+        # Сервер сменил человек: старые связки рвутся все.
+        runtime.apply_config(_config())
+        await asyncio.sleep(0)
+        self.assertTrue(relay.cancelled() or relay.done())
+        relay_finish.set()
+        await asyncio.gather(relay, return_exceptions=True)
+
     async def test_burst_of_1000_never_queues_more_than_64(self) -> None:
         gate = asyncio.Event()
         entered = 0
@@ -323,6 +371,52 @@ class UpstreamConnectionExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(MAX_QUEUED_CONNECTIONS, 64)
         self.assertLessEqual(QUEUE_TIMEOUT, 2.0)
         self.assertLessEqual(FULL_CONNECT_TIMEOUT, 5.0)
+
+
+
+class Socks5HandshakeCleanupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_silent_proxy_connection_is_closed_on_timeout(self) -> None:
+        closed = asyncio.Event()
+
+        async def silent_proxy(reader, writer):
+            await reader.read(3)  # приветствие клиента
+            await reader.read()  # молчим до закрытия со стороны клиента
+            closed.set()
+            writer.close()
+
+        server = await asyncio.start_server(silent_proxy, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            with self.assertRaises((asyncio.TimeoutError, TimeoutError)):
+                await asyncio.wait_for(
+                    socks5.connect_via_socks5("127.0.0.1", port, "149.154.167.51", 443, timeout=10.0),
+                    timeout=0.3,
+                )
+            await asyncio.wait_for(closed.wait(), timeout=2.0)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_rejected_auth_closes_the_connection(self) -> None:
+        closed = asyncio.Event()
+
+        async def rejecting_proxy(reader, writer):
+            await reader.read(3)
+            writer.write(bytes([socks5.SOCKS_VER, 0xFF]))
+            await writer.drain()
+            await reader.read()
+            closed.set()
+            writer.close()
+
+        server = await asyncio.start_server(rejecting_proxy, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            with self.assertRaises(socks5.Socks5Error):
+                await socks5.connect_via_socks5("127.0.0.1", port, "149.154.167.51", 443, timeout=2.0)
+            await asyncio.wait_for(closed.wait(), timeout=2.0)
+        finally:
+            server.close()
+            await server.wait_closed()
 
 
 if __name__ == "__main__":

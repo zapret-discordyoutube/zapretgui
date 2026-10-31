@@ -34,6 +34,10 @@ class TelegramProxyManager(QThread):
         self._runtime: Optional[TelegramProxyRuntime] = None
         self._proxy_logger = get_proxy_logger()
         self._upstream_state: Optional[UpstreamRuntimeSnapshot] = None
+        # Проверка «уже запущен?» и запуск — одно действие: автозапуск из своего
+        # потока и кнопка в окне иначе создавали бы два прокси, и один из них
+        # слушал бы порт без ссылки на него (его не остановить).
+        self._start_lock = threading.Lock()
 
     @property
     def is_running(self) -> bool:
@@ -82,7 +86,24 @@ class TelegramProxyManager(QThread):
                     buffer_kb: int = 256,
                     fake_tls_domain: str = "",
                     proxy_protocol: bool = False) -> bool:
-        """Start the proxy. Thread-safe, non-blocking."""
+        """Start the proxy. Thread-safe: a second start waits for the first one."""
+        with self._start_lock:
+            return self._start_proxy_locked(
+                port=port,
+                mode=mode,
+                host=host,
+                upstream_config=upstream_config,
+                cloudflare_config=cloudflare_config,
+                mtproxy_secret=mtproxy_secret,
+                dc_endpoint_overrides=dc_endpoint_overrides,
+                pool_size=pool_size,
+                buffer_kb=buffer_kb,
+                fake_tls_domain=fake_tls_domain,
+                proxy_protocol=proxy_protocol,
+            )
+
+    def _start_proxy_locked(self, *, port, mode, host, upstream_config, cloudflare_config, mtproxy_secret,
+                            dc_endpoint_overrides, pool_size, buffer_kb, fake_tls_domain, proxy_protocol) -> bool:
         if self.is_running:
             return False
 
