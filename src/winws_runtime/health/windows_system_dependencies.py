@@ -76,6 +76,9 @@ def run_windows_server_wlanapi_install() -> tuple[bool, str]:
             errors="replace",
             timeout=1800,
             check=False,
+            # Внешний PowerShell только ждёт установщика: его окно не нужно
+            # (окно установки с правами администратора откроет Start-Process).
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
         return False, "Установка компонента Windows заняла слишком много времени."

@@ -242,7 +242,9 @@ class OrchestraRunner:
 
         # Загружаем настройку авторестарта при Discord FAIL
         self.auto_restart_on_discord_fail = bool(get_orchestra_auto_restart_on_discord_fail())
-        self.restart_callback: Optional[Callable[[], None]] = None  # Callback для перезапуска приложения
+        # Перезапуск Discord идёт в своём потоке: поток чтения вывода winws2
+        # не должен ждать его (иначе переполнится канал вывода).
+        self._discord_restart_thread: Optional[threading.Thread] = None
 
         # Счётчик Discord FAIL для рестарта (рестарт только после N фейлов подряд)
         self.discord_fail_count = 0
@@ -925,6 +927,27 @@ class OrchestraRunner:
     # REMOVED: _generate_single_numbered_file() - стратегии теперь встроены в circular-config.txt
     # REMOVED: _generate_numbered_strategies() - стратегии теперь встроены в circular-config.txt
 
+    def _restart_discord_in_background(self) -> bool:
+        """Перезапускает Discord в отдельном потоке; второй, пока идёт первый, не начинается."""
+        running = self._discord_restart_thread
+        if running is not None and running.is_alive():
+            return False
+
+        def _restart() -> None:
+            try:
+                from discord.discord import DiscordRestartService
+
+                DiscordRestartService(
+                    status_callback=lambda text: log(f"Discord: {text}", "INFO"),
+                ).restart_once()
+            except Exception as exc:
+                log(f"Перезапуск Discord не удался: {exc}", "WARNING")
+
+        thread = threading.Thread(target=_restart, name="OrchestraDiscordRestart", daemon=True)
+        self._discord_restart_thread = thread
+        thread.start()
+        return True
+
     def _read_output(self):
         """Поток чтения stdout от winws2 с использованием LogParser"""
         parser = LogParser()
@@ -947,372 +970,377 @@ class OrchestraRunner:
             try:
                 for line in self.running_process.stdout:
                     if self.stop_event.is_set():
-                        break
-
-                    line = line.rstrip()
-                    if not line:
+                        # Остановка: строки больше не разбираем, но канал вывода
+                        # дочитываем до конца. Иначе winws2 упрётся в полный канал,
+                        # повиснет на записи и не услышит команду завершения.
                         continue
-
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-
-                    self._remember_output_line(line)
-
-                    if not startup_signal.is_set() and _ENGINE_READY_MARKER in line:
-                        self._startup_ready = True
-                        startup_signal.set()
-
-                    # Записываем в debug лог
-                    if log_file:
-                        try:
-                            log_file.write(f"{line}\n")
-                            log_line_counter += 1
-
-                            # Периодически проверяем размер файла
-                            if log_line_counter >= LOG_SIZE_CHECK_INTERVAL:
-                                log_line_counter = 0
-                                try:
-                                    log_file.flush()
-                                    file_size = os.path.getsize(self.debug_log_path)
-                                    if file_size > MAX_LOG_SIZE_BYTES:
-                                        # Файл превысил лимит - очищаем
-                                        log_file.close()
-                                        log_file = open(self.debug_log_path, 'w', encoding='utf-8', buffering=1)
-                                        log_file.write(f"=== Log truncated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (exceeded {MAX_LOG_SIZE_BYTES // (1024*1024*1024)} GB) ===\n")
-                                        log(f"Лог-файл оркестратора очищен (превышен лимит {MAX_LOG_SIZE_BYTES // (1024*1024*1024)} ГБ)", "INFO")
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
-
-                    # Парсим строку
-                    event = parser.parse_line(line)
-                    if not event:
-                        if self._is_startup_phase() and self._looks_like_error_output_line(line):
-                            self._forward_startup_raw_output(timestamp, line)
-                        continue
-
-                    if self._should_ignore_orchestra_event(event):
-                        continue
-
-                    is_udp = event.l7proto in ("udp", "quic", "stun", "discord", "wireguard", "dht", "unknown")
-
-                    # === LOCK ===
-                    if event.event_type == EventType.LOCK:
-                        host = event.hostname
-                        strat = event.strategy
-                        proto = event.l7proto or "tls"
-
-                        # Пропускаем заблокированные стратегии
-                        if self.blocked_manager.is_blocked(host, strat):
+                    try:
+                        line = line.rstrip()
+                        if not line:
                             continue
 
-                        # Маппинг l7proto -> askey
-                        askey = PROTO_TO_ASKEY.get(proto, proto if proto in ASKEY_ALL else "tls")
+                        timestamp = datetime.now().strftime("%H:%M:%S")
 
-                        # Пропускаем user locks - их нельзя перезаписать auto-lock
-                        if self.locked_manager.is_user_locked(host, askey):
-                            log(f"SKIP auto-lock: {host} has user lock [{askey.upper()}]", "DEBUG")
+                        self._remember_output_line(line)
+
+                        if not startup_signal.is_set() and _ENGINE_READY_MARKER in line:
+                            self._startup_ready = True
+                            startup_signal.set()
+
+                        # Записываем в debug лог
+                        if log_file:
+                            try:
+                                log_file.write(f"{line}\n")
+                                log_line_counter += 1
+
+                                # Периодически проверяем размер файла
+                                if log_line_counter >= LOG_SIZE_CHECK_INTERVAL:
+                                    log_line_counter = 0
+                                    try:
+                                        log_file.flush()
+                                        file_size = os.path.getsize(self.debug_log_path)
+                                        if file_size > MAX_LOG_SIZE_BYTES:
+                                            # Файл превысил лимит - очищаем
+                                            log_file.close()
+                                            log_file = open(self.debug_log_path, 'w', encoding='utf-8', buffering=1)
+                                            log_file.write(f"=== Log truncated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (exceeded {MAX_LOG_SIZE_BYTES // (1024*1024*1024)} GB) ===\n")
+                                            log(f"Лог-файл оркестратора очищен (превышен лимит {MAX_LOG_SIZE_BYTES // (1024*1024*1024)} ГБ)", "INFO")
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+
+                        # Парсим строку
+                        event = parser.parse_line(line)
+                        if not event:
+                            if self._is_startup_phase() and self._looks_like_error_output_line(line):
+                                self._forward_startup_raw_output(timestamp, line)
                             continue
 
-                        # Protocol tag and port for UI
-                        if askey in UDP_ASKEYS:
-                            proto_tag = f"[{askey.upper()}]"
-                            port_str = ""
-                        elif askey == "http":
-                            proto_tag = "[HTTP]"
-                            port_str = ":80"
-                        else:
-                            proto_tag = f"[{askey.upper()}]"
-                            port_str = ":443" if askey in TCP_ASKEYS else ""
-
-                        target_dict = self.locked_manager.locked_by_askey[askey]
-                        if host not in target_dict or target_dict[host] != strat:
-                            target_dict[host] = strat
-                            msg = f"[{timestamp}] {proto_tag} 🔒 LOCKED: {host}{port_str} = strategy {strat}"
-                            log(msg, "INFO")
-                            if self.output_callback:
-                                self.output_callback(msg)
-                            if self.lock_callback:
-                                self.lock_callback(host, strat)
-                            self.locked_manager.save()
-                        continue
-
-                    # === UNLOCK ===
-                    if event.event_type == EventType.UNLOCK:
-                        host = (event.hostname or "").strip().lower()
-                        proto = (event.l7proto or "tls").strip().lower()
-                        askey = PROTO_TO_ASKEY.get(proto, proto if proto in ASKEY_ALL else "tls")
-                        removed = False
-
-                        if not host:
+                        if self._should_ignore_orchestra_event(event):
                             continue
 
-                        # Ищем хост во всех askey профилях и удаляем.
-                        # IMPORTANT: do NOT auto-unlock user-locked entries.
-                        for ak in ASKEY_ALL:
-                            target_dict = self.locked_manager.locked_by_askey[ak]
-                            if host in target_dict:
-                                try:
-                                    if self.locked_manager.is_user_locked(host, ak):
-                                        # User explicitly pinned this domain; ignore AUTO-UNLOCK/UNLOCK from Lua.
-                                        log(f"SKIP auto-unlock: {host} has user lock [{ak.upper()}]", "INFO")
-                                        continue
-                                except Exception:
-                                    pass
+                        is_udp = event.l7proto in ("udp", "quic", "stun", "discord", "wireguard", "dht", "unknown")
 
-                                del target_dict[host]
-                                removed = True
-                                proto_tag = f"[{ak.upper()}]"
-                                port_str = ":443" if ak == "tls" else (":80" if ak == "http" else "")
-                                msg = f"[{timestamp}] {proto_tag} 🔓 UNLOCKED: {host}{port_str} - re-learning..."
+                        # === LOCK ===
+                        if event.event_type == EventType.LOCK:
+                            host = event.hostname
+                            strat = event.strategy
+                            proto = event.l7proto or "tls"
+
+                            # Пропускаем заблокированные стратегии
+                            if self.blocked_manager.is_blocked(host, strat):
+                                continue
+
+                            # Маппинг l7proto -> askey
+                            askey = PROTO_TO_ASKEY.get(proto, proto if proto in ASKEY_ALL else "tls")
+
+                            # Пропускаем user locks - их нельзя перезаписать auto-lock
+                            if self.locked_manager.is_user_locked(host, askey):
+                                log(f"SKIP auto-lock: {host} has user lock [{askey.upper()}]", "DEBUG")
+                                continue
+
+                            # Protocol tag and port for UI
+                            if askey in UDP_ASKEYS:
+                                proto_tag = f"[{askey.upper()}]"
+                                port_str = ""
+                            elif askey == "http":
+                                proto_tag = "[HTTP]"
+                                port_str = ":80"
+                            else:
+                                proto_tag = f"[{askey.upper()}]"
+                                port_str = ":443" if askey in TCP_ASKEYS else ""
+
+                            target_dict = self.locked_manager.locked_by_askey[askey]
+                            if host not in target_dict or target_dict[host] != strat:
+                                target_dict[host] = strat
+                                msg = f"[{timestamp}] {proto_tag} 🔒 LOCKED: {host}{port_str} = strategy {strat}"
                                 log(msg, "INFO")
                                 if self.output_callback:
                                     self.output_callback(msg)
-                                if self.unlock_callback:
-                                    self.unlock_callback(host)
-                        if removed:
-                            self.locked_manager.save()
-                        continue
+                                if self.lock_callback:
+                                    self.lock_callback(host, strat)
+                                self.locked_manager.save()
+                            continue
 
-                    # === RESET ===
-                    if event.event_type == EventType.RESET:
-                        host = event.hostname
-                        msg = f"[{timestamp}] 🔄 RESET: {host} - statistics cleared"
-                        log(msg, "INFO")
-                        if self.output_callback:
-                            self.output_callback(msg)
-                        continue
+                        # === UNLOCK ===
+                        if event.event_type == EventType.UNLOCK:
+                            host = (event.hostname or "").strip().lower()
+                            proto = (event.l7proto or "tls").strip().lower()
+                            askey = PROTO_TO_ASKEY.get(proto, proto if proto in ASKEY_ALL else "tls")
+                            removed = False
 
-                    # === APPLIED ===
-                    if event.event_type == EventType.APPLIED:
-                        host = event.hostname
-                        strat = event.strategy
-                        proto = event.l7proto or "tls"
-                        prev = parser.last_applied.get((host, proto))
+                            if not host:
+                                continue
 
-                        # Protocol tag for APPLIED
-                        if is_udp:
-                            proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
-                        elif proto == "http":
-                            proto_tag = "[HTTP]"
-                        else:
-                            proto_tag = "[TLS]"
+                            # Ищем хост во всех askey профилях и удаляем.
+                            # IMPORTANT: do NOT auto-unlock user-locked entries.
+                            for ak in ASKEY_ALL:
+                                target_dict = self.locked_manager.locked_by_askey[ak]
+                                if host in target_dict:
+                                    try:
+                                        if self.locked_manager.is_user_locked(host, ak):
+                                            # User explicitly pinned this domain; ignore AUTO-UNLOCK/UNLOCK from Lua.
+                                            log(f"SKIP auto-unlock: {host} has user lock [{ak.upper()}]", "INFO")
+                                            continue
+                                    except Exception:
+                                        pass
 
-                        if prev is None or prev != strat:
-                            if prev is None:
-                                msg = f"[{timestamp}] {proto_tag} 🎯 APPLIED: {host} = strategy {strat}"
-                            else:
-                                msg = f"[{timestamp}] {proto_tag} 🔄 APPLIED: {host} {prev} → {strat}"
-                            if self.output_callback:
-                                self.output_callback(msg)
-                        continue
-
-                    # === SUCCESS (from strategy_quality) ===
-                    if event.event_type == EventType.SUCCESS and event.total is not None:
-                        host = event.hostname
-                        strat = event.strategy
-                        proto = event.l7proto or "tls"
-
-                        if host and strat:
-                            self.locked_manager.increment_history(host, strat, is_success=True)
-                            history_save_counter += 1
-
-                            # Сброс счётчика Discord FAIL при SUCCESS
-                            if "discord" in host.lower() and self.discord_fail_count > 0:
-                                self.discord_fail_count = 0
-
-                            # Protocol tag for clear identification
-                            if is_udp:
-                                proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
-                                port_str = ""
-                            elif proto == "http":
-                                proto_tag = "[HTTP]"
-                                port_str = ":80"
-                            else:
-                                proto_tag = "[TLS]"
-                                port_str = ":443"
-                            msg = f"[{timestamp}] {proto_tag} ✓ SUCCESS: {host}{port_str} strategy={strat} ({event.successes}/{event.total})"
-                            if self.output_callback:
-                                self.output_callback(msg)
-
-                            if history_save_counter >= 5:
-                                self.locked_manager.flush_history()
-                                history_save_counter = 0
-                        continue
-
-                    # === SUCCESS (from std_success_detector) ===
-                    if event.event_type == EventType.SUCCESS:
-                        host = event.hostname
-                        strat = event.strategy
-                        proto = event.l7proto or "tls"
-
-                        if host and strat and not self.blocked_manager.is_blocked(host, strat):
-                            self.locked_manager.increment_history(host, strat, is_success=True)
-                            history_save_counter += 1
-
-                            # Сброс счётчика Discord FAIL при SUCCESS
-                            if "discord" in host.lower() and self.discord_fail_count > 0:
-                                self.discord_fail_count = 0
-
-                            # Protocol tag for clear identification
-                            if is_udp:
-                                proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
-                                port_str = ""
-                            elif proto == "http":
-                                proto_tag = "[HTTP]"
-                                port_str = ":80"
-                            else:
-                                proto_tag = "[TLS]"
-                                port_str = ":443"
-
-                            # Auto-LOCK после успехов
-                            host_key = f"{host}:{strat}"
-                            if not hasattr(self, '_success_counts'):
-                                self._success_counts = {}
-                            # Порядок ключей — от давних к свежим; при переполнении
-                            # выбрасываются давно не встречавшиеся цели.
-                            count = self._success_counts.pop(host_key, 0) + 1
-                            self._success_counts[host_key] = count
-                            if len(self._success_counts) > 6000:
-                                for stale_key in list(self._success_counts)[:3000]:
-                                    del self._success_counts[stale_key]
-
-                            lock_threshold = 1 if is_udp else 3
-                            if self._success_counts[host_key] >= lock_threshold:
-                                # Маппинг l7proto -> askey
-                                askey = PROTO_TO_ASKEY.get(proto, proto if proto in ASKEY_ALL else "tls")
-
-                                # Пропускаем user locks - их нельзя перезаписать auto-lock
-                                if self.locked_manager.is_user_locked(host, askey):
-                                    log(f"SKIP auto-lock: {host} has user lock [{askey.upper()}]", "DEBUG")
-                                else:
-                                    target_dict = self.locked_manager.locked_by_askey[askey]
-
-                                    if host not in target_dict or target_dict[host] != strat:
-                                        target_dict[host] = strat
-                                        msg = f"[{timestamp}] {proto_tag} 🔒 LOCKED: {host}{port_str} = strategy {strat}"
-                                        log(msg, "INFO")
-                                        if self.output_callback:
-                                            self.output_callback(msg)
-                                        self.locked_manager.save()
-                                        self.locked_manager.flush_history()
-                                        history_save_counter = 0
-
-                            msg = f"[{timestamp}] {proto_tag} ✓ SUCCESS: {host}{port_str} strategy={strat}"
-                            if self.output_callback:
-                                self.output_callback(msg)
-
-                            if history_save_counter >= 5:
-                                self.locked_manager.flush_history()
-                                history_save_counter = 0
-                        continue
-
-                    # === FAIL ===
-                    if event.event_type == EventType.FAIL:
-                        host = event.hostname
-                        strat = event.strategy
-                        proto = event.l7proto or "tls"
-
-                        if host and strat:
-                            self.locked_manager.increment_history(host, strat, is_success=False)
-                            history_save_counter += 1
-
-                            # Protocol tag for clear identification
-                            if is_udp:
-                                proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
-                                port_str = ""
-                            elif proto == "http":
-                                proto_tag = "[HTTP]"
-                                port_str = ":80"
-                            else:
-                                proto_tag = "[TLS]"
-                                port_str = ":443"
-                            msg = f"[{timestamp}] {proto_tag} ✗ FAIL: {host}{port_str} strategy={strat} ({event.successes}/{event.total})"
-                            if self.output_callback:
-                                self.output_callback(msg)
-
-                            # Проверяем Discord FAIL для авторестарта Discord (с подсчётом фейлов)
-                            if self.auto_restart_on_discord_fail and "discord" in host.lower():
-                                self.discord_fail_count += 1
-                                log(f"Discord FAIL #{self.discord_fail_count}/{self.discord_fails_threshold} ({host})", "DEBUG")
-                                if self.discord_fail_count >= self.discord_fails_threshold:
-                                    log(f"🔄 Достигнут порог Discord FAIL ({self.discord_fail_count}), перезапускаю Discord...", "WARNING")
+                                    del target_dict[host]
+                                    removed = True
+                                    proto_tag = f"[{ak.upper()}]"
+                                    port_str = ":443" if ak == "tls" else (":80" if ak == "http" else "")
+                                    msg = f"[{timestamp}] {proto_tag} 🔓 UNLOCKED: {host}{port_str} - re-learning..."
+                                    log(msg, "INFO")
                                     if self.output_callback:
-                                        self.output_callback(f"[{timestamp}] ⚠️ Discord FAIL x{self.discord_fail_count} - перезапуск Discord...")
-                                    if self.restart_callback:
-                                        # Вызываем callback для перезапуска Discord (через главный поток)
-                                        self.restart_callback()
-                                    self.discord_fail_count = 0  # Сброс после рестарта
+                                        self.output_callback(msg)
+                                    if self.unlock_callback:
+                                        self.unlock_callback(host)
+                            if removed:
+                                self.locked_manager.save()
+                            continue
 
-                            if history_save_counter >= 5:
-                                self.locked_manager.flush_history()
-                                history_save_counter = 0
-                        continue
+                        # === RESET ===
+                        if event.event_type == EventType.RESET:
+                            host = event.hostname
+                            msg = f"[{timestamp}] 🔄 RESET: {host} - statistics cleared"
+                            log(msg, "INFO")
+                            if self.output_callback:
+                                self.output_callback(msg)
+                            continue
 
-                    # === ROTATE ===
-                    if event.event_type == EventType.ROTATE:
-                        host = event.hostname or parser.current_host
-                        proto = event.l7proto or "tls"
-                        # Protocol tag for rotate
-                        if is_udp:
-                            proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
-                        elif proto == "http":
-                            proto_tag = "[HTTP]"
-                        else:
-                            proto_tag = "[TLS]"
-                        msg = f"[{timestamp}] {proto_tag} 🔄 Strategy rotated to {event.strategy}"
-                        if host:
-                            msg += f" ({host})"
-                        if self.output_callback:
-                            self.output_callback(msg)
-                        continue
+                        # === APPLIED ===
+                        if event.event_type == EventType.APPLIED:
+                            host = event.hostname
+                            strat = event.strategy
+                            proto = event.l7proto or "tls"
+                            prev = event.previous_strategy
 
-                    # === RST ===
-                    if event.event_type == EventType.RST:
-                        host = event.hostname
-                        strat = event.strategy
-                        proto = event.l7proto or "tls"
-                        # Protocol tag for RST
-                        if is_udp:
-                            proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
-                            port_str = ""
-                        elif proto == "http":
-                            proto_tag = "[HTTP]"
-                            port_str = ":80"
-                        else:
-                            proto_tag = "[TLS]"
-                            port_str = ":443"
+                            # Protocol tag for APPLIED
+                            if is_udp:
+                                proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
+                            elif proto == "http":
+                                proto_tag = "[HTTP]"
+                            else:
+                                proto_tag = "[TLS]"
 
-                        if host and strat:
-                            msg = f"[{timestamp}] {proto_tag} ⚡ RST detected: {host}{port_str} strategy={strat}"
-                        elif host:
-                            msg = f"[{timestamp}] {proto_tag} ⚡ RST detected: {host}{port_str}"
-                        else:
-                            msg = f"[{timestamp}] {proto_tag} ⚡ RST detected - DPI block"
-                        if self.output_callback:
-                            self.output_callback(msg)
-                        continue
+                            if prev is None or prev != strat:
+                                if prev is None:
+                                    msg = f"[{timestamp}] {proto_tag} 🎯 APPLIED: {host} = strategy {strat}"
+                                else:
+                                    msg = f"[{timestamp}] {proto_tag} 🔄 APPLIED: {host} {prev} → {strat}"
+                                if self.output_callback:
+                                    self.output_callback(msg)
+                            continue
 
-                    # === HISTORY ===
-                    if event.event_type == EventType.HISTORY:
-                        self.locked_manager.update_history(event.hostname, event.strategy, event.successes, event.failures)
-                        # Не спамим UI историей - данные и так сохраняются
-                        # msg = f"[{timestamp}] HISTORY: {event.hostname} strat={event.strategy} ({event.successes}✓/{event.failures}✗) = {event.rate}%"
-                        # if self.output_callback:
-                        #     self.output_callback(msg)
-                        # В базу пишет сам менеджер: изменившиеся цели раз в
-                        # HISTORY_FLUSH_INTERVAL_SECONDS и всю историю при остановке.
-                        # Полная запись на каждую строку HISTORY (при старте их
-                        # тысячи) пересобирала весь документ настроек.
-                        continue
+                        # === SUCCESS (from strategy_quality) ===
+                        if event.event_type == EventType.SUCCESS and event.total is not None:
+                            host = event.hostname
+                            strat = event.strategy
+                            proto = event.l7proto or "tls"
 
-                    # === PRELOADED ===
-                    if event.event_type == EventType.PRELOADED:
-                        proto_str = f" [{event.l7proto}]" if event.l7proto else ""
-                        msg = f"[{timestamp}] PRELOADED: {event.hostname} = strategy {event.strategy}{proto_str}"
-                        if self.output_callback:
-                            self.output_callback(msg)
-                        continue
+                            if host and strat:
+                                self.locked_manager.increment_history(host, strat, is_success=True)
+                                history_save_counter += 1
+
+                                # Сброс счётчика Discord FAIL при SUCCESS
+                                if "discord" in host.lower() and self.discord_fail_count > 0:
+                                    self.discord_fail_count = 0
+
+                                # Protocol tag for clear identification
+                                if is_udp:
+                                    proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
+                                    port_str = ""
+                                elif proto == "http":
+                                    proto_tag = "[HTTP]"
+                                    port_str = ":80"
+                                else:
+                                    proto_tag = "[TLS]"
+                                    port_str = ":443"
+                                msg = f"[{timestamp}] {proto_tag} ✓ SUCCESS: {host}{port_str} strategy={strat} ({event.successes}/{event.total})"
+                                if self.output_callback:
+                                    self.output_callback(msg)
+
+                                if history_save_counter >= 5:
+                                    self.locked_manager.flush_history()
+                                    history_save_counter = 0
+                            continue
+
+                        # === SUCCESS (from std_success_detector) ===
+                        if event.event_type == EventType.SUCCESS:
+                            host = event.hostname
+                            strat = event.strategy
+                            proto = event.l7proto or "tls"
+
+                            if host and strat and not self.blocked_manager.is_blocked(host, strat):
+                                self.locked_manager.increment_history(host, strat, is_success=True)
+                                history_save_counter += 1
+
+                                # Сброс счётчика Discord FAIL при SUCCESS
+                                if "discord" in host.lower() and self.discord_fail_count > 0:
+                                    self.discord_fail_count = 0
+
+                                # Protocol tag for clear identification
+                                if is_udp:
+                                    proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
+                                    port_str = ""
+                                elif proto == "http":
+                                    proto_tag = "[HTTP]"
+                                    port_str = ":80"
+                                else:
+                                    proto_tag = "[TLS]"
+                                    port_str = ":443"
+
+                                # Auto-LOCK после успехов
+                                host_key = f"{host}:{strat}"
+                                if not hasattr(self, '_success_counts'):
+                                    self._success_counts = {}
+                                # Порядок ключей — от давних к свежим; при переполнении
+                                # выбрасываются давно не встречавшиеся цели.
+                                count = self._success_counts.pop(host_key, 0) + 1
+                                self._success_counts[host_key] = count
+                                if len(self._success_counts) > 6000:
+                                    for stale_key in list(self._success_counts)[:3000]:
+                                        del self._success_counts[stale_key]
+
+                                lock_threshold = 1 if is_udp else 3
+                                if self._success_counts[host_key] >= lock_threshold:
+                                    # Маппинг l7proto -> askey
+                                    askey = PROTO_TO_ASKEY.get(proto, proto if proto in ASKEY_ALL else "tls")
+
+                                    # Пропускаем user locks - их нельзя перезаписать auto-lock
+                                    if self.locked_manager.is_user_locked(host, askey):
+                                        log(f"SKIP auto-lock: {host} has user lock [{askey.upper()}]", "DEBUG")
+                                    else:
+                                        target_dict = self.locked_manager.locked_by_askey[askey]
+
+                                        if host not in target_dict or target_dict[host] != strat:
+                                            target_dict[host] = strat
+                                            msg = f"[{timestamp}] {proto_tag} 🔒 LOCKED: {host}{port_str} = strategy {strat}"
+                                            log(msg, "INFO")
+                                            if self.output_callback:
+                                                self.output_callback(msg)
+                                            self.locked_manager.save()
+                                            self.locked_manager.flush_history()
+                                            history_save_counter = 0
+
+                                msg = f"[{timestamp}] {proto_tag} ✓ SUCCESS: {host}{port_str} strategy={strat}"
+                                if self.output_callback:
+                                    self.output_callback(msg)
+
+                                if history_save_counter >= 5:
+                                    self.locked_manager.flush_history()
+                                    history_save_counter = 0
+                            continue
+
+                        # === FAIL ===
+                        if event.event_type == EventType.FAIL:
+                            host = event.hostname
+                            strat = event.strategy
+                            proto = event.l7proto or "tls"
+
+                            if host and strat:
+                                self.locked_manager.increment_history(host, strat, is_success=False)
+                                history_save_counter += 1
+
+                                # Protocol tag for clear identification
+                                if is_udp:
+                                    proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
+                                    port_str = ""
+                                elif proto == "http":
+                                    proto_tag = "[HTTP]"
+                                    port_str = ":80"
+                                else:
+                                    proto_tag = "[TLS]"
+                                    port_str = ":443"
+                                msg = f"[{timestamp}] {proto_tag} ✗ FAIL: {host}{port_str} strategy={strat} ({event.successes}/{event.total})"
+                                if self.output_callback:
+                                    self.output_callback(msg)
+
+                                # Проверяем Discord FAIL для авторестарта Discord (с подсчётом фейлов)
+                                if self.auto_restart_on_discord_fail and "discord" in host.lower():
+                                    self.discord_fail_count += 1
+                                    log(f"Discord FAIL #{self.discord_fail_count}/{self.discord_fails_threshold} ({host})", "DEBUG")
+                                    if self.discord_fail_count >= self.discord_fails_threshold:
+                                        log(f"🔄 Достигнут порог Discord FAIL ({self.discord_fail_count}), перезапускаю Discord...", "WARNING")
+                                        if self.output_callback:
+                                            self.output_callback(f"[{timestamp}] ⚠️ Discord FAIL x{self.discord_fail_count} - перезапуск Discord...")
+                                        self._restart_discord_in_background()
+                                        self.discord_fail_count = 0  # Сброс после рестарта
+
+                                if history_save_counter >= 5:
+                                    self.locked_manager.flush_history()
+                                    history_save_counter = 0
+                            continue
+
+                        # === ROTATE ===
+                        if event.event_type == EventType.ROTATE:
+                            host = event.hostname or parser.current_host
+                            proto = event.l7proto or "tls"
+                            # Protocol tag for rotate
+                            if is_udp:
+                                proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
+                            elif proto == "http":
+                                proto_tag = "[HTTP]"
+                            else:
+                                proto_tag = "[TLS]"
+                            msg = f"[{timestamp}] {proto_tag} 🔄 Strategy rotated to {event.strategy}"
+                            if host:
+                                msg += f" ({host})"
+                            if self.output_callback:
+                                self.output_callback(msg)
+                            continue
+
+                        # === RST ===
+                        if event.event_type == EventType.RST:
+                            host = event.hostname
+                            strat = event.strategy
+                            proto = event.l7proto or "tls"
+                            # Protocol tag for RST
+                            if is_udp:
+                                proto_tag = f"[{proto.upper()}]" if proto else "[UDP]"
+                                port_str = ""
+                            elif proto == "http":
+                                proto_tag = "[HTTP]"
+                                port_str = ":80"
+                            else:
+                                proto_tag = "[TLS]"
+                                port_str = ":443"
+
+                            if host and strat:
+                                msg = f"[{timestamp}] {proto_tag} ⚡ RST detected: {host}{port_str} strategy={strat}"
+                            elif host:
+                                msg = f"[{timestamp}] {proto_tag} ⚡ RST detected: {host}{port_str}"
+                            else:
+                                msg = f"[{timestamp}] {proto_tag} ⚡ RST detected - DPI block"
+                            if self.output_callback:
+                                self.output_callback(msg)
+                            continue
+
+                        # === HISTORY ===
+                        if event.event_type == EventType.HISTORY:
+                            self.locked_manager.update_history(event.hostname, event.strategy, event.successes, event.failures)
+                            # Не спамим UI историей - данные и так сохраняются
+                            # msg = f"[{timestamp}] HISTORY: {event.hostname} strat={event.strategy} ({event.successes}✓/{event.failures}✗) = {event.rate}%"
+                            # if self.output_callback:
+                            #     self.output_callback(msg)
+                            # В базу пишет сам менеджер: изменившиеся цели раз в
+                            # HISTORY_FLUSH_INTERVAL_SECONDS и всю историю при остановке.
+                            # Полная запись на каждую строку HISTORY (при старте их
+                            # тысячи) пересобирала весь документ настроек.
+                            continue
+
+                        # === PRELOADED ===
+                        if event.event_type == EventType.PRELOADED:
+                            proto_str = f" [{event.l7proto}]" if event.l7proto else ""
+                            msg = f"[{timestamp}] PRELOADED: {event.hostname} = strategy {event.strategy}{proto_str}"
+                            if self.output_callback:
+                                self.output_callback(msg)
+                            continue
+                    except Exception as line_error:
+                        # Одна непонятная строка не должна останавливать чтение:
+                        # без читателя канал вывода заполнится и winws2 встанет.
+                        log(f"Orchestra: строка вывода не разобрана: {line_error}", "DEBUG")
 
             except Exception as e:
                 import traceback
@@ -1543,7 +1571,12 @@ class OrchestraRunner:
                 stderr=subprocess.STDOUT,
                 startupinfo=self._create_startup_info(),
                 creationflags=CREATE_NO_WINDOW,
+                # Кодировка задана явно и без исключений: по умолчанию Python
+                # взял бы кодировку системы (cp1251), где байт 0x98 из русских
+                # букв в UTF-8 не декодируется — и чтение вывода обрывалось бы.
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1
             )
 

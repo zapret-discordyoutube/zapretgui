@@ -425,5 +425,111 @@ class ShippedCircularConfigBlobTests(unittest.TestCase):
                 self.assertEqual(len(hex_value) % 2, 0)
 
 
+
+class OrchestraOutputReaderTests(unittest.TestCase):
+    """Поток чтения вывода winws2: дочитывает канал до конца и не теряет APPLIED."""
+
+    def _runner(self, tmp: str):
+        from orchestra import orchestra_runner as module
+
+        with patch.object(module, "get_orchestra_keep_debug_file", return_value=False), \
+                patch.object(module, "get_orchestra_auto_restart_on_discord_fail", return_value=True), \
+                patch.object(module, "get_orchestra_discord_fails_for_restart", return_value=1):
+            runner = module.OrchestraRunner(zapret_path=str(Path(tmp)))
+        runner.debug_log_path = ""
+        runner.locked_manager = MagicMock()
+        runner.locked_manager.strategy_history = {}
+        runner.blocked_manager = MagicMock()
+        runner.blocked_manager.is_blocked.return_value = False
+        return module, runner
+
+    def _run(self, runner, lines):
+        process = MagicMock()
+        stream = iter(lines)
+        consumed: list[str] = []
+
+        class _Stdout:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                line = next(stream)
+                consumed.append(line)
+                return line
+
+        process.stdout = _Stdout()
+        runner.running_process = process
+        output: list[str] = []
+        runner.output_callback = output.append
+        runner._read_output()
+        return consumed, output
+
+    def test_reader_keeps_draining_after_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _module, runner = self._runner(tmp)
+            runner.stop_event.set()
+            lines = [f"packet {index}\n" for index in range(50)]
+            consumed, _output = self._run(runner, lines)
+        self.assertEqual(len(consumed), 50)
+
+    def test_reader_survives_a_line_that_breaks_processing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _module, runner = self._runner(tmp)
+            calls = {"count": 0}
+            real_remember = runner._remember_output_line
+
+            def _remember(line):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    raise ValueError("bad line")
+                return real_remember(line)
+
+            runner._remember_output_line = _remember
+            consumed, _output = self._run(runner, ["first\n", "second\n", "third\n"])
+        self.assertEqual(len(consumed), 3)
+
+    def test_applied_lines_reach_the_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _module, runner = self._runner(tmp)
+            _consumed, output = self._run(
+                runner,
+                [
+                    "LUA: strategy-stats: APPLIED youtube.com [tls] = strategy 2\n",
+                    "LUA: strategy-stats: APPLIED youtube.com [tls] = strategy 2\n",
+                    "LUA: strategy-stats: APPLIED youtube.com [tls] = strategy 5\n",
+                ],
+            )
+        applied = [line for line in output if "APPLIED:" in line]
+        self.assertEqual(len(applied), 2)
+        self.assertIn("youtube.com = strategy 2", applied[0])
+        self.assertIn("youtube.com 2 → 5", applied[1])
+
+    def test_discord_fail_threshold_restarts_discord(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            module, runner = self._runner(tmp)
+            with patch.object(runner, "_restart_discord_in_background") as restart:
+                runner.discord_fail_count = 0
+                self._run(runner, ["LUA: slm_quality: [tls] discord.com strat=3 FAIL 0/3\n"])
+        restart.assert_called_once()
+
+    def test_profile_search_reads_current_engine_format(self) -> None:
+        from orchestra.log_parser import EventType, LogParser
+
+        parser = LogParser()
+        event = parser.parse_line(
+            "desync profile search for tcp ip=2a00:1450:4010:c0e::5e port=443 icmp=0:0 "
+            "l7proto=tls ssid='' mark=0x00000000 hostname='www.youtube.com'"
+        )
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, EventType.TCP_PROFILE_SEARCH)
+        self.assertEqual(parser.current_host, "youtube.com")
+        udp = parser.parse_line(
+            "desync profile search for udp ip1=10.0.0.1 ip2=8.8.8.8 port=443 icmp=0:0 "
+            "l7proto=quic ssid='' mark=0x00000000 hostname=''"
+        )
+        self.assertIsNotNone(udp)
+        self.assertEqual(udp.event_type, EventType.UDP_PROFILE_SEARCH)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -38,14 +38,18 @@ class Patterns:
     ip4_udp = re.compile(r"IP4: ([\d.]+) => ([\d.]+) proto=udp")
 
     # --- Profile Search ---
-    # desync profile search for tcp ip=142.250.74.206 port=443 l7proto=tls ssid='' hostname='youtube.com'
+    # desync profile search for tcp ip=142.250.74.206 port=443 icmp=0:0 l7proto=tls ssid='' mark=0x00000000 hostname='youtube.com'
+    # Поля между port= и l7proto= (icmp=) и между ssid= и hostname= (mark=) есть
+    # не во всех сборках, а вместо ip= бывает пара ip1=/ip2= (nfq2/desync.c):
+    # середина не фиксируется. Адрес — IPv4 или IPv6 (\S+, не только цифры).
     tcp_profile_search = re.compile(
-        r"desync profile search for tcp ip=([\d.:]+) port=(\d+) l7proto=(\S+) ssid='[^']*' hostname='([^']*)'"
+        r"desync profile search for tcp (?:ip|ip1)=(\S+)(?: ip2=\S+)? port=(\d+)\b.*?"
+        r"\bl7proto=(\S+) ssid='[^']*'.*? hostname='([^']*)'"
     )
 
-    # desync profile search for udp ip=108.177.122.95 port=443 l7proto=quic
+    # desync profile search for udp ip=108.177.122.95 port=443 icmp=0:0 l7proto=quic ...
     udp_profile_search = re.compile(
-        r"desync profile search for udp ip=([\d.:a-fA-F]+) port=(\d+) l7proto=(\S+)"
+        r"desync profile search for udp (?:ip|ip1)=(\S+)(?: ip2=\S+)? port=(\d+)\b.*?\bl7proto=(\S+)"
     )
 
     # using cached desync profile 1 (noname)
@@ -190,6 +194,10 @@ class ParsedEvent:
     ip: Optional[str] = None
     port: Optional[int] = None
     strategy: Optional[int] = None
+    # APPLIED: стратегия, что стояла у этой цели до строки (None — первая).
+    # Парсер сам обновляет last_applied, поэтому читающий после разбора
+    # видел бы уже новую стратегию.
+    previous_strategy: Optional[int] = None
     l7proto: Optional[str] = None  # tls, http, quic, stun, discord, etc.
     profile: Optional[int] = None  # номер профиля (1=TLS, 2=HTTP, 3=UDP)
     successes: Optional[int] = None
@@ -619,7 +627,7 @@ class LogParser:
             # Порядок ключей — от давних к свежим: при переполнении
             # выбрасываются давно не встречавшиеся цели (для UDP это сырые IP).
             applied_key = (host_key, proto_key)
-            self.last_applied.pop(applied_key, None)
+            previous_strategy = self.last_applied.pop(applied_key, None)
             self.last_applied[applied_key] = strategy
             if len(self.last_applied) > 4000:
                 for key in list(self.last_applied)[:2000]:
@@ -631,6 +639,7 @@ class LogParser:
                 event_type=EventType.APPLIED,
                 hostname=host_key,
                 strategy=strategy,
+                previous_strategy=previous_strategy,
                 l7proto=proto_key,
                 tag=tag,
                 raw_line=line

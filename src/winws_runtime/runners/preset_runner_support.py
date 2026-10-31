@@ -86,7 +86,10 @@ class PresetRunnerStateMachine:
             PresetRunnerState.FAILED,
             PresetRunnerState.IDLE,
         },
-        PresetRunnerState.FAILED: {PresetRunnerState.IDLE, PresetRunnerState.STARTING},
+        # Неудачная смена пресета оставляет прежний winws живым: «Стоп» из FAILED
+        # обязан пройти через STOPPING, иначе переход падал бы исключением и
+        # собственная остановка runner-а (драйвер, состояние) пропускалась.
+        PresetRunnerState.FAILED: {PresetRunnerState.IDLE, PresetRunnerState.STARTING, PresetRunnerState.STOPPING},
     }
 
     def __init__(self) -> None:
