@@ -180,13 +180,17 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
 
     def test_own_domains_row_is_hidden_while_a_check_runs(self) -> None:
         # Список сайтов берётся в момент запуска: добавлять свои домены во время проверки бесполезно.
+        # Поле открыто ссылкой «+ Свой домен»: на время проверки прячутся и оно, и ссылка, потом поле возвращается.
         page = _make_page()
+        page._open_custom_domains()
         with patch("blockcheck.ui.page.start_blockcheck_page_run"):
             page._on_start()
         self.assertTrue(page._domains_card.isHidden())
+        self.assertTrue(page._custom_domain_btn.isHidden())
 
         page._on_finished(None)
         self.assertFalse(page._domains_card.isHidden())
+        self.assertTrue(page._custom_domain_btn.isHidden())
 
     def test_cards_have_no_headers_to_save_space(self) -> None:
         page = _make_page()
@@ -201,22 +205,36 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(
             [actions.itemAt(index).widget() for index in range(3)], [page._start_btn, page._paired_btn, page._stop_btn]
         )
-        # В строке кнопок — только кнопки и полоса хода. Выбор набора с галочкой и строка
-        # состояния стоят ниже своими строками: в одну строку всё не помещалось при окне
-        # 1280 px — галочка сжималась до пустого квадрата, а текст состояния наезжал на неё.
-        row_widgets = {actions.itemAt(index).widget() for index in range(actions.count())} - {None}
-        self.assertEqual(row_widgets, {page._start_btn, page._paired_btn, page._stop_btn, page._progress_bar})
-        self.assertIs(page._scope_combo.parentWidget(), page._scope_host)
-        self.assertIs(page._outside_box.parentWidget(), page._scope_host)
-        self.assertIs(page._scope_host.parentWidget(), page._summary_panel.hero)
+        # Панель запуска в две строки (решение 2026-10-31): кнопки и выбор набора, ниже —
+        # галочка сверки с сервером и ссылка «+ Свой домен». Подписи «Что проверить:» нет.
+        row_widgets = [actions.itemAt(index).widget() for index in range(actions.count())]
+        row_widgets = [widget for widget in row_widgets if widget is not None]
+        self.assertEqual(
+            row_widgets,
+            [page._start_btn, page._paired_btn, page._stop_btn, page._scope_combo, page._progress_bar],
+        )
+        self.assertFalse(hasattr(page, "_scope_label"))
+        self.assertIs(page._outside_box.parentWidget(), page._options_row)
+        self.assertIs(page._custom_domain_btn.parentWidget(), page._options_row)
+        self.assertIs(page._options_row.parentWidget(), page._summary_panel.hero)
         self.assertTrue(page._status_label.wordWrap())
         # «Свои домены» — тоже управление проверкой: стоят в шапке, под кнопками, а не под результатами.
         self.assertIs(page._domains_card.parentWidget(), page._summary_panel.hero)
         controls = page._summary_panel.controls
         self.assertEqual(
             [controls.itemAt(index).widget() for index in range(controls.count())],
-            [page._scope_host, page._status_label, page._domains_card],
+            [page._options_row, page._status_label, page._domains_card],
         )
+        # До первой проверки нет ни строки состояния (она повторяла бы список), ни поля доменов:
+        # поле открывает ссылка «+ Свой домен».
+        self.assertTrue(page._status_label.isHidden())
+        self.assertTrue(page._domains_card.isHidden())
+        self.assertFalse(page._custom_domain_btn.isHidden())
+        page._open_custom_domains()
+        self.assertFalse(page._domains_card.isHidden())
+        self.assertTrue(page._custom_domain_btn.isHidden())
+        page._set_status_text("Проверяем… ход виден ниже")
+        self.assertFalse(page._status_label.isHidden())
         # Подложка — только у шапки и у самих карточек: разделы с карточками её не рисуют.
         from qfluentwidgets import CardWidget
 

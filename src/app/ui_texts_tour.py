@@ -480,12 +480,12 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
     "onboarding.step.blockcheck_domains.title": {"ru": "Свои домены", "en": "Your own domains"},
     "onboarding.step.blockcheck_domains.body": {
         "ru": (
-            "Нужного сайта нет в проверке — впишите его адрес и нажмите «Добавить». Домен запомнится и "
-            "будет проверяться вместе с остальными, пока вы его не уберёте."
+            "Нужного сайта нет в проверке — нажмите «Свой домен», впишите его адрес и нажмите «Добавить». "
+            "Домен запомнится и будет проверяться вместе с остальными, пока вы его не уберёте."
         ),
         "en": (
-            "If the site you need is not in the check, type its address and press Add. The domain is "
-            "remembered and checked with the others until you remove it."
+            "If the site you need is not in the check, press Own domain, type its address and press Add. "
+            "The domain is remembered and checked with the others until you remove it."
         ),
     },
     "onboarding.step.blockcheck_summary.title": {"ru": "Итог проверки", "en": "Check summary"},

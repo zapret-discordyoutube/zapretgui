@@ -533,9 +533,13 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Сервисы",
         "en": "Services",
     },
-    "page.blockcheck.scope": {
-        "ru": "Что проверить:",
-        "en": "What to check:",
+    "page.blockcheck.custom_domain.open": {
+        "ru": "Свой домен",
+        "en": "Own domain",
+    },
+    "page.blockcheck.custom_domain.open.description": {
+        "ru": "Добавить в проверку сайт, которого нет в списке BlockCheck.",
+        "en": "Add a site that is not on the BlockCheck list to the check.",
     },
     "page.blockcheck.ask_outside": {
         "ru": "Сверить с сервером в Нидерландах",

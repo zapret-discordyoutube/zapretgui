@@ -92,7 +92,10 @@ class BlockcheckTourGuide(QObject):
             # Выбор набора, галочка сверки с сервером и кнопки «Проверить» и «С обходом и без»: они есть при любой раскладке верха страницы.
             return [page._scope_combo, page._outside_box, page._start_btn, page._paired_btn]
         if name == "domains":
-            return page._domains_card
+            # Поле своих доменов открывается ссылкой «+ Свой домен»: пока его нет, экскурсия показывает ссылку.
+            if page._domains_card.isVisible() or page._custom_domain_btn is None:
+                return page._domains_card
+            return page._custom_domain_btn
         if name == "tabs":
             return page._tabs_pivot
         if name == "summary":

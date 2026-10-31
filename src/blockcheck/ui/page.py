@@ -55,13 +55,12 @@ from qfluentwidgets import (
     CheckBox,
     ComboBox,
     CaptionLabel,
-    FlowLayout,
-    BodyLabel,
     IndeterminateProgressBar,
     PrimaryPushButton,
     PushButton,
     LineEdit,
     SegmentedWidget,
+    TransparentPushButton,
     FluentIcon,
 )
 
@@ -220,6 +219,10 @@ class BlockcheckPage(BasePage):
         self._cleanup_in_progress = False
         self._tabs_pivot = None
         self._domains_caption = None
+        # Поле своих доменов открыто по ссылке «+ Свой домен» и спрятано на время проверки.
+        self._custom_domains_open = False
+        self._domains_hidden_for_run = False
+        self._custom_domain_btn = None
         self._domains_flow = None
         self._prepare_support_btn = None
         self._support_status_label = None
@@ -407,19 +410,12 @@ class BlockcheckPage(BasePage):
         self._add_tab_widget(self._summary_panel)
         # Имя осталось от отдельной карточки управления: теперь управление стоит в панели итога.
         self._control_card = self._summary_panel
-        # Первая строка — только кнопки и полоса хода. Выбор набора с галочкой — своей
-        # строкой под ними и переносится в узком окне, строка состояния — отдельно: в одну
-        # строку всё не помещалось уже при окне 1280 px, галочка сжималась до пустого
-        # квадрата, а текст состояния наезжал на неё.
+        # Панель запуска в две строки (решение пользователя 2026-10-31: «слишком
+        # перегружено»). Первая — кнопки и выбор набора, вторая — галочка сверки с
+        # сервером и ссылка «+ Свой домен»; поле своих доменов открывается по ссылке,
+        # строка состояния видна только во время проверки и после неё. Подпись «Что
+        # проверить:» убрана: выпадающий список сам называет набор.
         row = self._summary_panel.actions
-        self._scope_host = QWidget()
-        scope_flow = FlowLayout(self._scope_host, needAni=False)
-        scope_flow.setContentsMargins(0, 0, 0, 0)
-        scope_flow.setHorizontalSpacing(10)
-        scope_flow.setVerticalSpacing(6)
-        self._scope_label = BodyLabel(tr_catalog("page.blockcheck.scope", default="Что проверить:"))
-        set_state_text(self._scope_label, f"Поле BlockCheck: {self._scope_label.text()}")
-        scope_flow.addWidget(self._scope_label)
         self._scope_combo = ComboBox()
         # userData — именованным: второй позиционный аргумент у qfluentwidgets —
         # значок, и значение терялось (старый выбор режима всегда давал «Полную»).
@@ -439,7 +435,8 @@ class BlockcheckPage(BasePage):
         self._scope_combo.setMinimumWidth(320)
         self._update_scope_combo_accessibility()
         self._scope_combo.currentIndexChanged.connect(self._update_scope_combo_accessibility)
-        scope_flow.addWidget(self._scope_combo)
+        # Кнопки «Проверить», «С обходом и без», «Остановить» встают перед списком ниже (insertWidget 0–2).
+        row.addWidget(self._scope_combo)
         # Сервер проекта открывает закрытый сайт из Нидерландов: так видно, заблокирован он
         # или не работает сам. Само соединение с сервером выдаёт программу провайдеру,
         # поэтому без галочки запрос туда не уходит (utils.probe_gate, решение 2026-10-16).
@@ -455,20 +452,32 @@ class BlockcheckPage(BasePage):
         )
         set_tooltip(self._outside_box, outside_description)
         set_control_accessibility(self._outside_box, name="Сверить с сервером в Нидерландах", description=outside_description)
-        scope_flow.addWidget(self._outside_box)
-        # FlowLayout ставит элементы строки по верхнему краю: подпись и галочку
-        # выравниваем по высоте выпадающего списка.
-        control_height = self._scope_combo.sizeHint().height()
-        self._scope_label.setFixedHeight(control_height)
-        self._scope_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self._outside_box.setMinimumHeight(control_height)
-        self._summary_panel.controls.addWidget(self._scope_host)
+        self._options_row = QWidget()
+        options = QHBoxLayout(self._options_row)
+        options.setContentsMargins(0, 0, 0, 0)
+        options.setSpacing(10)
+        options.addWidget(self._outside_box)
+        options.addStretch(1)
+        self._custom_domain_btn = TransparentPushButton(
+            FluentIcon.ADD, tr_catalog("page.blockcheck.custom_domain.open", default="Свой домен")
+        )
+        custom_domain_description = tr_catalog(
+            "page.blockcheck.custom_domain.open.description",
+            default="Добавить в проверку сайт, которого нет в списке BlockCheck.",
+        )
+        set_tooltip(self._custom_domain_btn, custom_domain_description)
+        set_control_accessibility(
+            self._custom_domain_btn, name="Добавить свой домен в BlockCheck", description=custom_domain_description
+        )
+        self._custom_domain_btn.clicked.connect(self._open_custom_domains)
+        options.addWidget(self._custom_domain_btn)
+        self._summary_panel.controls.addWidget(self._options_row)
 
         self._status_label = CaptionLabel(
             tr_catalog("page.blockcheck.ready", default="Сайты, хостинги и звонки — так, как их открыл бы браузер")
         )
-        self._set_status_text(self._status_label.text())
         self._status_label.setWordWrap(True)
+        self._set_status_text(self._status_label.text())
         self._summary_panel.controls.addWidget(self._status_label)
 
         # start=False: иначе анимация крутится и у скрытой полосы, пока жива страница.
@@ -882,7 +891,8 @@ class BlockcheckPage(BasePage):
         self._progress_steps.start(progress_steps(scope))
         self._progress_card.setVisible(True)
         # Список сайтов проверки уже взят: добавлять свои домены до конца проверки бесполезно.
-        self._domains_card.setVisible(False)
+        self._domains_hidden_for_run = True
+        self._sync_domains_area()
         self._report_btn.setEnabled(False)
         self._set_support_footer_available(False)
         start_blockcheck_page_run(
@@ -1557,7 +1567,8 @@ class BlockcheckPage(BasePage):
             progress_bar=self._progress_bar,
         )
         self._outside_box.setEnabled(True)
-        self._domains_card.setVisible(True)
+        self._domains_hidden_for_run = False
+        self._sync_domains_area()
         # Между проверками парного запуска запускать нечего: Zapret переключается.
         busy = self._paired is not None and self._paired.active
         self._paired_btn.setEnabled(self._paired is not None and not busy)
@@ -1627,6 +1638,9 @@ class BlockcheckPage(BasePage):
         value = str(text or "").strip()
         self._status_label.setText(value)
         set_state_text(self._status_label, f"Статус BlockCheck: {value}")
+        # До первой проверки строка повторяла бы выпадающий список: её нет, пока нечего сказать.
+        idle = value == tr_catalog("page.blockcheck.ready", default="Сайты, хостинги и звонки — так, как их открыл бы браузер")
+        self._status_label.setVisible(bool(value) and not idle)
 
     def _set_support_status(self, text: str) -> None:
         if self._support_status_label is None:
@@ -2051,6 +2065,28 @@ class BlockcheckPage(BasePage):
         """Строка плашек доменов видна, только когда в ней что-то есть."""
         if self._domains_flow is not None:
             self._domains_flow.setVisible(bool(self._get_extra_domains()))
+        self._sync_domains_area()
+
+    def _sync_domains_area(self) -> None:
+        """Поле своих доменов: открыто по ссылке или когда домены уже есть; на время проверки спрятано.
+
+        Ссылка «+ Свой домен» видна, пока поля нет на экране.
+        """
+        card = self.__dict__.get("_domains_card")
+        if card is None:
+            return
+        shown = not self._domains_hidden_for_run and (self._custom_domains_open or bool(self._get_extra_domains()))
+        card.setVisible(shown)
+        button = self.__dict__.get("_custom_domain_btn")
+        if button is not None:
+            button.setVisible(not shown and not self._domains_hidden_for_run)
+
+    def _open_custom_domains(self) -> None:
+        """«+ Свой домен»: открыть поле и поставить в него курсор."""
+        self._custom_domains_open = True
+        self._sync_domains_area()
+        if self._domain_input is not None:
+            self._domain_input.setFocus()
 
     def _get_extra_domains(self) -> list[str]:
         """Collect domains from chips to pass to worker."""
@@ -2131,7 +2167,8 @@ class BlockcheckPage(BasePage):
                 self._tabs_pivot.setItemText(self.TAB_DNS_SPOOFING, _tr("page.blockcheck.tab.dns_spoofing", "DNS подмена"))
             self._update_tabs_accessibility()
             # Карточки без шапок: set_title не вызывается, он добавил бы шапку обратно.
-            self._scope_label.setText(_tr("page.blockcheck.scope", "Что проверить:"))
+            if self._custom_domain_btn is not None:
+                self._custom_domain_btn.setText(_tr("page.blockcheck.custom_domain.open", "Свой домен"))
             # Порядок тот же, что при создании списка: сайты первые, глубокая диагностика последняя.
             self._scope_combo.setItemText(0, _tr("page.blockcheck.scope_all", "Только сайты (быстро)"))
             self._scope_combo.setItemText(1, _tr("page.blockcheck.scope_main", "Только Discord и YouTube (быстро)"))
