@@ -211,7 +211,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         row_widgets = [widget for widget in row_widgets if widget is not None]
         self.assertEqual(
             row_widgets,
-            [page._start_btn, page._paired_btn, page._stop_btn, page._scope_combo, page._progress_bar],
+            [page._start_btn, page._paired_btn, page._stop_btn, page._scope_combo],
         )
         self.assertFalse(hasattr(page, "_scope_label"))
         self.assertIs(page._outside_box.parentWidget(), page._options_row)
@@ -223,7 +223,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         controls = page._summary_panel.controls
         self.assertEqual(
             [controls.itemAt(index).widget() for index in range(controls.count())],
-            [page._options_row, page._status_label, page._domains_card],
+            [page._options_row, page._status_label, page._progress_bar, page._domains_card],
         )
         # До первой проверки нет ни строки состояния (она повторяла бы список), ни поля доменов:
         # поле открывает ссылка «+ Свой домен».

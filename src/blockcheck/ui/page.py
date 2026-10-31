@@ -483,7 +483,6 @@ class BlockcheckPage(BasePage):
         # start=False: иначе анимация крутится и у скрытой полосы, пока жива страница.
         self._progress_bar = IndeterminateProgressBar(start=False)
         self._progress_bar.setVisible(False)
-        self._progress_bar.setFixedWidth(160)
         set_control_accessibility(
             self._progress_bar,
             name="Ход BlockCheck: не выполняется",
@@ -491,7 +490,9 @@ class BlockcheckPage(BasePage):
         )
         set_state_text(self._progress_bar, "Ход BlockCheck: не выполняется")
         row.addStretch(1)
-        row.addWidget(self._progress_bar)
+        # Полоса хода — тонкой линией под строкой состояния: в строке кнопок во время проверки
+        # (там ещё «Остановить») она наезжала на выпадающий список.
+        self._summary_panel.controls.addWidget(self._progress_bar)
 
         self._start_btn = PrimaryPushButton(tr_catalog("page.blockcheck.start", default="Проверить"))
         self._start_btn.setIcon(FluentIcon.PLAY)
