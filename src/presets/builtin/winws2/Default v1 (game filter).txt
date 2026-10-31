@@ -1,5 +1,5 @@
 # Preset: Default v1 (game filter)
-# BuiltinVersion: 2.48
+# BuiltinVersion: 2.49
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -176,7 +176,8 @@
 --hostlist=lists/google-backend.txt
 --out-range=-d8
 --payload=tls_client_hello
---lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+--lua-desync=fake:blob=stun_pat:tcp_ack=-66000:tcp_ts_up:repeats=3
+--lua-desync=multisplit:pos=1,midsld
 
 --new
 

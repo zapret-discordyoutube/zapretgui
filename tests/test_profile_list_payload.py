@@ -1555,6 +1555,9 @@ class ProfileListPayloadTests(unittest.TestCase):
             def get_grouping(self) -> str:
                 return "method"
 
+            def get_strategy_experience(self, _profile_key: str) -> dict[str, tuple[int, int]]:
+                return {}
+
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "system" / "templates").mkdir(parents=True)

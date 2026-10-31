@@ -1,5 +1,5 @@
 # Preset: fake close
-# BuiltinVersion: 2.44
+# BuiltinVersion: 2.45
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -22,6 +22,7 @@
 --wf-raw-part=@windivert.filter/windivert_part.stun.txt
 --wf-raw-part=@windivert.filter/windivert_part.wireguard.txt
 
+--blob=tls_google:@bin/tls_clienthello_www_google_com.bin
 --blob=quic_google:@bin/quic_initial_www_google_com.bin
 --blob=fake_default_udp:0x00000000000000000000000000000000
 
