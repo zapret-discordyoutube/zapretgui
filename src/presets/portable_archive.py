@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import zipfile
 
+from lists.core.files import read_text_file
 from lists.core.layered_files import (
     delete_profile_user_list_file,
     layered_list_file,
@@ -164,7 +165,7 @@ def import_portable_preset(backend, src_path: Path, *, name: str) -> PresetImpor
         for file_name, text in writes:
             user_path = layered_list_file(lists_root, file_name).user_path
             existed = user_path.is_file()
-            previous = user_path.read_text(encoding="utf-8", errors="replace") if existed else ""
+            previous = read_text_file(str(user_path)) if existed else ""
             backups.append((file_name, existed, previous))
             write_profile_user_list_text(lists_root, file_name, text)
 
@@ -199,7 +200,7 @@ def collect_portable_list_files(source_text: str, *, engine: str, lists_root: Pa
         file_name = _reference_file_name(source_text, key) or key
         paths = layered_list_file(lists_root, file_name)
         if paths.user_path.is_file():
-            text = paths.user_path.read_text(encoding="utf-8", errors="replace")
+            text = read_text_file(str(paths.user_path))
             if text.strip():
                 _validate_exported_list_file(file_name, kind, text)
                 result.append(
@@ -214,7 +215,7 @@ def collect_portable_list_files(source_text: str, *, engine: str, lists_root: Pa
         if paths.base_path.is_file():
             continue
         if paths.final_path.is_file():
-            text = paths.final_path.read_text(encoding="utf-8", errors="replace")
+            text = read_text_file(str(paths.final_path))
             if text.strip():
                 _validate_exported_list_file(file_name, kind, text)
                 result.append(
@@ -334,7 +335,7 @@ def _plan_list_imports(
         target_name = item.file_name
         paths = layered_list_file(lists_root, target_name)
         if item.storage == "overlay" and paths.base_path.is_file():
-            existing = paths.user_path.read_text(encoding="utf-8", errors="replace") if paths.user_path.is_file() else ""
+            existing = read_text_file(str(paths.user_path)) if paths.user_path.is_file() else ""
             merged = _merge_list_text(existing, item.text)
             if _normalized_text(existing) != _normalized_text(merged):
                 writes.append((target_name, merged))
@@ -449,13 +450,13 @@ def _list_file_exists(paths) -> bool:
 
 def _visible_list_text(paths) -> str:
     if paths.user_path.is_file() and not paths.base_path.is_file():
-        return paths.user_path.read_text(encoding="utf-8", errors="replace")
+        return read_text_file(str(paths.user_path))
     if paths.final_path.is_file():
-        return paths.final_path.read_text(encoding="utf-8", errors="replace")
+        return read_text_file(str(paths.final_path))
     if paths.user_path.is_file():
-        return paths.user_path.read_text(encoding="utf-8", errors="replace")
+        return read_text_file(str(paths.user_path))
     if paths.base_path.is_file():
-        return paths.base_path.read_text(encoding="utf-8", errors="replace")
+        return read_text_file(str(paths.base_path))
     return ""
 
 

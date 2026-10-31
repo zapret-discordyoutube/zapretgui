@@ -332,6 +332,13 @@ class SaveNormalizationTests(unittest.TestCase):
                 # Имя profile-а не меняется: прежнее стоковое имя только узнаётся.
                 self.assertIn("\n--name=git.zapret.moe\n", saved)
 
+    def test_renamed_list_file_moves_on_line_with_several_options(self) -> None:
+        source = "--hostlist=lists/git-zapret-moe.txt --filter-tcp=443\n--ipset=@lists/git-zapret-moe.txt\n"
+        saved = normalize_preset_source_for_save(source, ENGINE_WINWS1)
+        self.assertIn("--hostlist=lists/zapret-moe.txt --filter-tcp=443\n", saved)
+        self.assertIn("--ipset=@lists/zapret-moe.txt\n", saved)
+        self.assertNotIn("git-zapret-moe", saved.lower())
+
     def test_other_list_files_keep_their_path(self) -> None:
         source = "--hostlist=lists/my-git-zapret-moe.txt\n--ipset=other/git-zapret-moe.txt\n"
         self.assertEqual(normalize_preset_source_for_save(source, ENGINE_WINWS1), source)

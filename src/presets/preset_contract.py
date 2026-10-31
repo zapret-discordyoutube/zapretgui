@@ -34,7 +34,9 @@ tests/test_preset_contract_architecture_checks.py — структура) и а�
 
    Отдельно при переименовании, дублировании, создании и импорте шапка получает
    ``# Preset: <имя>`` (и ``# PresetKind: imported`` для импорта), чтобы имя в
-   списке совпадало с именем в файле.
+   списке совпадало с именем в файле. Обновление пресета по ссылке
+   (``presets.remote_sync_workers``) — тот же импорт, повторённый по просьбе
+   пользователя: свежий текст источника получает ту же шапку с локальным именем.
 
 2. При запуске (текст пресета -> @config-файл для winws/winws2):
 
@@ -118,6 +120,12 @@ tests/test_preset_contract_architecture_checks.py — структура) и а�
 
 from __future__ import annotations
 
+import re
+
+
+# Деление строки пресета на опции — то же правило, что у парсера и запуска
+# («--a=x --b=y» — две опции); разделители сохраняются: "".join(части) == строка.
+_INLINE_OPTION_SPLIT_KEEP_RE = re.compile(r"((?<=\S)\s+(?=--))")
 
 ENGINE_WINWS1 = "winws1"
 ENGINE_WINWS2 = "winws2"
@@ -137,7 +145,7 @@ SAVE_TIME_NORMALIZATIONS: dict[str, str] = {
     SAVE_LEGACY_LIST_FILE_RENAME: "lists/<прежнее имя поставляемого списка> -> lists/<нынешнее> (LEGACY_LIST_FILE_RENAMES)",
     SAVE_DROP_SERVICE_HEADER_LINES: "удаление строк # Modified: и # ActivePreset:",
     SAVE_LINE_ENDINGS: "CRLF/CR -> LF, ровно один перевод строки в конце, без метки BOM в начале",
-    SAVE_PRESET_IDENTITY_HEADERS: "# Preset: / # PresetKind: при переименовании, дублировании, создании и импорте",
+    SAVE_PRESET_IDENTITY_HEADERS: "# Preset: / # PresetKind: при переименовании, дублировании, создании, импорте и обновлении по ссылке",
 }
 
 # Служебные строки шапки, которые сохранение удаляет (в нижнем регистре).
@@ -309,17 +317,29 @@ def _rename_legacy_list_files(text: str) -> str:
         return text
     out: list[str] = []
     for raw in text.split("\n"):
-        stripped = raw.strip()
-        option, sep, value = stripped.partition("=")
-        if sep and option.startswith("--"):
-            path = value.strip().replace("\\", "/")
-            folder, slash, name = path.rpartition("/")
-            new_name = LEGACY_LIST_FILE_RENAMES.get(name.lower()) if slash else None
-            if new_name is not None and folder.lower().lstrip("@") == "lists":
-                out.append(f"{option}={folder}/{new_name}")
-                continue
-        out.append(raw)
+        if raw.lstrip().startswith("#"):
+            out.append(raw)
+            continue
+        # Опций в строке может быть несколько («--hostlist=… --filter-tcp=443»):
+        # переименование касается только своей опции, остальное — как было.
+        pieces = _INLINE_OPTION_SPLIT_KEEP_RE.split(raw)
+        out.append("".join(_rename_legacy_list_option(piece) for piece in pieces))
     return "\n".join(out)
+
+
+def _rename_legacy_list_option(piece: str) -> str:
+    stripped = piece.strip()
+    option, sep, value = stripped.partition("=")
+    if not (sep and option.startswith("--")):
+        return piece
+    path = value.strip().replace("\\", "/")
+    folder, slash, name = path.rpartition("/")
+    new_name = LEGACY_LIST_FILE_RENAMES.get(name.lower()) if slash else None
+    if new_name is None or folder.lower().lstrip("@") != "lists":
+        return piece
+    head = piece[: len(piece) - len(piece.lstrip())]
+    tail = piece[len(piece.rstrip()):]
+    return f"{head}{option}={folder}/{new_name}{tail}"
 
 
 def _drop_service_header_lines(text: str) -> str:

@@ -333,6 +333,32 @@ class ListsStartupContractTests(unittest.TestCase):
             self.assertEqual((lists_root / "discord-updates.txt").read_text(encoding="utf-8"), "discord.com\n")
             self.assertFalse((lists_root / "animego.online.txt").exists())
 
+    def test_fast_required_files_check_reads_list_from_line_with_several_options(self) -> None:
+        from lists import file_manager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lists_root = root / "lists"
+            user_dir = lists_root / "user"
+            user_dir.mkdir(parents=True)
+            for name in ("other.txt", "ipset-all.txt", "ipset-ru.txt"):
+                (lists_root / name).write_text("ready\n", encoding="utf-8")
+            (user_dir / "my.txt").write_text("qwen.ai\n", encoding="utf-8")
+            preset_path = root / "selected.txt"
+            preset_path.write_text(
+                "--filter-tcp=443 --hostlist=lists/my.txt --hostlist-exclude=lists/other.txt\n--lua-desync=pass\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(file_manager, "LISTS_FOLDER", str(lists_root)),
+                patch.object(file_manager, "ensure_required_files", side_effect=AssertionError("unexpected full rebuild")),
+                patch("settings.store.get_user_profiles_settings", return_value={"version": 1, "profiles": {}}),
+            ):
+                self.assertTrue(file_manager.ensure_required_files_fast(active_preset_path=str(preset_path)))
+
+            self.assertEqual((lists_root / "my.txt").read_text(encoding="utf-8"), "qwen.ai\n")
+
     def test_fast_required_files_check_rebuilds_user_profile_list_files(self) -> None:
         from lists import file_manager
 

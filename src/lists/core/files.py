@@ -14,24 +14,40 @@ def normalize_newlines(text: str) -> str:
     return normalized
 
 
+def decode_list_text(data: bytes) -> str:
+    """Текст списка из байтов файла.
+
+    Программа пишет UTF-8, но список могли сохранить и в Блокноте: с меткой
+    BOM в начале или в старой кодировке Windows (cp1251). Метку снимаем, иначе
+    она прилипнет к первому адресу; cp1251 читаем как есть, а не как «пусто»,
+    иначе первое же сохранение затрёт записи пользователя.
+    """
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("cp1251", errors="replace")
+
+
 def read_text_file(path: str) -> str:
-    """Читает текстовый файл как UTF-8."""
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+    """Читает текстовый файл списка (UTF-8, UTF-8 с BOM или cp1251)."""
+    with open(path, "rb") as f:
+        return decode_list_text(f.read())
 
 
 def read_text_file_safe(path: str) -> str | None:
-    """Пытается прочитать текстовый файл и возвращает `None` при ошибке."""
+    """Читает текстовый файл и возвращает `None`, если файла нет или он недоступен."""
     try:
         return read_text_file(path)
-    except Exception:
+    except OSError:
         return None
 
 
 def _file_content_matches(path: str, normalized: str) -> bool:
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return normalize_newlines(f.read()) == normalized
+        with open(path, "rb") as f:
+            data = f.read()
+        # Сравниваем байты: файл в cp1251 или с BOM должен переписаться в UTF-8.
+        return data == normalized.encode("utf-8")
     except Exception:
         return False
 

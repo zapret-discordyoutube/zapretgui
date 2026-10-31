@@ -14,6 +14,8 @@ _PRESET_LIST_FILE_RE = re.compile(
     r"^\s*--(?:hostlist|hostlist-exclude|ipset|ipset-exclude)\s*=\s*(?P<value>.+?)\s*$",
     flags=re.IGNORECASE,
 )
+# Опций в строке пресета может быть несколько: «--hostlist=a.txt --filter-tcp=443».
+_INLINE_OPTION_SPLIT_RE = re.compile(r"(?<=\S)\s+(?=--)")
 
 
 def _runtime_required_file_ready(path: str) -> bool:
@@ -138,11 +140,14 @@ def _preset_list_file_names(active_preset_path: str) -> set[str]:
 
     names: set[str] = set()
     for raw_line in text.splitlines():
-        match = _PRESET_LIST_FILE_RE.match(raw_line)
-        if not match:
+        if raw_line.lstrip().startswith("#"):
             continue
-        for raw_value in match.group("value").split(","):
-            safe_name = safe_list_file_name(raw_value.strip().strip('"').strip("'").lstrip("@"))
-            if safe_name:
-                names.add(safe_name)
+        for option in _INLINE_OPTION_SPLIT_RE.split(raw_line.strip()):
+            match = _PRESET_LIST_FILE_RE.match(option)
+            if not match:
+                continue
+            for raw_value in match.group("value").split(","):
+                safe_name = safe_list_file_name(raw_value.strip().strip('"').strip("'").lstrip("@"))
+                if safe_name:
+                    names.add(safe_name)
     return names
