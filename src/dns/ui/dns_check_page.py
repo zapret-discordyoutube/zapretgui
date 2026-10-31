@@ -98,8 +98,8 @@ class DNSCheckPage(BasePage):
         """Создаёт интерфейс страницы.
 
         Страница живёт во вкладке BlockCheck, поэтому без шапок у карточек,
-        карточки «Что проверяем» и подписи «Действия»: кнопки и статус — одна
-        строка, под ней итог. Подробный лог открывается в отдельном окне.
+        карточки «Что проверяем» и подписи «Действия»: строка кнопок, под ней
+        статус, ниже итог. Подробный лог открывается в отдельном окне.
         """
         # Итог с медоедом; кнопки стоят в нём же, под главной фразой, — как на вкладке «DNS-серверы».
         self.summary_panel = DnsSummaryPanel(on_open_dns_settings=self._open_dns_settings)
@@ -176,9 +176,12 @@ class DNSCheckPage(BasePage):
         self.progress_bar = IndeterminateProgressBar(self, start=False)
         self.progress_bar.setVisible(False)
         set_state_text(self.progress_bar, "Ход проверки DNS: не выполняется")
-        # Кнопки стоят рядом, как на вкладке «DNS-серверы»; строка состояния — после них.
-        row.addSpacing(8)
-        row.addWidget(self.status_label, 1)
+        # Кнопки стоят рядом, как на вкладке «DNS-серверы». Строка состояния — своей строкой
+        # под ними и переносится по словам: в одной строке с тремя кнопками при окне 1280 px
+        # она обрезалась на полуслове («…с эталоном и вид»).
+        row.addStretch(1)
+        self.status_label.setWordWrap(True)
+        self.summary_panel.progress_slot.addWidget(self.status_label)
         self.summary_panel.progress_slot.addWidget(self.progress_bar)
         self._update_action_button_state_text()
         self.layout.addWidget(self.summary_panel)

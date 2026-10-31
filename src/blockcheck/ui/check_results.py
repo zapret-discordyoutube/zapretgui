@@ -1280,6 +1280,9 @@ class _HistoryTable(QWidget):
     ROW = 30
     _COLUMNS = (("Когда", 104), ("Что проверяли", 160), ("Итог", 350))
     _LAST = "Что изменилось с прошлой такой проверки"
+    # Заголовок столбца короче: полное «…с прошлой такой проверки» обрезалось при окне 1280 px.
+    # Полная фраза осталась в подсказке у строки.
+    _LAST_HEADER = "Что изменилось"
     _ICONS = {"ok": "fa5s.check-circle", "warn": "fa5s.exclamation-triangle", "fail": "fa5s.times-circle", "unknown": "fa5s.question-circle"}
 
     # Нажали строку: её номер сверху.
@@ -1367,7 +1370,9 @@ class _HistoryTable(QWidget):
         for caption, width in self._COLUMNS:
             painter.drawText(QRectF(x, 0, width, self.HEADER), flags, caption)
             x += width
-        painter.drawText(QRectF(x, 0, max(0, self.width() - x), self.HEADER), flags, self._LAST)
+        last_width = max(0, self.width() - x)
+        last_caption = QFontMetrics(small).elidedText(self._LAST_HEADER, Qt.TextElideMode.ElideRight, int(last_width))
+        painter.drawText(QRectF(x, 0, last_width, self.HEADER), flags, last_caption)
 
         for index, row in enumerate(self._rows):
             top = self.HEADER + index * self.ROW

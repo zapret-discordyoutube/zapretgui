@@ -163,6 +163,27 @@ class ServiceSummaryTests(unittest.TestCase):
         self.assertIn("www.youtube.com", verdict.dns_note)
         self.assertTrue(any("DoH" in item for item in verdict.advice))
 
+    def test_verdict_says_whether_the_site_opens_independently_of_the_level(self) -> None:
+        # «Не удалось соединиться» — замечание (WARN), а не тревога, но сайт не открывается:
+        # история и сравнение «с Zapret и без» судят по opens, а не по уровню.
+        no_connect = TargetOutcome(
+            "www.facebook.com", "сайт", ReachState.IP_BLOCK, DnsState.OK, main=True, kind="noconnect"
+        )
+        verdict = summarize_service("Facebook", [no_connect], zapret_running=False)
+        self.assertEqual(verdict.level, Level.WARN)
+        self.assertIn("не открывается", verdict.headline)
+        self.assertFalse(verdict.opens)
+
+        blocked = summarize_service("YouTube", self._outcomes(ReachState.DPI), zapret_running=False)
+        self.assertEqual(blocked.level, Level.FAIL)
+        self.assertFalse(blocked.opens)
+
+        with_dns_note = summarize_service(
+            "YouTube", self._outcomes(ReachState.OK, ReachState.OK, dns=DnsState.SPOOFED), zapret_running=True
+        )
+        self.assertEqual(with_dns_note.level, Level.WARN)
+        self.assertTrue(with_dns_note.opens)
+
     def test_site_whose_address_the_computer_dns_denies_is_not_called_open(self) -> None:
         # Случай 2026-10-13: фильтр отвечает «такого сайта нет» вместо DNS, проверка идёт по адресу из
         # шифрованного DNS и сайт открывает, а браузер спрашивает Windows и остаётся ни с чем.

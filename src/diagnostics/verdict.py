@@ -307,6 +307,10 @@ class ServiceVerdict:
     dns_note: str = ""
     # Вид блокировки сервиса: по нему экран собирает проблемы в группы.
     kind: str = ""
+    # Открывается ли сам сайт. Уровень этого не говорит: сайт, к которому не удалось
+    # соединиться или который не работает сам, — замечание (WARN), а не тревога, но
+    # он не открывается. История и сравнение «с Zapret и без» судят по этому полю.
+    opens: bool = True
 
 
 _BROKEN = (ReachState.DPI, ReachState.FREEZE, ReachState.IP_BLOCK, ReachState.CERT)
@@ -520,7 +524,7 @@ def summarize_service(
             advice = advice + (_ADVICE_DNS,)
         # «Причина не ясна» и «не работает сам» — не установленная блокировка: замечание, а не тревога.
         level = Level.WARN if kind in (KIND_NO_CONNECT, KIND_DOWN) else Level.FAIL
-        return ServiceVerdict(level, headline, advice, dns_note, kind)
+        return ServiceVerdict(level, headline, advice, dns_note, kind, opens=False)
 
     if main.reach == ReachState.NO_ADDRESS:
         # Адреса нет — это дело DNS: такой сайт идёт в группу «DNS» с кнопкой настройки DNS.
@@ -530,5 +534,6 @@ def summarize_service(
             ("Проверьте подключение к интернету.", _ADVICE_DNS),
             dns_note,
             KIND_DNS,
+            opens=False,
         )
     return ServiceVerdict(Level.UNKNOWN, f"{label}: проверка не дала ответа", ("Повторите проверку через минуту.",), dns_note)

@@ -65,6 +65,13 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
         self.assertIs(page.control_card, page.summary_panel)
         self.assertIs(page.summary_panel.actions.itemAt(0).widget(), page.check_button)
         self.assertIs(page.progress_bar.parentWidget(), page.summary_panel)
+        # Строка состояния — не в строке кнопок, а под ней и с переносом: рядом с тремя
+        # кнопками при окне 1280 px она обрезалась на полуслове.
+        actions = page.summary_panel.actions
+        row_widgets = {actions.itemAt(index).widget() for index in range(actions.count())} - {None}
+        self.assertNotIn(page.status_label, row_widgets)
+        self.assertIs(page.summary_panel.progress_slot.itemAt(0).widget(), page.status_label)
+        self.assertTrue(page.status_label.wordWrap())
         self.assertFalse(hasattr(page, "info_card"))
 
     def test_progress_bar_exposes_screen_reader_state(self) -> None:

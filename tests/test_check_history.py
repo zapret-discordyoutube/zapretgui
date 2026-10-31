@@ -50,6 +50,20 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(entry["states"], {"Discord": "ok", "YouTube": "fail"})
         self.assertEqual(entry["log_file"], "C:\\logs\\run.log")
 
+    def test_site_that_does_not_open_is_saved_as_not_opening_even_with_a_warning_level(self) -> None:
+        # Сайт, к которому не удалось соединиться, отчёт помечает замечанием (warn): это не
+        # установленная блокировка. Но он не открывается, и история не должна называть его
+        # «снова открывается» (так было с Facebook 31.10.2026: карточка «не открывается»,
+        # строка изменений «снова открываются: Facebook»).
+        facebook = {**_service("Facebook", "warn"), "opens": False}
+        youtube = {**_service("YouTube", "warn"), "opens": True}
+        old_report = _service("Discord", "warn")  # отчёт до поля opens: остаётся уровень
+        entry = history.blockcheck_entry(_report(facebook, youtube, old_report), when=WHEN)
+
+        self.assertEqual(entry["states"], {"Facebook": "fail", "YouTube": "warn", "Discord": "warn"})
+        before = history.blockcheck_entry(_report({**_service("Facebook", "fail"), "opens": False}), when=WHEN)
+        self.assertEqual(history.describe_changes(before, entry), [])
+
     def test_clean_run_and_scope_title(self) -> None:
         entry = history.blockcheck_entry(_report(_service("Discord", "ok"), scope="main"), when=WHEN)
 
