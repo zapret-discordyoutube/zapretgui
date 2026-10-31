@@ -348,6 +348,9 @@ class PremiumStorage:
                 ),
             )
             conn.execute("DELETE FROM pending_pairing")
+            # Неподтверждённая отвязка старой привязки больше не нужна: сервер при
+            # новом сопряжении сам отзывает прежнюю привязку этого device_id
+            # (zapretpremiumapi, причина «repaired»).
             conn.execute("DELETE FROM pending_operations")
             cls._store_cache(conn, signed_payload, kid, sig)
             cls._set_meta_in_conn(conn, "last_check", datetime.now().isoformat())

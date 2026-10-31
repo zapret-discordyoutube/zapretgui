@@ -335,5 +335,51 @@ class InternetCleanupTests(unittest.TestCase):
         self.assertIn("понадобится перезагрузка", content)
 
 
+
+class RunHiddenRetryTests(unittest.TestCase):
+    def test_timeout_is_not_retried(self) -> None:
+        from utils import subproc
+
+        calls = []
+
+        def _run(cmd, **kwargs):
+            calls.append(cmd)
+            raise subprocess.TimeoutExpired(cmd, 30)
+
+        with (
+            patch.object(subproc.sys, "platform", "win32"),
+            patch.object(subproc.subprocess, "run", side_effect=_run),
+            patch.object(subproc.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True),
+            patch.object(subproc, "_hidden_startupinfo", return_value=None),
+            patch.object(subproc, "get_system_exe", return_value="cmd.exe"),
+        ):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                subproc.run_hidden(["netsh", "winsock", "reset"], capture_output=True, timeout=30)
+
+        self.assertEqual(len(calls), 1)
+
+    def test_start_failure_is_retried_with_basic_flags(self) -> None:
+        from utils import subproc
+
+        calls = []
+
+        def _run(cmd, **kwargs):
+            calls.append(kwargs.get("creationflags"))
+            if len(calls) == 1:
+                raise PermissionError(5, "Access is denied")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(subproc.sys, "platform", "win32"),
+            patch.object(subproc.subprocess, "run", side_effect=_run),
+            patch.object(subproc.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True),
+            patch.object(subproc, "_hidden_startupinfo", return_value=None),
+            patch.object(subproc, "get_system_exe", return_value="cmd.exe"),
+        ):
+            subproc.run_hidden(["netsh", "winsock", "reset"], capture_output=True, timeout=30)
+
+        self.assertEqual(calls[1], 0x08000000)
+
+
 if __name__ == "__main__":
     unittest.main()

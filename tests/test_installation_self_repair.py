@@ -31,6 +31,16 @@ def _damaged_report() -> IntegrityReport:
     )
 
 
+class SelfRepairSettingsTests(unittest.TestCase):
+    def test_damaged_attempts_value_reads_as_empty(self) -> None:
+        from settings.normalize import normalize_self_repair
+
+        for value in (5, "1700000000", None, {"a": 1}):
+            with self.subTest(value=value):
+                self.assertEqual(normalize_self_repair({"attempts": value}), {"attempts": []})
+        self.assertEqual(normalize_self_repair({"attempts": [3, 0, 2]}), {"attempts": [2, 3]})
+
+
 class SelfRepairAttemptLimitTests(unittest.TestCase):
     def test_daily_limit_blocks_further_attempts(self) -> None:
         from settings.store import append_self_repair_attempt, get_self_repair_attempts

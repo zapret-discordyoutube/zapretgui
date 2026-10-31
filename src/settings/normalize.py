@@ -694,7 +694,10 @@ SELF_REPAIR_ATTEMPTS_KEPT = 20
 def normalize_self_repair(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     attempts: list[int] = []
-    for item in raw.get("attempts") or ():
+    raw_attempts = raw.get("attempts")
+    # Испорченное значение (число, строка) — не список попыток: читаем как пустой,
+    # иначе TypeError ронял бы каждое чтение настроек.
+    for item in raw_attempts if isinstance(raw_attempts, (list, tuple)) else ():
         stamp = as_int(item, 0, minimum=0)
         if stamp:
             attempts.append(stamp)

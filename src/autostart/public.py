@@ -40,14 +40,28 @@ def save_gui_autostart_enabled(enabled: bool) -> bool:
 
 
 def disable_gui_autostart() -> GuiAutostartResult:
-    from autostart.scheduled_task_api import delete_autostart_task
-    from autostart.startup_shortcut_api import delete_startup_shortcut
+    from autostart.scheduled_task_api import autostart_task_exists, delete_autostart_task
+    from autostart.startup_shortcut_api import delete_startup_shortcut, get_startup_shortcut_path
 
     removed_count = 0
     if delete_autostart_task():
         removed_count += 1
     if delete_startup_shortcut():
         removed_count += 1
+    # «Не удалось удалить» и «удалять было нечего» удаление не различает:
+    # проверяем, что задачи и ярлыка действительно нет. Иначе настройка
+    # сохранилась бы как «выключено», а программа продолжала бы стартовать с Windows.
+    leftovers: list[str] = []
+    if autostart_task_exists():
+        leftovers.append("задачу планировщика")
+    if get_startup_shortcut_path().exists():
+        leftovers.append("ярлык автозагрузки")
+    if leftovers:
+        return GuiAutostartResult(
+            success=False,
+            removed_count=removed_count,
+            message=f"Windows не дала удалить {' и '.join(leftovers)}. Попробуйте ещё раз.",
+        )
     return GuiAutostartResult(success=True, removed_count=removed_count)
 
 

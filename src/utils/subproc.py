@@ -193,8 +193,11 @@ def run_hidden(cmd: Union[str, Sequence[str]],
             return subprocess.run(cmd, shell=shell, **kw)
         else:
             return subprocess.Popen(cmd, shell=shell, **kw)
-    except Exception as e:
-        # Если не удалось с агрессивными флагами, пробуем с базовыми
+    except OSError:
+        # Процесс не создался (например, Windows не дала флаг выхода из job-а):
+        # пробуем с базовыми флагами. Таймаут или ненулевой код сюда не попадают —
+        # команда уже выполнилась, второй запуск повторил бы её действие
+        # (например, `netsh ... reset`) и удвоил ожидание.
         if sys.platform == "win32" and "creationflags" in kw:
             kw["creationflags"] = subprocess.CREATE_NO_WINDOW
             if need_run:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +13,9 @@ import xml.etree.ElementTree as ET
 PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
+
+
+_MISSING_PATH = Path("/nonexistent/zapretgui-autostart/ZapretGUI.lnk")
 
 
 class _FakeToggle:
@@ -157,11 +161,27 @@ class GuiAutostartContractTests(unittest.TestCase):
         with (
             patch("autostart.scheduled_task_api.delete_autostart_task", return_value=True),
             patch("autostart.startup_shortcut_api.delete_startup_shortcut", return_value=True),
+            patch("autostart.scheduled_task_api.autostart_task_exists", return_value=False),
+            patch("autostart.startup_shortcut_api.get_startup_shortcut_path", return_value=_MISSING_PATH),
         ):
             result = disable_gui_autostart()
 
         self.assertTrue(result.success)
         self.assertEqual(result.removed_count, 2)
+
+    def test_disable_gui_autostart_fails_when_task_is_still_registered(self) -> None:
+        from autostart.public import disable_gui_autostart
+
+        with (
+            patch("autostart.scheduled_task_api.delete_autostart_task", return_value=False),
+            patch("autostart.startup_shortcut_api.delete_startup_shortcut", return_value=False),
+            patch("autostart.scheduled_task_api.autostart_task_exists", return_value=True),
+            patch("autostart.startup_shortcut_api.get_startup_shortcut_path", return_value=_MISSING_PATH),
+        ):
+            result = disable_gui_autostart()
+
+        self.assertFalse(result.success)
+        self.assertIn("задачу планировщика", result.message)
 
     def test_migration_is_noop_when_autostart_disabled(self) -> None:
         from autostart.public import ensure_gui_autostart_migrated
