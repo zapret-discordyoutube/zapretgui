@@ -217,6 +217,51 @@ class PremiumSqliteLifecycleTest(unittest.TestCase):
             service._api.revoke_requests[1]["request_id"],
         )
 
+    def _make_token_unreadable(self) -> None:
+        """Как после переустановки Windows: ключ привязки зашифрован DPAPI, а расшифровать его нельзя."""
+        database = self.store.get_settings_database_path().parent / "premium.sqlite3"
+        with closing(sqlite3.connect(database)) as conn, conn:
+            conn.execute("UPDATE current_binding SET device_token=?", (b"dpapi:old-windows-blob",))
+
+    @staticmethod
+    def _unreadable(_raw):
+        raise OSError(-2146893813, "CryptUnprotectData", "Ключ не может быть использован в указанном состоянии.")
+
+    def test_unreadable_windows_key_asks_to_pair_again_instead_of_raw_error(self) -> None:
+        from donater.storage import UNREADABLE_BINDING_MESSAGE, PremiumStorage
+
+        service = self._service()
+        with patch("donater.service.verify_signed_response", side_effect=self._verify):
+            self.assertTrue(service.pair_start()[0])
+            self.assertTrue(service.check_status().is_activated)
+        device_id = PremiumStorage.get_device_id()
+        self._make_token_unreadable()
+
+        with patch("donater.storage._dpapi_decrypt", side_effect=self._unreadable):
+            status = service.check_status()
+            self.assertFalse(status.is_activated)
+            self.assertFalse(status.is_linked)
+            self.assertEqual(status.status_message, UNREADABLE_BINDING_MESSAGE)
+            # Привязка забыта, устройство то же — его можно привязать заново.
+            self.assertIsNone(PremiumStorage.get_binding(include_disabled=True))
+            self.assertEqual(PremiumStorage.get_device_id(), device_id)
+            # Объяснение показывается один раз, дальше — обычное «не привязано».
+            self.assertEqual(service.check_status().status_message, "Устройство не привязано")
+
+    def test_unbinding_with_unreadable_key_just_forgets_the_binding(self) -> None:
+        from donater.storage import PremiumStorage
+
+        service = self._service()
+        with patch("donater.service.verify_signed_response", side_effect=self._verify):
+            self.assertTrue(service.pair_start()[0])
+            self.assertTrue(service.check_status().is_activated)
+        self._make_token_unreadable()
+
+        with patch("donater.storage._dpapi_decrypt", side_effect=self._unreadable):
+            self.assertTrue(service.clear_activation())
+        self.assertIsNone(PremiumStorage.get_binding(include_disabled=True))
+        self.assertEqual(service._api.revoke_requests, [])
+
     def test_legacy_settings_and_plaintext_token_are_not_carried_forward(self) -> None:
         from donater.storage import PremiumStorage
 

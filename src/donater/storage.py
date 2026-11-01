@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from log.log import log
 from settings import store as settings_store
 
 
@@ -91,6 +92,23 @@ def _dpapi_decrypt(raw: bytes) -> bytes:
         raw, None, None, None, 0
     )
     return bytes(decrypted)
+
+
+class PremiumKeyUnreadable(RuntimeError):
+    """Windows больше не расшифровывает ключ привязки (DPAPI).
+
+    Ключ зашифрован для учётной записи Windows. После переустановки Windows,
+    восстановления профиля из копии или сброса пароля администратором он
+    становится нечитаемым навсегда: CryptUnprotectData отвечает
+    «Ключ не может быть использован в указанном состоянии» (-2146893813).
+    """
+
+
+# Что показать вместо «Устройство не привязано», когда привязку пришлось забыть.
+UNREADABLE_BINDING_MESSAGE = (
+    "Windows больше не может прочитать ключ привязки этого компьютера — так бывает после "
+    "переустановки Windows, переноса профиля или сброса пароля. Привяжите устройство заново."
+)
 
 
 class PremiumStorage:
@@ -172,7 +190,10 @@ class PremiumStorage:
     def _decrypt_token(cls, value: bytes) -> str:
         raw = bytes(value)
         if raw.startswith(b"dpapi:"):
-            return _dpapi_decrypt(raw[len(b"dpapi:") :]).decode("utf-8")
+            try:
+                return _dpapi_decrypt(raw[len(b"dpapi:") :]).decode("utf-8")
+            except Exception as exc:
+                raise PremiumKeyUnreadable(str(exc)) from exc
         if raw.startswith(b"hmac-stream:"):
             protected = raw[len(b"hmac-stream:") :]
             nonce, tag, body = protected[:32], protected[32:64], protected[64:]
@@ -295,7 +316,37 @@ class PremiumStorage:
                 WHERE singleton=1 AND local_disabled=0
                 """
             ).fetchone()
-            return cls._decrypt_token(row[0]) if row is not None else None
+            if row is None:
+                return None
+            try:
+                return cls._decrypt_token(row[0])
+            except PremiumKeyUnreadable as exc:
+                cls._forget_unreadable_binding(conn, exc)
+                return None
+
+    @classmethod
+    def _forget_unreadable_binding(cls, conn: sqlite3.Connection, exc: Exception) -> None:
+        """Нечитаемый ключ не вернуть: привязка забывается, чтобы привязать устройство заново.
+
+        Идентификатор устройства остаётся прежним — сервер узнаёт компьютер при
+        новой привязке.
+        """
+        log(f"Premium: ключ привязки не расшифровывается ({exc}); привязка забыта", "WARNING")
+        conn.execute("DELETE FROM current_binding")
+        conn.execute("DELETE FROM signed_status_cache")
+        cls._set_meta_in_conn(conn, "binding_unreadable_at", str(int(time.time())))
+
+    @classmethod
+    def take_unreadable_binding_notice(cls) -> bool:
+        """Была ли привязка забыта из-за нечитаемого ключа (сообщение показывается один раз)."""
+        with _LOCK, cls._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM client_meta WHERE key='binding_unreadable_at'"
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute("DELETE FROM client_meta WHERE key='binding_unreadable_at'")
+            return True
 
     @classmethod
     def get_binding(cls, *, include_disabled: bool = False) -> dict[str, Any] | None:
@@ -307,7 +358,11 @@ class PremiumStorage:
             if row is None:
                 return None
             result = dict(row)
-            result["device_token"] = cls._decrypt_token(result.pop("device_token"))
+            try:
+                result["device_token"] = cls._decrypt_token(result.pop("device_token"))
+            except PremiumKeyUnreadable as exc:
+                cls._forget_unreadable_binding(conn, exc)
+                return None
             result["device_id"] = cls.get_device_id()
             return result
 
@@ -432,7 +487,14 @@ class PremiumStorage:
             # The durable retry record contains only immutable identifiers.
             # The credential remains encrypted in current_binding and exists in
             # plaintext only in memory for the immediate HTTP request.
-            payload["device_token"] = cls._decrypt_token(current["device_token"])
+            try:
+                payload["device_token"] = cls._decrypt_token(current["device_token"])
+            except PremiumKeyUnreadable as exc:
+                # Отвязать на сервере нечем; локально привязки больше нет.
+                conn.execute("DELETE FROM pending_operations WHERE operation_id=?", (payload["operation_id"],))
+                cls._forget_unreadable_binding(conn, exc)
+                conn.execute("DELETE FROM pending_pairing")
+                return None
             conn.execute("UPDATE current_binding SET local_disabled=1 WHERE singleton=1")
             conn.execute("DELETE FROM signed_status_cache")
             conn.execute("DELETE FROM pending_pairing")

@@ -11,7 +11,7 @@ from config._build_secrets import PREMIUM_API_BASE_URL as API_BASE_URL
 
 from .api import PremiumApiClient
 from .crypto import verify_signed_response
-from .storage import PremiumStorage
+from .storage import UNREADABLE_BINDING_MESSAGE, PremiumStorage
 from .types import ActivationStatus
 
 
@@ -334,7 +334,9 @@ class PremiumService:
                         expires_at=None,
                         status_message=(
                             pairing_message
-                            or ("Ожидание привязки" if has_pending else "Устройство не привязано")
+                            or ("Ожидание привязки" if has_pending else None)
+                            or (UNREADABLE_BINDING_MESSAGE if PremiumStorage.take_unreadable_binding_notice() else None)
+                            or "Устройство не привязано"
                         ),
                         is_linked=False,
                         subscription_level="–",
