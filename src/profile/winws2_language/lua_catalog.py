@@ -218,6 +218,13 @@ LUA_ARGS: dict[str, LuaArgSpec] = {
         _a("stype", "Тип ICMP сервера (0..255).", "int"),
         _a("scode", "Код ICMP сервера (0..255).", "int"),
         _a("server", "Режим сервера (0 — клиент).", "text"),
+        _a(
+            "cgnat",
+            "Не полагаться на идентификатор ICMP — провайдерский NAT (CGNAT) обычно его меняет. "
+            "Пакет растёт на 2 байта и может не влезть в MTU.",
+            "flag",
+        ),
+        _a("id_lifetime", "Сколько секунд помнить сопоставление идентификаторов (по умолчанию 60).", "int"),
         _a("ghost", "Ghost-пакет для IPv4.", "text"),
         _a("ghost6", "Ghost-пакет для IPv6.", "text"),
         _a("synack", "Также обрабатывать SYN+ACK.", "flag"),
@@ -426,7 +433,12 @@ LUA_FUNCTIONS: tuple[LuaFunctionSpec, ...] = (
     _f("wgobfs", ("zapret-obfs.lua", "zapret-wgobfs.lua"), "Обфускация WireGuard.",
        ("secret", "padmin", "padmax")),
     _f("ippxor", _OBFS, "XOR номера IP-протокола и данных.", ("ippxor", "dataxor", "rebuild")),
-    _f("udp2icmp", _OBFS, "Завернуть UDP в ICMP.", ("ctype", "ccode", "stype", "scode", "dataxor", "server")),
+    _f(
+        "udp2icmp",
+        _OBFS,
+        "Завернуть UDP в ICMP.",
+        ("ctype", "ccode", "stype", "scode", "dataxor", "server", "cgnat", "id_lifetime"),
+    ),
     _f("synhide", _OBFS, "Спрятать SYN-пакет.", ("ghost", "ghost6", "synack", "magic", "x2", "kind", "opt", "xorseq")),
     _f("pcap", ("zapret-pcap.lua",), "Записывать пакеты в файл pcap.", ("file", "keep")),
     # ------------------------------------------------------ custom_funcs.lua
