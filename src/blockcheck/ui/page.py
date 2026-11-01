@@ -795,6 +795,11 @@ class BlockcheckPage(BasePage):
             return self.request_runtime_conflicting_stop()
         return False
 
+    def request_exit_restore(self, on_done) -> bool:
+        """Выход с оставленным DPI посреди подбора стратегии: см. StrategyScanPage."""
+        request = getattr(self._strategy_tab_page, "request_exit_restore", None)
+        return bool(callable(request) and request(on_done))
+
     def request_runtime_conflicting_stop(self) -> bool:
         """Останавливает проверки BlockCheck перед ручным запуском основного DPI."""
         stopped = False

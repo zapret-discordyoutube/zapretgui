@@ -52,6 +52,86 @@ class StrategyScanRunRuntimeArchitectureTest(unittest.TestCase):
         page._strategy_scan_run_runtime.stop.assert_called_once_with()
         page._on_finished.assert_called_once_with(None)
 
+    def test_exit_during_scan_stops_it_and_reports_the_restore_when_it_finishes(self) -> None:
+        page = StrategyScanPage.__new__(StrategyScanPage)
+        page._strategy_scan_run_runtime = Mock()
+        page._strategy_scan_run_runtime.is_running.return_value = True
+        page._on_stop = Mock()
+        page._cleanup_in_progress = False
+        page._restore_runtime_after_scan = Mock(return_value=True)
+        page._request_strategy_scan_finalize = Mock()
+        done = Mock()
+
+        self.assertTrue(StrategyScanPage.request_exit_restore(page, done))
+        page._on_stop.assert_called_once_with()
+        done.assert_not_called()
+
+        StrategyScanPage._on_finished(page, None)
+
+        done.assert_called_once_with(True)
+        # Второй конец подбора ничего не вызывает повторно.
+        StrategyScanPage._on_finished(page, None)
+        done.assert_called_once_with(True)
+
+    def test_exit_without_a_running_scan_has_nothing_to_wait_for(self) -> None:
+        page = StrategyScanPage.__new__(StrategyScanPage)
+        page._strategy_scan_run_runtime = Mock()
+        page._strategy_scan_run_runtime.is_running.return_value = False
+        page._on_stop = Mock()
+
+        self.assertFalse(StrategyScanPage.request_exit_restore(page, Mock()))
+        page._on_stop.assert_not_called()
+
+    def test_window_port_waits_for_the_scan_page_and_calls_back_once(self) -> None:
+        from unittest.mock import patch
+
+        from PyQt6.QtWidgets import QApplication, QWidget
+
+        from main.application_lifecycle_port import ApplicationLifecycleWindowPort
+
+        app = QApplication.instance() or QApplication([])
+        window = QWidget()
+        self.addCleanup(window.deleteLater)
+        callbacks: list = []
+        scan_page = Mock()
+        scan_page.request_exit_restore.side_effect = lambda on_done: callbacks.append(on_done) or True
+        results: list[bool] = []
+
+        with patch(
+            "main.window_lifecycle_cleanup.iter_loaded_pages_for_close",
+            return_value=iter([("other", object()), ("blockcheck", scan_page)]),
+        ):
+            waiting = ApplicationLifecycleWindowPort(window).finish_strategy_scan_before_exit(results.append)
+
+        self.assertTrue(waiting)
+        self.assertEqual(results, [])
+        callbacks[0](True)
+        callbacks[0](False)
+        self.assertEqual(results, [True])
+        del app
+
+    def test_window_port_has_nothing_to_wait_for_without_a_scan(self) -> None:
+        from unittest.mock import patch
+
+        from PyQt6.QtWidgets import QApplication, QWidget
+
+        from main.application_lifecycle_port import ApplicationLifecycleWindowPort
+
+        app = QApplication.instance() or QApplication([])
+        window = QWidget()
+        self.addCleanup(window.deleteLater)
+        idle_page = Mock()
+        idle_page.request_exit_restore.return_value = False
+
+        with patch(
+            "main.window_lifecycle_cleanup.iter_loaded_pages_for_close",
+            return_value=iter([("blockcheck", idle_page), ("about", object())]),
+        ):
+            waiting = ApplicationLifecycleWindowPort(window).finish_strategy_scan_before_exit(Mock())
+
+        self.assertFalse(waiting)
+        del app
+
 
 if __name__ == "__main__":
     unittest.main()

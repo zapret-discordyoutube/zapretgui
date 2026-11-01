@@ -275,6 +275,8 @@ class ExitScreenLifecycleTests(unittest.TestCase):
 
         window_port = Mock()
         window_port.begin_exit_screen.side_effect = _begin
+        # По умолчанию подбора стратегии нет: ждать перед выходом нечего.
+        window_port.finish_strategy_scan_before_exit.return_value = False
         runtime_feature = Mock()
         runtime_feature.snapshot.return_value = Mock(running=running)
         lifecycle = ApplicationLifecycle(
@@ -286,6 +288,50 @@ class ExitScreenLifecycleTests(unittest.TestCase):
             tray_feature=Mock(),
         )
         return lifecycle, window_port, runtime_feature
+
+    def test_exit_during_strategy_scan_waits_for_zapret_to_come_back(self) -> None:
+        # Подбор выключил Zapret на время замеров: «оставить работать» значит
+        # вернуть его и выйти, только когда он снова запущен.
+        lifecycle, window_port, runtime_feature = self._lifecycle(running=False)
+        window_port.finish_strategy_scan_before_exit.return_value = True
+        timers: list = []
+
+        with (
+            patch("main.application_lifecycle.QApplication"),
+            patch("main.application_lifecycle.QTimer") as q_timer,
+        ):
+            q_timer.singleShot.side_effect = lambda _ms, callback: timers.append(callback)
+            lifecycle.exit_keep_dpi()
+            scan_done = window_port.finish_strategy_scan_before_exit.call_args.args[0]
+            (session,) = self.sessions
+            session.finish.assert_not_called()  # подбор ещё идёт
+
+            scan_done(True)  # подбор остановлен, запуск Zapret заказан
+            session.finish.assert_not_called()  # Zapret ещё не поднялся
+            self.assertEqual(len(timers), 1)
+
+            runtime_feature.snapshot.return_value = Mock(running=True)
+            timers.pop()()
+            session.finish.assert_called_once()
+
+    def test_exit_during_strategy_scan_does_not_wait_when_nothing_was_restored(self) -> None:
+        lifecycle, window_port, _runtime = self._lifecycle(running=False)
+        window_port.finish_strategy_scan_before_exit.return_value = True
+
+        with patch("main.application_lifecycle.QApplication"):
+            lifecycle.exit_keep_dpi()
+            (session,) = self.sessions
+            window_port.finish_strategy_scan_before_exit.call_args.args[0](False)
+
+        session.finish.assert_called_once()
+
+    def test_exit_for_update_install_does_not_touch_the_scan(self) -> None:
+        lifecycle, window_port, _runtime = self._lifecycle(running=False)
+
+        with patch("main.application_lifecycle.QApplication"):
+            lifecycle.exit_keep_dpi(farewell=False)
+
+        window_port.finish_strategy_scan_before_exit.assert_not_called()
 
     def test_closing_only_the_window_plays_the_screen_and_then_quits(self) -> None:
         lifecycle, window_port, _runtime = self._lifecycle(running=True)

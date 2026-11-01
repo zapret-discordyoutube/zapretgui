@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import time
+
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
 from log.log import log
+
+
+# После подбора Zapret запускается в фоне: выход ждёт его не дольше этого.
+DPI_RESTORE_WAIT_SECONDS = 30.0
+DPI_RESTORE_POLL_MS = 250
 
 
 class _ImmediateExit:
@@ -47,7 +55,47 @@ class ApplicationLifecycle:
         exit_screen = self._begin_exit_screen(farewell, stop_dpi=False)
         self._prepare_full_exit(stop_dpi=False)
         log("Запрошен выход: выйти без остановки DPI", "INFO")
-        exit_screen.finish(self._quit_application)
+        leave = lambda: exit_screen.finish(self._quit_application)  # noqa: E731
+        if farewell:
+            # Выход по просьбе человека: если идёт подбор стратегии, он выключил
+            # Zapret на время замеров — вернуть его до выхода. Выход ради
+            # установки обновления (farewell=False) Zapret не запускает.
+            self._restore_dpi_after_scan_then(leave)
+        else:
+            leave()
+
+    def _restore_dpi_after_scan_then(self, leave) -> None:
+        try:
+            waiting = bool(
+                self._window_port.finish_strategy_scan_before_exit(
+                    lambda restored: self._wait_dpi_running_then(restored, leave)
+                )
+            )
+        except Exception as e:
+            log(f"Подбор стратегии перед выходом не остановлен: {e}", "WARNING")
+            waiting = False
+        if not waiting:
+            leave()
+
+    def _wait_dpi_running_then(self, restored: bool, leave, *, deadline: float | None = None) -> None:
+        """Ждёт, пока вернувшийся после подбора Zapret правда запустится, и выходит."""
+        if not restored:
+            leave()
+            return
+        now = time.monotonic()
+        if deadline is None:
+            deadline = now + DPI_RESTORE_WAIT_SECONDS
+        if self._is_bypass_running():
+            leave()
+            return
+        if now >= deadline:
+            log("Zapret не успел запуститься после подбора перед выходом", "WARNING")
+            leave()
+            return
+        QTimer.singleShot(
+            DPI_RESTORE_POLL_MS,
+            lambda: self._wait_dpi_running_then(True, leave, deadline=deadline),
+        )
 
     def exit_stop_dpi(self, *, farewell: bool = True) -> None:
         exit_screen = self._begin_exit_screen(farewell, stop_dpi=True)

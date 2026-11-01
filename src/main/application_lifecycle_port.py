@@ -41,6 +41,39 @@ class ApplicationLifecycleWindowPort:
         )
 
 
+    def finish_strategy_scan_before_exit(self, on_done, *, timeout_ms: int = 60_000) -> bool:
+        """Если идёт подбор стратегии, остановить его и вернуть Zapret до выхода.
+
+        ``on_done(restored)`` вызывается один раз: когда подбор закончился или
+        когда вышло время (тогда ``restored`` False). Возвращает False, если
+        подбора нет и ждать нечего.
+        """
+        from PyQt6.QtCore import QTimer
+
+        from main.window_lifecycle_cleanup import iter_loaded_pages_for_close
+
+        state = {"done": False}
+        # Таймер принадлежит окну: пока идёт ожидание, ссылок на него больше нет.
+        timer = QTimer(self._window)
+        timer.setSingleShot(True)
+
+        def _once(restored: bool) -> None:
+            if state["done"]:
+                return
+            state["done"] = True
+            timer.stop()
+            on_done(bool(restored))
+
+        timer.timeout.connect(lambda: _once(False))
+        for _name, page in iter_loaded_pages_for_close(self._window):
+            request = getattr(page, "request_exit_restore", None)
+            if not callable(request):
+                continue
+            if request(_once):
+                timer.start(int(timeout_ms))
+                return True
+        return False
+
     def begin_exit_screen(self, *, stop_dpi: bool, bypass_running: bool):
         """Прощальный экран поверх окна. Возвращает сеанс с finish(on_done)."""
         from ui.exit_screen import begin_exit_screen

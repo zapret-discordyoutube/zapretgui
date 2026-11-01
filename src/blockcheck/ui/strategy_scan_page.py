@@ -914,18 +914,44 @@ class StrategyScanPage(BasePage):
                 proceed = False
         worker.answer_continue(proceed)
 
-    def _restore_runtime_after_scan(self) -> None:
-        """Подбор останавливал Zapret — вернуть его, если он работал до подбора."""
+    def _restore_runtime_after_scan(self) -> bool:
+        """Подбор останавливал Zapret — вернуть его, если он работал до подбора.
+
+        True — запуск Zapret заказан (он идёт в фоне).
+        """
         restore = getattr(self._scan_worker, "restore_runtime_if_needed", None)
         if restore is None:
-            return
+            return False
         try:
-            restored = restore()
+            restored = bool(restore())
         except Exception:
             logger.exception("Failed to restore Zapret after strategy scan")
-            return
+            return False
         if restored:
             self._on_log("Подбор закончен — запускаю Zapret снова, как было до подбора")
+        return restored
+
+    def request_exit_restore(self, on_done) -> bool:
+        """Выход «оставить DPI работающим» посреди подбора.
+
+        Подбор на время замеров выключил Zapret. Если выйти сейчас, программа
+        закроется, а Zapret так и останется выключенным, хотя человек выбрал
+        «оставить работать». Поэтому подбор сначала останавливается, Zapret
+        возвращается, и только потом программа выходит.
+
+        ``on_done(restored)`` вызывается, когда подбор закончился: ``restored``
+        — заказан ли запуск Zapret. False — подбора нет, выходить можно сразу.
+        """
+        if not self._strategy_scan_run_runtime.is_running():
+            return False
+        self._exit_restore_callback = on_done
+        self._on_stop()
+        return True
+
+    def _finish_exit_restore(self, restored: bool) -> None:
+        callback = self.__dict__.pop("_exit_restore_callback", None)
+        if callback is not None:
+            callback(bool(restored))
 
     def _on_log(self, message: str):
         if self._cleanup_in_progress:
@@ -948,7 +974,8 @@ class StrategyScanPage(BasePage):
         """Handle scan completion."""
         if self._cleanup_in_progress:
             return
-        self._restore_runtime_after_scan()
+        restored = self._restore_runtime_after_scan()
+        self._finish_exit_restore(restored)
         self._request_strategy_scan_finalize(report)
 
     def _request_strategy_scan_finalize(self, report) -> None:
