@@ -62,6 +62,11 @@ def replace_in_line(line: int, start: int, end: int, text: str) -> TextEdit:
     return TextEdit(line, int(start), line, int(end), str(text))
 
 
+def remove_whole_line(line: int) -> TextEdit:
+    """Удаляет строку целиком вместе с переводом строки."""
+    return TextEdit(line, 0, line + 1, 0, "")
+
+
 def insert_line_before(line: int, text: str) -> TextEdit:
     return TextEdit(line, 0, line, 0, f"{text}\n")
 
@@ -76,5 +81,6 @@ __all__ = [
     "SEVERITY_WARNING",
     "TextEdit",
     "insert_line_before",
+    "remove_whole_line",
     "replace_in_line",
 ]

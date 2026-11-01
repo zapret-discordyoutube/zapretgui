@@ -35,7 +35,7 @@ from profile.winws2_language.model import (
     CompletionResult,
     Diagnostic,
     QuickFix,
-    TextEdit,
+    remove_whole_line,
     replace_in_line,
 )
 
@@ -57,7 +57,7 @@ HOSTLIST_PREFIX_HELP = (
 
 
 def _remove_line_fix(line: int, title: str = "Удалить строку") -> QuickFix:
-    return QuickFix(title, (TextEdit(line, 0, line + 1, 0, ""),))
+    return QuickFix(title, (remove_whole_line(line),))
 
 
 def _where(found: IndexedEntry) -> str:

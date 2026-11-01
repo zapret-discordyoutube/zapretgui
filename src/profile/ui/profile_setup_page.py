@@ -2104,6 +2104,9 @@ class ProfileSetupPageBase(BasePage):
         prefix_help = self.__dict__.get("_list_file_prefix_help")
         if prefix_help is not None:
             set_widget_visible_if_changed(prefix_help, editable and kind == "hostlist")
+        list_tab = self.__dict__.get("_list_file_editor_tab")
+        if list_tab is not None and kind:
+            list_tab.set_list_kind(kind)
         # Что сервер знает — фиксируем всегда; текст пользователя — только
         # когда его правки не старше пришедшего состояния.
         self._list_file_server_text_snapshot = visible_user_text

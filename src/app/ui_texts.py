@@ -6470,7 +6470,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "отмечают, работает ли он.\n\n"
             "Кнопки-значки в шапке открывают остальные разделы; название кнопки видно при наведении. "
             "«Список сайтов» — ваши записи списка сайтов или адресов. «Текст профиля» — строки "
-            "профиля так, как они записаны в пресете.\n\n"
+            "профиля так, как они записаны в пресете. В обоих разделах есть кнопка с подробным "
+            "объяснением и статьями вики.\n\n"
             "Открытый раздел появляется в строке пути вверху; по ней же возвращаются к стратегиям."
         ),
         "en": (
@@ -6478,7 +6479,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "method and mark whether it works.\n\n"
             "The icon buttons in the header open the other sections; hover a button to see its name. "
             "\"Site list\" holds your entries of the site or address list. \"Profile text\" shows "
-            "the profile lines as they are written in the preset.\n\n"
+            "the profile lines as they are written in the preset. Both sections have a button with a "
+            "detailed explanation and wiki articles.\n\n"
             "The open section appears in the path line at the top; use it to return to the strategies."
         ),
     },
@@ -6754,14 +6756,22 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "отдельном файле в папке lists/user и не пропадут при обновлении.\n\n"
             "«Встроенные записи (только просмотр)» — список, который приходит с программой и обновляется "
             "вместе с ней; менять его здесь нельзя. В широком окне он стоит справа, в узком — ниже.\n\n"
-            "Движок получает общий список: встроенные записи плюс ваши."
+            "Движок получает общий список: сначала ваши записи, потом встроенные. Домен учитывается по "
+            "первой записи, поэтому ваша строка перебивает встроенную: строка !youtube.com её отключит, "
+            "строка ^youtube.com оставит только сам домен без поддоменов.\n\n"
+            "Кнопка «Что это?» внизу подробно объясняет, как читается строка и что важнее чего, и "
+            "открывает статьи вики с примерами."
         ),
         "en": (
             "Your entries is the field for your own sites or addresses, one per line. They live in a "
             "separate file in the lists/user folder and survive updates.\n\n"
             "Built-in entries (read-only) is the list that comes with the app and is updated with it; it "
             "cannot be changed here. In a wide window it stands on the right, in a narrow one below.\n\n"
-            "The engine receives the combined list: the built-in entries plus yours."
+            "The engine receives the combined list: your entries first, then the built-in ones. A domain "
+            "counts by its first entry, so your line overrides a built-in one: \"!youtube.com\" switches it "
+            "off, \"^youtube.com\" keeps only the domain itself without subdomains.\n\n"
+            "The \"What is this?\" button at the bottom explains how a line is read and what overrides "
+            "what, and opens wiki articles with examples."
         ),
     },
     "onboarding.step.fakes.title": {

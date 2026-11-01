@@ -15,6 +15,8 @@ from ui.code_editor.find_bar import FindReplaceBar
 from ui.code_editor.find_controller import FindController
 from ui.code_editor.syntax import PresetSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
+from profile.profile_help_texts import PROFILE_TEXT_HELP
+from profile.ui.profile_help_dialog import make_help_button, show_help
 
 
 HINT_TEXT = (
@@ -78,6 +80,13 @@ class ProfileRawTextTab(QWidget):
         )
         set_state_text(self.save_button, "Сохранить текст профиля")
         actions_layout.addWidget(self.save_button)
+        # «Что это?» — что значат строки профиля и что важнее чего, со ссылками на вики.
+        self.help_button = make_help_button(
+            actions,
+            description="Объясняет строки профиля: условия, списки, исключения и стратегию — и что из них важнее.",
+        )
+        self.help_button.clicked.connect(lambda: show_help(PROFILE_TEXT_HELP, self.window()))
+        actions_layout.addWidget(self.help_button)
         actions_layout.addStretch(1)
         layout.addWidget(actions)
 

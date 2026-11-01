@@ -111,15 +111,18 @@ WINWS2_OPTIONS: tuple[OptionSpec, ...] = (
     # ------------------------------------------------------ списки хостов/IP
     _o("hostlist", "required", "profile", "file",
        "Профиль работает только для доменов из файла (поддомены тоже). В файле «^домен» — без поддоменов, "
-       "«!домен» — исключение из этого файла: «ru» и «!torrents.ru» — все .ru, кроме torrents.ru.",
+       "«!домен» — исключение из этого файла: «ru» и «!torrents.ru» — все .ru, кроме torrents.ru. "
+       "Файлов может быть несколько — хватит совпадения в любом. Имя сайта движок узнаёт из первого "
+       "пакета с данными, до этого профиль со списком сайтов не срабатывает.",
        repeat="accumulate", placeholder="lists/файл.txt"),
     _o("hostlist-domains", "required", "profile", "text",
        "Домены прямо в строке через запятую; работают «^» (без поддоменов) и «!» (исключение): "
        "«ru,!torrents.ru». Все --hostlist-domains профиля складываются в один список.",
        repeat="accumulate", placeholder="example.com,example.org"),
     _o("hostlist-exclude", "required", "profile", "file",
-       "Не применять профиль к доменам из файла (поддомены тоже). «!домен» в файле — не исключать этот "
-       "домен: «ru» и «!torrents.ru» исключают все .ru, кроме torrents.ru.",
+       "Не применять профиль к доменам из файла (поддомены тоже). Исключение сильнее включения: домен "
+       "отсюда профиль не возьмёт, даже если он есть в --hostlist, — соединение уйдёт в профили ниже. "
+       "«!домен» в файле — не исключать этот домен: «ru» и «!torrents.ru» исключают все .ru, кроме torrents.ru.",
        repeat="accumulate", placeholder="lists/файл.txt"),
     _o("hostlist-exclude-domains", "required", "profile", "text",
        "Исключаемые домены прямо в строке через запятую; «!» — не исключать: «ru,!torrents.ru».",
@@ -177,11 +180,15 @@ WINWS2_OPTIONS: tuple[OptionSpec, ...] = (
     _o("filter-ssid-neg", "optional", "profile", "bool01", "Обратить фильтр SSID.", platform="linux"),
     _o("filter-mark", "required", "profile", "text", "Фильтр по fwmark.", platform="linux"),
     _o("ipset", "required", "profile", "file",
-       "Профиль работает только для IP/подсетей из файла.", repeat="accumulate", placeholder="lists/ipset-файл.txt"),
+       "Профиль работает только для IP/подсетей из файла (1.2.3.4, 10.0.0.0/8, IPv6). Адрес известен с "
+       "первого пакета, поэтому условие срабатывает сразу. Файлов может быть несколько — хватит совпадения в любом.",
+       repeat="accumulate", placeholder="lists/ipset-файл.txt"),
     _o("ipset-ip", "required", "profile", "text",
        "IP и подсети прямо в строке через запятую.", repeat="accumulate"),
     _o("ipset-exclude", "required", "profile", "file",
-       "Не применять профиль к IP/подсетям из файла.", repeat="accumulate", placeholder="lists/ipset-exclude.txt"),
+       "Не применять профиль к IP/подсетям из файла. Исключение сильнее включения: адрес отсюда профиль "
+       "не возьмёт, даже если он есть в --ipset, — соединение уйдёт в профили ниже.",
+       repeat="accumulate", placeholder="lists/ipset-exclude.txt"),
     _o("ipset-exclude-ip", "required", "profile", "text",
        "Исключаемые IP и подсети прямо в строке через запятую.", repeat="accumulate"),
     # --------------------------------------------- что и когда делает Lua
