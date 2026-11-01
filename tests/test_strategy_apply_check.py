@@ -86,6 +86,52 @@ class CheckSiteTests(unittest.TestCase):
         # Проба не открыла сайт — браузер не нужен: итог уже ясен.
         self.assertEqual(self._run([[RESET], [RESET]], visit=refused).code, check.CHECK_FAILED)
 
+    def test_silent_browser_is_retried_and_then_said_to_be_unchecked(self) -> None:
+        from blockcheck import browser_check
+
+        silent = browser_check.BrowserVisit(browser_check.BROWSER_NO_ANSWER, browser="msedge.exe", details="код выхода 0; вывод пуст")
+        opened = browser_check.BrowserVisit(browser_check.BROWSER_OK, browser="msedge.exe")
+        answers = iter([silent, opened])
+        result = self._run_with_browser(lambda host, **_k: next(answers))
+        self.assertEqual(result.code, check.CHECK_OK)
+        self.assertIn("открылся и в браузере", result.text)
+        # Молчит и второй раз — не «работает» и не «не открылся»: проверить не вышло, с тем, что вернул браузер.
+        result = self._run_with_browser(lambda host, **_k: silent)
+        self.assertEqual(result.code, check.CHECK_BROWSER_UNKNOWN)
+        self.assertIn("код выхода 0", result.text)
+        kind, _title, body = check.apply_check_message("discord.com", result.code, result.text)
+        self.assertEqual(kind, "info")
+        self.assertIn("сбой проверки", body)
+
+    def test_every_installed_browser_is_tried_while_they_stay_silent(self) -> None:
+        from blockcheck import browser_check
+
+        tried: list[str] = []
+
+        def visit(host, *, cancelled, browser):
+            tried.append(browser)
+            if browser.endswith("chrome.exe"):
+                return browser_check.BrowserVisit(browser_check.BROWSER_OK, browser="chrome.exe")
+            return browser_check.BrowserVisit(browser_check.BROWSER_NO_ANSWER, browser="msedge.exe", details="код выхода 1")
+
+        with (
+            patch.object(browser_check, "find_browsers", return_value=[r"C:\Edge\msedge.exe", r"C:\Chrome\chrome.exe"]),
+            patch.object(browser_check, "open_in_browser", side_effect=visit),
+        ):
+            visits = check._browser_visits("discord.com", cancel=SocketCancel())
+        self.assertEqual(tried, [r"C:\Edge\msedge.exe", r"C:\Edge\msedge.exe", r"C:\Chrome\chrome.exe"])
+        self.assertTrue(visits[-1].ok)
+
+    def _run_with_browser(self, open_browser):
+        with (
+            patch("blockcheck.strategy_search.probes.resolve_target_addresses", return_value=(["1.1.1.1", "1.1.2.1"], "")),
+            patch("blockcheck.strategy_search.probes.probe_https_addresses", return_value=[OK, OK]),
+            patch.object(check, "wait_until_running", return_value=True),
+        ):
+            cancel = SocketCancel()
+            cancel.sleep = lambda seconds: True
+            return check.run_apply_check("discord.com", is_running=lambda: True, restarting=False, cancel=cancel, open_browser=open_browser)
+
     def test_zapret_not_started_is_skipped(self) -> None:
         self.assertEqual(self._run([], running=False).code, check.CHECK_SKIPPED)
 

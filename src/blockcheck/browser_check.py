@@ -10,8 +10,11 @@
 Браузер запускается без окна и с пустым временным профилем: ни истории, ни
 расширений, ни своих фоновых запросов (синхронизация, обновления
 компонентов). Итог читается из того, что печатает сам браузер: страница —
-открылось; «Page load failed: net::ERR_…» — не открылось и почему;
-«Page load timed out» — не дождались.
+открылось; «Page load failed: net::ERR_…» — не открылось и почему (эти строки
+браузер пишет в свой журнал, поэтому он включается ключом ``--enable-logging=stderr``);
+«Page load timed out» — не дождались. Ни страницы, ни ошибки — браузер не ответил
+(упал, его выключила политика, напечатал что-то незнакомое): это сбой самой
+проверки, а не сайта, и код выхода с последней строкой вывода идут в журнал.
 
 QUIC (UDP 443) отключается, когда проверяется обычное соединение: иначе
 браузер ушёл бы на QUIC, и проверка была бы не о той стратегии.
@@ -29,18 +32,34 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-__all__ = ["BROWSER_FAILED", "BROWSER_MISSING", "BROWSER_OK", "BROWSER_TIMEOUT", "BrowserVisit", "find_browser", "open_in_browser"]
+__all__ = [
+    "BROWSER_FAILED",
+    "BROWSER_MISSING",
+    "BROWSER_NO_ANSWER",
+    "BROWSER_OK",
+    "BROWSER_TIMEOUT",
+    "BrowserVisit",
+    "find_browser",
+    "find_browsers",
+    "open_in_browser",
+]
 
 BROWSER_OK = "ok"
 BROWSER_FAILED = "failed"
 BROWSER_TIMEOUT = "timeout"
 BROWSER_MISSING = "missing"
+# Браузер завершился без страницы и без ошибки: о сайте он ничего не сказал.
+BROWSER_NO_ANSWER = "no_answer"
 
 # Сколько ждать загрузки страницы и сколько сверху — на запуск и выход браузера.
 PAGE_TIMEOUT_S = 20.0
 START_EXTRA_S = 15.0
 
 _NET_ERROR = re.compile(r"Page load failed: net::(ERR_[A-Z0-9_]+)")
+# Ошибка сети в другой строке журнала браузера (не «Page load failed»).
+_ANY_NET_ERROR = re.compile(r"net::(ERR_[A-Z0-9_]+)")
+# Сколько знаков последней строки вывода сохранять для журнала.
+DETAIL_CHARS = 200
 _TIMED_OUT = "Page load timed out"
 
 # Где искать: сначала Edge (есть всегда), потом Chrome.
@@ -77,19 +96,30 @@ class BrowserVisit:
     browser: str = ""
     # Сколько прошло от запуска браузера до итога: по разнице с QUIC и без него видна цена отката (``diagnostics.quic_fallback``).
     elapsed_ms: float = 0.0
+    # Для журнала: код выхода и последняя строка вывода, когда браузер не ответил.
+    details: str = ""
 
     @property
     def ok(self) -> bool:
         return self.state == BROWSER_OK
 
 
-def find_browser() -> str:
-    """Путь к Edge или Chrome; пусто — браузера нет."""
+def find_browsers() -> list[str]:
+    """Пути ко всем найденным браузерам: Edge первым, потом Chrome; по одному пути на браузер."""
+    found: list[str] = []
     for candidate in _CANDIDATES:
         path = os.path.expandvars(candidate)
-        if "%" not in path and os.path.isfile(path):
-            return path
-    return ""
+        if "%" in path or not os.path.isfile(path):
+            continue
+        if ntpath.basename(path).lower() not in {ntpath.basename(known).lower() for known in found}:
+            found.append(path)
+    return found
+
+
+def find_browser() -> str:
+    """Путь к Edge или Chrome; пусто — браузера нет."""
+    browsers = find_browsers()
+    return browsers[0] if browsers else ""
 
 
 def browser_command(browser: str, url: str, profile_dir: str, *, quic: bool) -> list[str]:
@@ -104,6 +134,10 @@ def browser_command(browser: str, url: str, profile_dir: str, *, quic: bool) -> 
         "--disable-component-update",
         f"--user-data-dir={profile_dir}",
         f"--timeout={int(PAGE_TIMEOUT_S * 1000)}",
+        # «Page load failed» и «Page load timed out» браузер пишет в свой журнал, а он без этого
+        # ключа выключен: ошибка сети выглядела бы как молчание. Уровень 2 — только ошибки.
+        "--enable-logging=stderr",
+        "--log-level=2",
     ]
     if not quic:
         command.append("--disable-quic")
@@ -111,7 +145,23 @@ def browser_command(browser: str, url: str, profile_dir: str, *, quic: bool) -> 
     return command
 
 
-def judge_output(output: str, browser: str) -> BrowserVisit:
+def _last_line(output: str) -> str:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return lines[-1][:DETAIL_CHARS] if lines else ""
+
+
+def no_answer_details(output: str, exit_code: int | None) -> str:
+    """Что сказать в журнал о браузере, который не ответил: код выхода и последняя строка вывода."""
+    if exit_code is None:
+        code = "неизвестен"
+    else:
+        # Падение Windows отдаёт код вида 0xC0000005: так его и показываем.
+        code = f"0x{exit_code & 0xFFFFFFFF:08X}" if exit_code < 0 or exit_code > 0xFFFF else str(exit_code)
+    line = _last_line(output)
+    return f"код выхода {code}; " + (f"последняя строка: {line}" if line else "вывод пуст")
+
+
+def judge_output(output: str, browser: str, exit_code: int | None = None) -> BrowserVisit:
     """Итог по тому, что напечатал браузер."""
     name = ntpath.basename(browser)
     match = _NET_ERROR.search(output)
@@ -122,7 +172,12 @@ def judge_output(output: str, browser: str) -> BrowserVisit:
         return BrowserVisit(BROWSER_TIMEOUT, "", f"страница не загрузилась за {PAGE_TIMEOUT_S:g} с", name)
     if "<html" in output.lower():
         return BrowserVisit(BROWSER_OK, browser=name)
-    return BrowserVisit(BROWSER_FAILED, "", "браузер ничего не показал", name)
+    match = _ANY_NET_ERROR.search(output)
+    if match:
+        code = match.group(1)
+        return BrowserVisit(BROWSER_FAILED, code, _ERROR_TEXT.get(code, code), name, details=_last_line(output))
+    details = no_answer_details(output, exit_code)
+    return BrowserVisit(BROWSER_NO_ANSWER, "", "браузер завершился, ничего не сказав о сайте", name, details=details)
 
 
 def _hidden_popen(command: list[str], output) -> subprocess.Popen:
@@ -149,6 +204,16 @@ def _kill_on_close_job(process: subprocess.Popen):
         if job is not None:
             winapi.close_handle(job)
         return None
+
+
+def _read_output(path: str) -> str:
+    with open(path, "rb") as output:
+        return output.read().decode("utf-8", errors="replace")
+
+
+def _has_verdict(output: str) -> bool:
+    """Браузер уже сказал, что страница не открылась или не дождалась."""
+    return bool(_NET_ERROR.search(output)) or _TIMED_OUT in output
 
 
 def open_in_browser(
@@ -183,11 +248,15 @@ def open_in_browser(
             while process.poll() is None:
                 if cancelled():
                     return BrowserVisit(BROWSER_TIMEOUT, "", "проверку остановили", name)
+                # Edge, напечатав «Page load failed», сам не выходит: итог берётся, как только он напечатан.
+                if _has_verdict(_read_output(output_path)):
+                    break
                 if clock() >= deadline:
-                    return BrowserVisit(BROWSER_TIMEOUT, "", "браузер не ответил вовремя", name)
+                    last = _last_line(_read_output(output_path))
+                    details = f"последняя строка: {last}" if last else "вывод пуст"
+                    return BrowserVisit(BROWSER_TIMEOUT, "", "браузер не ответил вовремя", name, details=details)
                 time.sleep(0.2)
-        with open(output_path, "rb") as output:
-            visit = judge_output(output.read().decode("utf-8", errors="replace"), browser)
+        visit = judge_output(_read_output(output_path), browser, process.poll())
         return replace(visit, elapsed_ms=(clock() - started) * 1000)
     except OSError as error:
         return BrowserVisit(BROWSER_MISSING, text=f"браузер не запустился: {error}")

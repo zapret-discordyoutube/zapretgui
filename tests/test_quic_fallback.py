@@ -45,6 +45,11 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(verdict.code, qf.FALLBACK_BROKEN)
         self.assertIn("соединение сброшено", verdict.text)
 
+    def test_browser_that_says_nothing_with_quic_is_unknown_not_broken(self) -> None:
+        silent = _visit(0.0, browser_check.BROWSER_NO_ANSWER)
+        verdict = qf.judge(qf.FallbackFacts("x.com", (silent, silent), (_visit(1000), _visit(1100))))
+        self.assertEqual(verdict.code, qf.FALLBACK_UNKNOWN)
+
     def test_no_browser_or_no_tcp_result_is_unknown(self) -> None:
         missing = browser_check.BrowserVisit(browser_check.BROWSER_MISSING, text="нет браузера")
         self.assertEqual(qf.judge(_facts([missing], [missing])).code, qf.FALLBACK_UNKNOWN)

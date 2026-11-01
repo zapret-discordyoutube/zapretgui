@@ -82,6 +82,8 @@ def judge(facts: FallbackFacts) -> FallbackVerdict:
         return FallbackVerdict(FALLBACK_UNKNOWN, "без QUIC браузер сайт не открыл — про откат сказать нечего", host)
     quic = _times(facts.with_quic)
     tcp_ms = statistics.median(tcp)
+    if not quic and facts.with_quic and all(getattr(visit, "state", "") == "no_answer" for visit in facts.with_quic):
+        return FallbackVerdict(FALLBACK_UNKNOWN, "с QUIC браузер ничего не сказал о сайте — про откат сказать нечего", host)
     if not quic:
         reason = next((visit.text for visit in facts.with_quic if visit.text), "не открылась")
         return FallbackVerdict(

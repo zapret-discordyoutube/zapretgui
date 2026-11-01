@@ -19,6 +19,8 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from log.log import log
+
 # Сколько ждать, пока Zapret запустится после «Применить».
 START_WAIT_SECONDS = 25.0
 # Работающий Zapret перечитывает изменённый пресет сам; столько даём ему на это.
@@ -33,6 +35,8 @@ CHECK_FAILED = "failed"
 CHECK_SKIPPED = "skipped"
 # Проба сайт открыла, а настоящий браузер — нет.
 CHECK_BROWSER_FAILED = "browser_failed"
+# Проба сайт открыла, а браузер завершился, ничего не сказав: проверить в браузере не вышло.
+CHECK_BROWSER_UNKNOWN = "browser_unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,18 +128,50 @@ def run_apply_check(host: str, *, is_running, restarting: bool, cancel, open_bro
     return _confirm_in_browser(host, check, cancel=cancel, open_browser=open_browser)
 
 
-def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=None) -> ApplyCheck:
-    """Проба открыла сайт — подтверждает настоящий браузер. Нет браузера — остаётся итог пробы."""
+def _browser_visits(host: str, *, cancel, open_browser=None):
+    """Открытия сайта браузером, пока какое-то не скажет о сайте: молчащий браузер — ещё раз, затем другой браузер."""
     from blockcheck import browser_check
 
-    visit = (open_browser or browser_check.open_in_browser)(host, cancelled=lambda: cancel.cancelled)
+    if open_browser is not None:
+        attempts = [lambda: open_browser(host, cancelled=lambda: cancel.cancelled)] * 2
+    else:
+        attempts = [
+            lambda path=path: browser_check.open_in_browser(host, cancelled=lambda: cancel.cancelled, browser=path)
+            for path in browser_check.find_browsers()
+            for _ in range(2)
+        ]
+    visits = []
+    for attempt in attempts:
+        visits.append(attempt())
+        if cancel.cancelled or visits[-1].state != browser_check.BROWSER_NO_ANSWER:
+            break
+    return visits
+
+
+def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=None) -> ApplyCheck:
+    """Проба открыла сайт — подтверждает настоящий браузер. Нет браузера — остаётся итог пробы.
+
+    Браузер, который завершился, ничего не сказав о сайте, проверку не прошёл и не провалил: так молчит
+    и Edge, у которого сайт не открылся (на win10 он молча выходил и на несуществующем имени). Поэтому
+    это отдельный итог — «проверить в браузере не вышло» — с тем, что браузер вернул.
+    """
+    from blockcheck import browser_check
+
+    visits = _browser_visits(host, cancel=cancel, open_browser=open_browser)
+    for visit in visits:
+        if visit.details:
+            log(f"Проверка {host} в браузере {visit.browser}: {visit.state}, {visit.details}", "INFO")
     if cancel.cancelled:
         return ApplyCheck(CHECK_SKIPPED, "проверку остановили")
-    if visit.state == browser_check.BROWSER_MISSING:
+    if not visits or visits[-1].state == browser_check.BROWSER_MISSING:
         return check
+    visit = visits[-1]
     if visit.ok:
         note = f"открылся и в браузере {visit.browser}"
         return ApplyCheck(CHECK_OK, f"{check.text}; {note}" if check.text else note)
+    if visit.state == browser_check.BROWSER_NO_ANSWER:
+        silent = list(dict.fromkeys(item.browser for item in visits))
+        return ApplyCheck(CHECK_BROWSER_UNKNOWN, f"{', '.join(silent)}: {visit.text} ({visit.details})")
     return ApplyCheck(CHECK_BROWSER_FAILED, f"{visit.browser}: {visit.text}")
 
 
@@ -189,5 +225,13 @@ def apply_check_message(host: str, code: str, text: str) -> tuple[str, str, str]
             f"{host}: проба программы через ваш пресет сайт открыла, а браузер без окна — нет ({text}). "
             "Браузер мог получить от DNS другой адрес сайта или пойти через свой прокси. Откройте сайт в "
             "браузере сами; если не открывается — запустите подбор ещё раз.",
+        )
+    if code == CHECK_BROWSER_UNKNOWN:
+        return (
+            "info",
+            "Проверить в браузере не вышло",
+            f"{host}: проба программы через ваш пресет сайт открыла, а браузер без окна не ответил ({text}). "
+            "Это сбой проверки, а не ответ сайта. Откройте сайт в своём браузере; если не открывается — "
+            "запустите подбор ещё раз.",
         )
     return None

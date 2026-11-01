@@ -1327,7 +1327,7 @@ class StrategyScanPage(BasePage):
         if message is None:
             return
         kind, title, body = message
-        show = InfoBarHelper.warning if kind == "warning" else InfoBarHelper.success
+        show = {"warning": InfoBarHelper.warning, "info": InfoBarHelper.info}.get(kind, InfoBarHelper.success)
         show(self.window(), title, body)
 
     def _zapret_after_apply(self) -> str:
