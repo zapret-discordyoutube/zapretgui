@@ -499,9 +499,9 @@ def check_filter_habits(run: Run, collected: dict[str, list[Probe]], *, tools=()
     """
     from diagnostics import block_cause, browser_hello
 
-    def _send(ip: str, parts: tuple[bytes, ...], pause: float) -> str:
+    def _send(ip: str, parts: tuple[bytes, ...], pause: float, *, flight: bool = False) -> str:
         return browser_hello.send_parts(
-            ip, parts, pause=pause, timeout=HABIT_TIMEOUT_S, cancel=run.probe_cancel
+            ip, parts, pause=pause, timeout=HABIT_TIMEOUT_S, cancel=run.probe_cancel, flight=flight
         ).kind
 
     def _rest(seconds: float) -> None:

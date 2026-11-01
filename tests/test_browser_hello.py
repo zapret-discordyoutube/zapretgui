@@ -123,6 +123,31 @@ class SendHelloTests(unittest.TestCase):
     def test_something_that_is_not_tls_is_a_foreign_answer(self) -> None:
         self.assertEqual(self._send(b"HTTP/1.1 403 Forbidden\r\n\r\n")[0].kind, bc.HELLO_GARBAGE)
 
+    def _flight(self, reply, **kwargs):
+        server = _Server(reply, **kwargs)
+        self.addCleanup(server.done.set)
+        return browser_hello.send_parts("127.0.0.1", (browser_hello.build_hello("x.com", tls12=True),), port=server.port, timeout=0.6, flight=True)
+
+    def test_whole_tls12_reply_is_read_up_to_server_hello_done(self) -> None:
+        # ServerHello (4 байта тела), сертификат (3 байта) и ServerHelloDone — в двух записях.
+        first = b"\x16\x03\x03\x00\x0b" + b"\x02\x00\x00\x01\x00" + b"\x0b\x00\x00\x02\x00\x00"
+        second = b"\x16\x03\x03\x00\x04" + b"\x0e\x00\x00\x00"
+
+        self.assertEqual(self._flight(first + second).kind, bc.HELLO_OK)
+
+    def test_reply_cut_after_its_start_is_a_cut_not_an_answer(self) -> None:
+        started = b"\x16\x03\x03\x00\x0b" + b"\x02\x00\x00\x01\x00" + b"\x0b\x00\x00\x02\x00\x00"
+
+        closed = self._flight(started)
+        silent = self._flight(started, close=False)
+
+        self.assertEqual((closed.kind, closed.detail), (bc.HELLO_RESET, "ответ сервера оборвался после его начала"))
+        self.assertEqual((silent.kind, silent.detail), (bc.HELLO_TIMEOUT, "ответ сервера оборвался после его начала"))
+        # Без чтения ответа целиком то же начало ответа — обычное «сервер ответил».
+        server = _Server(started)
+        self.addCleanup(server.done.set)
+        self.assertEqual(browser_hello.send_parts("127.0.0.1", (b"\x16\x03\x01\x00\x00",), port=server.port, timeout=0.6).kind, bc.HELLO_OK)
+
     def test_closed_port_is_no_connection(self) -> None:
         free = socket.socket()
         free.bind(("127.0.0.1", 0))

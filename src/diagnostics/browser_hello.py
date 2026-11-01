@@ -136,13 +136,16 @@ def _extension(kind: int, data: bytes) -> bytes:
     return struct.pack("!HH", kind, len(data)) + data
 
 
-def build_hello(host: str, *, rnd: Random = os.urandom, post_quantum: bool = True, ech: bool = True) -> bytes:
+def build_hello(
+    host: str, *, rnd: Random = os.urandom, post_quantum: bool = True, ech: bool = True, tls12: bool = False
+) -> bytes:
     """Запись TLS с приветствием Chrome для сайта ``host``.
 
     ``post_quantum=False`` — без постквантового ключа: приветствие втрое короче и
     умещается в один пакет (нужно пробам, которые сами решают, где его резать).
-    ``ech=False`` — без расширения ECH. Оба варианта меняют отпечаток: это уже не
-    «почерк Chrome», а просто корректное приветствие.
+    ``ech=False`` — без расширения ECH. ``tls12=True`` — только TLS 1.2: так здороваются
+    старые устройства и программы, и сервер отвечает открытым сертификатом. Все три
+    варианта меняют отпечаток: это уже не «почерк Chrome», а просто корректное приветствие.
     """
     seeds = rnd(5)
     grease_cipher, grease_group, grease_first, grease_last, grease_version = (_grease(byte) for byte in seeds)
@@ -178,7 +181,7 @@ def build_hello(host: str, *, rnd: Random = os.urandom, post_quantum: bool = Tru
         EXT_SCT: b"",
         EXT_KEY_SHARE: _vec16(key_shares),
         EXT_PSK_MODES: _vec8(b"\x01"),
-        EXT_VERSIONS: _vec8(_u16s((grease_version, 0x0304, 0x0303))),
+        EXT_VERSIONS: _vec8(_u16s((grease_version, 0x0303) if tls12 else (grease_version, 0x0304, 0x0303))),
         EXT_COMPRESS_CERT: _vec8(_u16s((0x0002,))),  # brotli
         EXT_ALPS: _vec16(_vec8(b"h2")),
         EXT_ECH: ech_body,
@@ -279,6 +282,45 @@ def _read_exact(sock: socket.socket, size: int) -> bytes:
     return bytes(data)
 
 
+_HANDSHAKE_SERVER_HELLO_DONE = 14
+# Сколько читать первого ответа TLS 1.2 в поисках «ServerHelloDone»: цепочка сертификатов — несколько КБ.
+_FLIGHT_LIMIT = 64 * 1024
+_CUT_IN_FLIGHT = "ответ сервера оборвался после его начала"
+
+
+def _read_flight(sock: socket.socket, header: bytes, first: bytes) -> bool:
+    """Дочитать первый ответ TLS 1.2 до «ServerHelloDone». False — соединение закрыли раньше."""
+    buffer = bytearray(first)
+    remaining = struct.unpack("!H", header[3:5])[0] - 1
+    total = 0
+    while total < _FLIGHT_LIMIT:
+        if remaining > 0:
+            chunk = _read_exact(sock, remaining)
+            if len(chunk) < remaining:
+                return False
+            buffer += chunk
+            total += len(chunk)
+        # Сообщения рукопожатия идут подряд: тип (1 байт) и длина (3 байта).
+        offset = 0
+        while offset + 4 <= len(buffer):
+            kind = buffer[offset]
+            size = int.from_bytes(buffer[offset + 1 : offset + 4], "big")
+            if kind == _HANDSHAKE_SERVER_HELLO_DONE:
+                return True
+            if offset + 4 + size > len(buffer):
+                break
+            offset += 4 + size
+        del buffer[:offset]
+        record = _read_exact(sock, 5)
+        if len(record) < 5:
+            return False
+        if record[0] != _RECORD_HANDSHAKE:
+            # Отказ или неожиданная запись после начала ответа: сервер ответил, фильтр не резал.
+            return record[0] == _RECORD_ALERT
+        remaining = struct.unpack("!H", record[3:5])[0]
+    return True
+
+
 def send_hello(
     ip: str,
     host: str,
@@ -300,16 +342,22 @@ def send_parts(
     port: int = 443,
     timeout: float = HELLO_TIMEOUT_S,
     cancel: SocketCancel | None = None,
+    flight: bool = False,
 ) -> HelloResult:
     """Шлёт готовое приветствие кусками ``parts`` (с паузой ``pause`` между ними) и сообщает, что пришло в ответ.
 
     Каждый кусок уходит отдельным пакетом. ``HELLO_OK`` — сервер ответил своим приветствием; ``HELLO_ALERT`` — сервер
     ответил отказом (приветствие до него всё равно дошло); ``HELLO_RESET`` и
     ``HELLO_TIMEOUT`` — соединение установилось, но ответа на приветствие нет.
+
+    ``flight=True`` — читать весь первый ответ сервера TLS 1.2, до «ServerHelloDone»: в нём открытым
+    текстом идёт сертификат, и фильтр, который читает ответ, режет соединение уже после начала ответа.
+    Обрыв на середине — тоже ``HELLO_RESET`` / ``HELLO_TIMEOUT``, с пометкой в ``detail``.
     """
     token = cancel or SocketCancel()
     sock: socket.socket | None = None
     connected = False
+    answered = False
     try:
         sock = socket.socket(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM)
         if not token.track(sock):
@@ -334,16 +382,25 @@ def send_parts(
         if header[0] != _RECORD_HANDSHAKE or header[1] != 0x03:
             return HelloResult(HELLO_GARBAGE)
         first = _read_exact(sock, 1)
-        if first and first[0] == _HANDSHAKE_SERVER_HELLO:
+        if not first or first[0] != _HANDSHAKE_SERVER_HELLO:
+            return HelloResult(HELLO_GARBAGE)
+        if not flight:
             return HelloResult(HELLO_OK, ms=took)
-        return HelloResult(HELLO_GARBAGE)
+        answered = True
+        if _read_flight(sock, header, first):
+            return HelloResult(HELLO_OK, ms=(time.perf_counter() - started) * 1000.0)
+        return HelloResult(HELLO_RESET, _CUT_IN_FLIGHT)
     except (socket.timeout, TimeoutError):
         if token.cancelled:
             return HelloResult(HELLO_CANCELLED)
+        if flight and answered:
+            return HelloResult(HELLO_TIMEOUT, _CUT_IN_FLIGHT)
         return HelloResult(HELLO_TIMEOUT if connected else HELLO_CONNECT)
     except OSError as error:
         if token.cancelled:
             return HelloResult(HELLO_CANCELLED)
+        if flight and answered:
+            return HelloResult(HELLO_RESET, _CUT_IN_FLIGHT)
         return HelloResult(HELLO_RESET if connected else HELLO_CONNECT, str(error))
     finally:
         if sock is not None:

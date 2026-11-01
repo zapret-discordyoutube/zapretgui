@@ -21,13 +21,15 @@ class _Filter:
     записей TLS; ``server_takes`` — терпит ли сервер такое дробление вообще.
     """
 
-    def __init__(self, *, joins_packets=False, join_wait=None, joins_records=False, server_takes=lambda parts: True, blocked=(HOST,), cut="reset") -> None:
+    def __init__(self, *, joins_packets=False, join_wait=None, joins_records=False, server_takes=lambda parts: True, blocked=(HOST,), cut="reset", reads_reply12=False) -> None:
         self.joins_packets = joins_packets
         self.join_wait = join_wait
         self.joins_records = joins_records
         self.server_takes = server_takes
         self.blocked = tuple(name.encode() for name in blocked)
         self.cut = cut
+        # Не увидел имени в приветствии TLS 1.2 — читает его в открытом сертификате ответа (ТСПУ, октябрь 2026).
+        self.reads_reply12 = reads_reply12
         self.sent: list[tuple[tuple[bytes, ...], float]] = []
 
     def _sees(self, parts: tuple[bytes, ...], pause: float) -> bool:
@@ -49,11 +51,21 @@ class _Filter:
                 views.extend(records)
         return any(name in view for view in views for name in self.blocked)
 
-    def __call__(self, ip: str, parts: tuple[bytes, ...], pause: float) -> str:
+    def __call__(self, ip: str, parts: tuple[bytes, ...], pause: float, *, flight: bool = False) -> str:
         self.sent.append((parts, pause))
         if self._sees(parts, pause):
             return self.cut
+        hello = b"".join(parts)
+        # supported_versions только с TLS 1.2: длина расширения 5, список из GREASE и 0x0303.
+        tls12_only = TLS12_ONLY_VERSIONS in hello
+        if flight and self.reads_reply12 and tls12_only and any(name in hello for name in self.blocked + (HOST.encode(),)):
+            # Ответ сервера с сертификатом сайта: фильтр рвёт соединение после его начала.
+            return self.cut
         return "ok" if self.server_takes(parts) else "timeout"
+
+
+# Расширение supported_versions (0x002b) длиной 5: список из 4 байт — GREASE и одна версия.
+TLS12_ONLY_VERSIONS = b"\x00\x2b\x00\x05\x04"
 
 
 def _facts(network) -> fh.SplitFacts:
@@ -129,7 +141,7 @@ class CollectTests(unittest.TestCase):
     def test_single_failures_are_rechecked(self) -> None:
         # Первый контроль пропал — берётся второй; две попытки разошлись — делается третья.
         answers = iter(["timeout", "ok", "reset", "ok", "reset"])
-        facts = fh.check_split(HOST, IP, send=lambda *_a: next(answers, "ok"))
+        facts = fh.check_split(HOST, IP, send=lambda *_a, **_k: next(answers, "ok"))
         whole = facts.ways[0]
 
         self.assertEqual(whole.control, ("timeout", "ok"))
@@ -157,6 +169,41 @@ class SplitJudgeTests(unittest.TestCase):
         self.assertIn("multisplit", verdict.advice)
         self.assertEqual(_states(verdict)[fh.WAY_WHOLE], fh.CUT)
         self.assertEqual(_states(verdict)[fh.WAY_TCP_NAME], fh.PASSED)
+
+    def test_filter_reading_the_tls12_reply_is_named_for_old_devices(self) -> None:
+        """ТСПУ, октябрь 2026: не увидел имени в приветствии TLS 1.2 — читает открытый сертификат в ответе."""
+        verdict = _verdict(_Filter(reads_reply12=True))
+
+        self.assertEqual(verdict.code, fh.HABIT_TCP)
+        self.assertTrue(verdict.reply12)
+        self.assertEqual(_states(verdict)[fh.WAY_TCP_NAME], fh.PASSED)
+        self.assertEqual(_states(verdict)[fh.WAY_TLS12_NAME], fh.CUT)
+        self.assertIn("сертификатом", verdict.text)
+        self.assertIn("только TLS 1.2", verdict.advice)
+        self.assertTrue(fh.summarize([verdict], (fh.ECH_UNKNOWN, ""))["sites"][0]["reply12"])
+
+    def test_tls12_split_passing_too_claims_nothing_about_the_reply(self) -> None:
+        verdict = _verdict(_Filter())
+
+        self.assertEqual(_states(verdict)[fh.WAY_TLS12_NAME], fh.PASSED)
+        self.assertFalse(verdict.reply12)
+        self.assertNotIn("TLS 1.2", verdict.advice)
+
+    def test_tls12_way_offers_only_tls12_and_asks_for_the_whole_reply(self) -> None:
+        asked: list = []
+
+        def send(ip, parts, pause, *, flight=False):
+            asked.append(flight)
+            return "ok" if HOST.encode() not in b"".join(parts) else "reset"
+
+        hello = b"".join(fh._parts(HOST, fh.WAY_TLS12_NAME)[0])
+        versions_at = hello.find(TLS12_ONLY_VERSIONS)
+        fh.check_split(HOST, IP, send=send)
+
+        self.assertGreater(versions_at, 0)
+        self.assertEqual(hello[versions_at + 7 : versions_at + 9], b"\x03\x03")
+        self.assertNotIn(TLS12_ONLY_VERSIONS, b"".join(fh._parts(HOST, fh.WAY_TCP_NAME)[0]))
+        self.assertIn(True, asked)
 
     def test_filter_joining_only_what_comes_at_once_is_told_apart(self) -> None:
         verdict = _verdict(_Filter(joins_packets=True, join_wait=0.5, joins_records=True))
@@ -230,11 +277,11 @@ class SplitJudgeTests(unittest.TestCase):
 
     def test_whole_hello_cut_now_and_then_gives_no_comparison(self) -> None:
         answers = iter(["ok", "reset", "ok", "ok"])
-        verdict = fh.judge_split(fh.check_split(HOST, IP, send=lambda *_a: next(answers, "ok")))
+        verdict = fh.judge_split(fh.check_split(HOST, IP, send=lambda *_a, **_k: next(answers, "ok")))
 
         self.assertEqual(verdict.code, fh.HABIT_NOT_BY_NAME)
         answers = iter(["ok", "reset", "ok", "connect"])
-        verdict = fh.judge_split(fh.check_split(HOST, IP, send=lambda *_a: next(answers, "ok")))
+        verdict = fh.judge_split(fh.check_split(HOST, IP, send=lambda *_a, **_k: next(answers, "ok")))
         self.assertEqual(verdict.code, fh.HABIT_UNKNOWN)
         self.assertIn("не каждый раз", verdict.text)
 

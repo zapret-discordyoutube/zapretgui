@@ -13,7 +13,13 @@
 - **разрез посреди имени с паузой в секунду** — отличает фильтр, который
   склеивает только пришедшее подряд, от того, который ждёт остаток долго;
 - **записи TLS** — приветствие двумя записями шифрования: граница перед
-  именем, посреди имени, и то же двумя пакетами.
+  именем, посреди имени, и то же двумя пакетами;
+- **TLS 1.2, разрез посреди имени** — то же дробление, но приветствие только
+  TLS 1.2, и ответ сервера читается целиком. В TLS 1.2 сервер называет себя в
+  открытом сертификате: если имени в приветствии фильтр не увидел, он может
+  прочесть его в ответе (ТСПУ, октябрь 2026). Тогда дробление проходит у
+  браузера (TLS 1.3, сертификат зашифрован) и не проходит у старых устройств и
+  программ, которые умеют только TLS 1.2.
 
 Как делается вывод
 ------------------
@@ -95,6 +101,7 @@ WAY_TCP_THREE = "tcp_three"
 WAY_REC_BEFORE = "rec_before"
 WAY_REC_NAME = "rec_name"
 WAY_REC_TCP = "rec_tcp"
+WAY_TLS12_NAME = "tls12_name"
 WAYS = (
     WAY_WHOLE,
     WAY_TCP_FIRST,
@@ -105,6 +112,7 @@ WAYS = (
     WAY_REC_BEFORE,
     WAY_REC_NAME,
     WAY_REC_TCP,
+    WAY_TLS12_NAME,
 )
 WAY_TITLES = {
     WAY_WHOLE: "Целиком, одним пакетом",
@@ -116,6 +124,7 @@ WAY_TITLES = {
     WAY_REC_BEFORE: "Две записи TLS, граница перед именем",
     WAY_REC_NAME: "Две записи TLS, граница посреди имени",
     WAY_REC_TCP: "Две записи TLS двумя пакетами",
+    WAY_TLS12_NAME: "Только TLS 1.2, разрез посреди имени, ответ сервера целиком",
 }
 # Разрезы пакета, которые делает и сам Zapret (куски подряд), и разрезы по записям шифрования.
 _TCP_WAYS = (WAY_TCP_FIRST, WAY_TCP_BEFORE, WAY_TCP_NAME, WAY_TCP_THREE)
@@ -150,19 +159,20 @@ ECH_BLOCKED = "blocked"
 ECH_FINE = "fine"
 ECH_UNKNOWN = "unknown"
 
-Send = Callable[[str, tuple[bytes, ...], float], str]
+# ``send(адрес, куски, пауза)`` → код ответа; с ``flight=True`` — дочитать весь первый ответ сервера TLS 1.2.
+Send = Callable[..., str]
 
 
 def _parts(host: str, way: str) -> tuple[tuple[bytes, ...], float]:
     """Куски приветствия для способа ``way`` и пауза между ними."""
-    record = browser_hello.build_hello(host, post_quantum=False)
+    record = browser_hello.build_hello(host, post_quantum=False, ech=way != WAY_TLS12_NAME, tls12=way == WAY_TLS12_NAME)
     name_at = browser_hello.name_offset(record, host)
     middle = name_at + max(1, len(host) // 2)
     if way == WAY_TCP_FIRST:
         return (record[:1], record[1:]), 0.0
     if way == WAY_TCP_BEFORE:
         return (record[:name_at], record[name_at:]), 0.0
-    if way == WAY_TCP_NAME:
+    if way in (WAY_TCP_NAME, WAY_TLS12_NAME):
         return (record[:middle], record[middle:]), 0.0
     if way == WAY_TCP_SLOW:
         return (record[:middle], record[middle:]), SLOW_PAUSE_S
@@ -234,7 +244,7 @@ def check_split(
 
     def ask(name: str, way: str) -> str:
         parts, gap = _parts(name, way)
-        kind = send(ip, parts, gap)
+        kind = send(ip, parts, gap, flight=True) if way == WAY_TLS12_NAME else send(ip, parts, gap)
         pause(BETWEEN_S)
         return kind
 
@@ -327,6 +337,8 @@ class SplitVerdict:
     text: str
     # Что из этого следует для выбора стратегии. Пусто — сказать нечего.
     advice: str = ""
+    # Дробление проходит, а то же дробление в TLS 1.2 режется на ответе сервера: фильтр читает сертификат.
+    reply12: bool = False
 
 
 ADVICE_TCP = (
@@ -339,6 +351,15 @@ ADVICE_TIMER = (
 )
 ADVICE_RECORDS = (
     "Дробление пакета не поможет, а дробление записи TLS — должно: ищите стратегии с tlsrec в названии."
+)
+ADVICE_REPLY12 = (
+    "Программам и устройствам, которые умеют только TLS 1.2 (старые телевизоры и приставки, часть приложений "
+    "Windows 10), дробление не поможет: фильтр прочтёт имя сайта в ответе сервера. Им нужны стратегии с "
+    "подделками (fake) или малое окно приёма. Браузеру хватит обычного дробления."
+)
+TEXT_REPLY12 = (
+    "но приветствие только TLS 1.2, разрезанное так же, режется уже на ответе сервера: в TLS 1.2 сервер "
+    "называет себя открытым сертификатом, и фильтр читает его"
 )
 ADVICE_NONE = (
     "Одно дробление здесь не поможет: фильтр собирает приветствие целиком. Пробуйте стратегии с подделками "
@@ -399,11 +420,13 @@ def judge_split(facts: SplitFacts) -> SplitVerdict | None:
     passing_tcp = [way for way in _TCP_WAYS if states[way] == PASSED]
     if passing_tcp:
         places = ", ".join(_POSITION_HINTS[way] for way in passing_tcp)
-        return verdict(
-            HABIT_TCP,
-            f"фильтр не склеивает пакеты: приветствие, разрезанное {places}, проходит",
-            ADVICE_TCP,
-        )
+        text = f"фильтр не склеивает пакеты: приветствие, разрезанное {places}, проходит"
+        # Прямое сравнение: тот же разрез посреди имени и безобидное имя в TLS 1.2 проходят, а с именем сайта — нет.
+        if states[WAY_TCP_NAME] == PASSED and states[WAY_TLS12_NAME] == CUT:
+            return SplitVerdict(
+                facts.host, facts.ip, HABIT_TCP, ways, f"{text}; {TEXT_REPLY12}", f"{ADVICE_TCP} {ADVICE_REPLY12}", True
+            )
+        return verdict(HABIT_TCP, text, ADVICE_TCP)
     if states[WAY_TCP_NAME] == CUT and states[WAY_TCP_SLOW] == PASSED:
         return verdict(
             HABIT_TIMER,
@@ -497,6 +520,7 @@ def summarize(splits, ech: tuple[str, str], *, tools: Iterable[str] = ()) -> dic
             "text": item.text,
             # При работающем обходе совет по стратегиям был бы выведен из искажённых проб.
             "advice": "" if tools else item.advice,
+            "reply12": item.reply12,
             "ways": [
                 {
                     "way": way.way,
