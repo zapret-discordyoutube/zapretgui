@@ -226,8 +226,13 @@ class DnsApplyWorker(QThread):
         self._load_state = load_state
 
     def run(self) -> None:
+        from dns.step_log import timed_step
+
+        what = f"применение {self._name or self._action}"
+        log(f"DNS: {what} начато (адаптеров: {len(self._adapters)}, шифрованный режим: {self._proxy_mode or 'нет'})", "INFO")
         try:
-            result = self._run_apply()
+            with timed_step(f"{what} целиком"):
+                result = self._run_apply()
         except Exception as exc:
             log(f"DnsApplyWorker: действие {self._action} не выполнено: {exc}", "ERROR")
             self.failed.emit(self._request_id, str(exc))
@@ -237,6 +242,7 @@ class DnsApplyWorker(QThread):
     def _run_apply(self) -> dict[str, object]:
         from dns import page_plans as dns_page_plans
         from dns.dns_providers import is_encrypted_only, proxy_upstreams
+        from dns.step_log import timed_step
 
         if not self._adapters:
             return {"plan": None, "state": None}
@@ -266,12 +272,13 @@ class DnsApplyWorker(QThread):
             if self._proxy_mode:
                 # Шифрованный DNS: сначала движок должен ответить на запрос, и только
                 # потом адаптеры получают 127.0.0.1 — иначе пропал бы весь интернет.
-                if own_mode:
-                    started = self._start_local_proxy(self._proxy_mode)
-                else:
-                    started = self._start_local_proxy(
-                        self._proxy_mode, upstreams=proxy_upstreams(self._data), server_name=self._name
-                    )
+                with timed_step(f"запуск шифрованного DNS ({self._proxy_mode})"):
+                    if own_mode:
+                        started = self._start_local_proxy(self._proxy_mode)
+                    else:
+                        started = self._start_local_proxy(
+                            self._proxy_mode, upstreams=proxy_upstreams(self._data), server_name=self._name
+                        )
                 if started.success:
                     used_proxy = True
                     if not own_mode:
@@ -307,7 +314,10 @@ class DnsApplyWorker(QThread):
         if not used_proxy:
             # Выбран обычный DNS: движок шифрованного DNS больше никому не нужен — убрать.
             try:
-                self._stop_local_proxy_if_unused()
+                with timed_step("остановка ненужного шифрованного DNS"):
+                    self._stop_local_proxy_if_unused()
             except Exception as exc:
                 log(f"DnsApplyWorker: не удалось остановить шифрованный DNS: {exc}", "WARNING")
-        return {"plan": plan, "state": self._load_state()}
+        with timed_step("перечитывание адаптеров после применения"):
+            state = self._load_state()
+        return {"plan": plan, "state": state}

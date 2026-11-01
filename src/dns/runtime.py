@@ -18,6 +18,7 @@ from dns.custom_servers import custom_doh_templates
 from dns.dns_providers import doh_templates
 from dns.reachability import check_servers
 from dns.state import DnsCommandResult, DnsState
+from dns.step_log import timed_step
 from log.log import log
 
 _warmed_state: DnsState | None = None
@@ -134,9 +135,12 @@ def apply_dns(guids: list[str], ipv4: list[str], ipv6: list[str]) -> DnsCommandR
     ним компьютер остался бы без DNS.
     """
     guids = list(dict.fromkeys(str(item or "").strip() for item in guids if str(item or "").strip()))
-    names = {adapter.guid: adapter.name for adapter in load_state().adapters}
-    templates = write_doh_templates()
-    reach = check_servers(list(ipv4 or []), list(ipv6 or []), templates)
+    with timed_step("чтение адаптеров"):
+        names = {adapter.guid: adapter.name for adapter in load_state().adapters}
+    with timed_step("шаблоны шифрования Windows"):
+        templates = write_doh_templates()
+    with timed_step(f"проверка сервера {', '.join(ipv4 or ipv6 or []) or 'автоматический'}"):
+        reach = check_servers(list(ipv4 or []), list(ipv6 or []), templates)
     if reach.blocked:
         log(f"DNS: {reach.blocked}", "WARNING")
         return DnsCommandResult(success=False, message=reach.blocked, affected_count=0, total_count=len(guids))
@@ -146,12 +150,14 @@ def apply_dns(guids: list[str], ipv4: list[str], ipv6: list[str]) -> DnsCommandR
             errors.append(f"адаптер {guid} не найден — он отключён или удалён")
             continue
         try:
-            winapi.write_dns(guid, ipv4, ipv6=False, doh_templates=templates)
-            winapi.write_dns(guid, ipv6, ipv6=True, doh_templates=templates)
+            with timed_step(f"запись DNS адаптеру «{names[guid]}»"):
+                winapi.write_dns(guid, ipv4, ipv6=False, doh_templates=templates)
+                winapi.write_dns(guid, ipv6, ipv6=True, doh_templates=templates)
         except (winapi.DnsWinApiError, ValueError) as exc:
             errors.append(f"«{names[guid]}»: {exc}")
     if len(errors) < len(guids):
-        winapi.flush_resolver_cache()
+        with timed_step("очистка кэша DNS"):
+            winapi.flush_resolver_cache()
     message = "; ".join(errors)
     if message:
         log(f"DNS: {message}", "WARNING")
