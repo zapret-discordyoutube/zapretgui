@@ -172,6 +172,18 @@ def geo_service_for_target(geo_sites, *, scan_protocol: str, target_input: str) 
 def geo_site_question_text(service: str, target_input: str, *, language: str | None = None) -> str:
     # Тот же адрес, с которым запустился бы подбор.
     target = normalize_target_input(target_input, PROTOCOL_TCP_HTTPS)
+    from hosts.geo_sites import only_vpn_helps
+
+    if only_vpn_helps((service,)):
+        return tr_catalog(
+            "page.strategy_scan.geo_site.question_text_vpn",
+            language=language,
+            default=(
+                "{target} — это {service}. Сервис сам ограничивает посетителей из России: он узнаёт страну по адресу "
+                "вашего подключения, провайдер тут ни при чём. Ни одна стратегия Zapret этого не изменит, а подбор "
+                "зря займёт время.\n\nhosts и DNS тоже не помогут — только подключение через другую страну (VPN)."
+            ),
+        ).format(service=service, target=target)
     return tr_catalog(
         "page.strategy_scan.geo_site.question_text",
         language=language,

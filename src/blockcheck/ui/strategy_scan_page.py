@@ -351,7 +351,10 @@ class StrategyScanPage(BasePage):
         hosts_text = tr_catalog("page.strategy_scan.geo_site.open_hosts", default="Открыть «Редактор hosts»")
         scan_text = tr_catalog("page.strategy_scan.geo_site.question_scan_anyway", default="Всё равно подобрать")
         box.yesButton.setText(hosts_text)
-        box.yesButton.setVisible(self._open_hosts_editor is not None)
+        from hosts.geo_sites import only_vpn_helps
+
+        # Сервису, которому помогает только VPN, «Редактор hosts» ничего не даст.
+        box.yesButton.setVisible(self._open_hosts_editor is not None and not only_vpn_helps((service,)))
         box.cancelButton.setText(tr_catalog("page.strategy_scan.resume_question_cancel", default="Отмена"))
         scan_button = PushButton(scan_text)
         choice = {"scan": False}

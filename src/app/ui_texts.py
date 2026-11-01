@@ -5397,6 +5397,10 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "ru": "Открыть «Редактор hosts»",
         "en": "Open the Hosts editor",
     },
+    "page.strategy_scan.geo_site.question_text_vpn": {
+        "ru": "{target} — это {service}. Сервис сам ограничивает посетителей из России: он узнаёт страну по адресу вашего подключения, провайдер тут ни при чём. Ни одна стратегия Zapret этого не изменит, а подбор зря займёт время.\n\nhosts и DNS тоже не помогут — только подключение через другую страну (VPN).",
+        "en": "{target} is {service}. The service itself limits visitors from Russia: it tells the country by the address of your connection, your provider has nothing to do with it. No Zapret strategy changes that, and the search would only waste time.\n\nhosts and DNS will not help either, only a connection through another country (VPN).",
+    },
     "page.strategy_scan.geo_site.question_title": {
         "ru": "Стратегия здесь не поможет",
         "en": "A strategy will not help here",

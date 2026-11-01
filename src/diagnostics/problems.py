@@ -31,6 +31,7 @@ from diagnostics import (
 from diagnostics.run_context import Probe
 from diagnostics.services import Service
 from diagnostics.verdict import ADVICE_DNS, ADVICE_VIA_ZAPRET, DnsState, Level, ReachState, ServiceVerdict, advice_geo_site
+from hosts.geo_sites import only_vpn_helps
 
 ADVICE_IPV6 = (
     "Из-за этого сайты могут открываться с задержкой: браузер сначала пробует IPv6. Перезагрузите роутер; "
@@ -339,7 +340,8 @@ def collect_problems(
                 advice = (advice_geo_site(geo_service),) + tuple(
                     item for item in advice if item not in ADVICE_VIA_ZAPRET
                 )
-                action = "hosts"
+                # Кнопка «Редактор hosts» — только тем, кому hosts помогает.
+                action = "" if only_vpn_helps((geo_service,)) else "hosts"
             if not action and verdict.kind == block_kind.KIND_DNS:
                 # Адрес сайта не узнать — помогает другой DNS: кнопка ведёт в его настройку.
                 action = "dns"

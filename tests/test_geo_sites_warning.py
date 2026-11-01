@@ -50,6 +50,12 @@ class GeoSitesTests(unittest.TestCase):
         self.assertEqual(_GEO_SITES.service_for("www.google.com"), "")
         self.assertEqual(_GEO_SITES.service_for("anthropic.com"), "")
 
+    def test_tiktok_is_a_geo_site_even_without_a_hosts_profile(self) -> None:
+        # В каталоге у TikTok нет DNS-профиля, но стратегия ему всё равно не поможет.
+        self.assertEqual(_GEO_SITES.service_for("www.tiktok.com"), "TikTok")
+        self.assertEqual(_GEO_SITES.service_for("log.tiktokv.com"), "TikTok")
+        self.assertEqual(_GEO_SITES.services_for_name("тикток"), ("TikTok",))
+
     def test_services_without_dns_profile_are_not_geo_sites(self) -> None:
         # Discord режет провайдер: ему как раз помогает стратегия.
         self.assertEqual(_GEO_SITES.service_for("discord.com"), "")
@@ -281,6 +287,25 @@ class BlockcheckProblemsGeoTests(unittest.TestCase):
         self.assertIn("Редактор hosts", problem["advice"][0])
         for advice in ADVICE_VIA_ZAPRET:
             self.assertNotIn(advice, problem["advice"])
+
+    def test_tiktok_gets_vpn_advice_and_no_hosts_button(self) -> None:
+        # TikTok узнаёт страну по адресу подключения: hosts и DNS не помогут, кнопка в hosts была бы неправдой.
+        from diagnostics.verdict import ADVICE_VIA_ZAPRET
+
+        [problem] = self._problems("www.tiktok.com", _GEO_SITES.service_for)
+
+        self.assertEqual(problem["action"], "")
+        self.assertIn("TikTok сам ограничивает посетителей из России", problem["advice"][0])
+        self.assertIn("VPN", problem["advice"][0])
+        self.assertNotIn("Редактор hosts", problem["advice"][0])
+        for advice in ADVICE_VIA_ZAPRET:
+            self.assertNotIn(advice, problem["advice"])
+
+    def test_tiktok_question_before_scan_offers_no_hosts(self) -> None:
+        text = plans.geo_site_question_text("TikTok", "tiktok.com", language="ru")
+        self.assertIn("tiktok.com — это TikTok", text)
+        self.assertIn("VPN", text)
+        self.assertNotIn("Редактор", text)
 
     def test_ordinary_site_still_gets_strategy_scan(self) -> None:
         from diagnostics.verdict import ADVICE_VIA_ZAPRET

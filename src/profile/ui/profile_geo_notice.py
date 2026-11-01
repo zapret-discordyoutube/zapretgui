@@ -42,6 +42,7 @@ from qfluentwidgets import (
     isDarkTheme,
 )
 
+from hosts.geo_sites import only_vpn_helps
 from profile.icons import resolve_profile_icon
 from profile.ui.profile_icon import profile_icon_pixmap
 from ui.accessibility import set_control_accessibility
@@ -77,6 +78,14 @@ def geo_notice_title(services: tuple[str, ...]) -> str:
 
 
 def geo_notice_text(services: tuple[str, ...]) -> str:
+    if only_vpn_helps(services):
+        # TikTok и подобные узнают страну по адресу подключения: hosts и DNS тут бессильны.
+        many = len(services) > 1
+        return (
+            f"{'Эти сервисы сами ограничивают' if many else 'Этот сервис сам ограничивает'} посетителей из России "
+            f"— {'узнают' if many else 'узнаёт'} страну по адресу вашего подключения, провайдер тут ни при чём. "
+            "Перебирать стратегии бесполезно, hosts и DNS тоже не помогут — только подключение через другую страну (VPN)."
+        )
     if len(services) > 1:
         subject = "Эти сервисы сами не пускают посетителей из России"
     else:
@@ -228,6 +237,10 @@ class ProfileGeoNoticeCard(FlyoutViewBase):
     def set_services(self, services: tuple[str, ...]) -> None:
         self.title_label.setText(geo_notice_title(services))
         self.text_label.setText(geo_notice_text(services))
+        # Сервису, которому помогает только VPN, кнопки hosts и DNS обещали бы неправду.
+        hosts_helps = not only_vpn_helps(services)
+        self.hosts_button.setVisible(hosts_helps)
+        self.dns_button.setVisible(hosts_helps)
         self.setFixedHeight(self._height_for_content())
         self.place()
 

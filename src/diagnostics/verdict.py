@@ -330,6 +330,13 @@ ADVICE_VIA_ZAPRET = (_ADVICE_STRATEGY, _ADVICE_START, _ADVICE_STRATEGY_OR_ADDRES
 
 def advice_geo_site(service: str) -> str:
     """Совет для сервиса, который сам ограничивает доступ из России (каталог hosts)."""
+    from hosts.geo_sites import only_vpn_helps
+
+    if only_vpn_helps((service,)):
+        return (
+            f"{service} сам ограничивает посетителей из России — узнаёт страну по адресу подключения. "
+            "Стратегия Zapret, hosts и DNS тут не помогут: нужно подключение через другую страну (VPN)."
+        )
     return (
         f"{service} сам ограничивает доступ из России, поэтому стратегия Zapret его не чинит. "
         "Включите для него DNS-профиль на странице «Редактор hosts» или смените DNS в разделе «Настройка DNS»."

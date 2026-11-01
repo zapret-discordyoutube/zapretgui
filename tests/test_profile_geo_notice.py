@@ -47,6 +47,12 @@ class GeoServicesForNameTests(unittest.TestCase):
             self.assertEqual(GEO.services_for_name(name), ("ChatGPT",), name)
         self.assertEqual(GEO.services_for_name("клод"), ("Claude",))
 
+    def test_tiktok_profile_list_from_the_preset_is_geo(self) -> None:
+        geo = build_geo_sites({"services": [], "has_proxy_by_service": {}, "domain_names_by_service": {}})
+        preset_list = "tiktok.com\ntiktokcdn.com\nbytedance.com\nbyteoversea.com\nlog.tiktokv.com\nwww.tiktok.com\n"
+        self.assertEqual(geo_services_for_site_list(geo, preset_list), ("TikTok",))
+        self.assertEqual(geo.services_for_name("ТикТок"), ("TikTok",))
+
     def test_ordinary_names_are_not_geo(self) -> None:
         for name in ("YouTube", "Discord", "Дискорд", "Telegram", "Google", "AI", "Мой профиль", "", "  "):
             self.assertEqual(GEO.services_for_name(name), (), name)
@@ -262,6 +268,22 @@ class ProfileGeoNoticeTests(unittest.TestCase):
 
         self._answer("profile:chatgpt", ("ChatGPT",))
         self.assertTrue(self.notice.card.isVisible())
+
+    def test_vpn_only_service_gets_its_own_advice_and_no_hosts_buttons(self) -> None:
+        self.notice.show_services(("TikTok",), SimpleNamespace(display_name="TikTok", match_lines=()))
+        self.notice.card.finish_appearing()
+        card = self.notice.card
+
+        self.assertEqual(card.title_label.text(), "TikTok: стратегия не поможет")
+        self.assertIn("hosts и DNS тоже не помогут", card.text_label.text())
+        self.assertIn("VPN", card.text_label.text())
+        self.assertTrue(card.hosts_button.isHidden())
+        self.assertTrue(card.dns_button.isHidden())
+
+        # Следующему сервису hosts помогает — кнопки возвращаются.
+        self.notice.show_services(("Gemini AI",))
+        self.assertFalse(card.hosts_button.isHidden())
+        self.assertFalse(card.dns_button.isHidden())
 
     def test_ready_answer_shows_and_hides_the_card(self) -> None:
         # «Подбор стратегии» сам знает гео-сервис и отдаёт готовый ответ без фоновой проверки.
