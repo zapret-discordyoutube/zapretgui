@@ -526,6 +526,24 @@ def _filter_desired_hosts_rows(domain_ip_rows, *, allow_ipv6: bool) -> tuple[lis
     return desired_rows, had_requested_rows
 
 
+def _services_left_without_relay(service_dns: dict[str, str], dead_keys: set[str]) -> list[str]:
+    """Сервисы, у которых хоть одно имя ведёт только на молчащие адреса."""
+    stranded: list[str] = []
+    for service_name, profile_name in (service_dns or {}).items():
+        if not isinstance(service_name, str) or not isinstance(profile_name, str):
+            continue
+        if not profile_name.strip() or profile_name.strip().lower() in ("off", "откл", "откл.", "0", "false"):
+            continue
+        alive_by_domain: dict[str, bool] = {}
+        for domain, ip in get_service_domain_ip_rows(service_name, profile_name.strip()):
+            key = str(domain or "").strip().casefold()
+            alive = str(ip or "").strip().casefold() not in dead_keys
+            alive_by_domain[key] = alive_by_domain.get(key, False) or alive
+        if alive_by_domain and not all(alive_by_domain.values()):
+            stranded.append(service_name)
+    return stranded
+
+
 def _build_service_selection_rows(
     service_dns: dict[str, str],
     static_enabled: set[str] | None = None,
@@ -739,12 +757,30 @@ class HostsManager:
             log(f"apply_service_dns_selections: нет связи, посредник не проверен: {', '.join(dead)}", "WARNING")
             return False
         if dead:
-            self.set_status(
-                f"Сервер-посредник {', '.join(dead)} не отвечает из вашей сети — похоже, его блокирует провайдер. "
-                "Файл hosts не изменён. Выберите для этих сервисов другой профиль."
+            # У сервиса обычно несколько посредников: молчащий просто не пишется,
+            # сервис идёт через остальные. Отказ — только если у имени не осталось ни одного.
+            dead_keys = {str(address).strip().casefold() for address in dead}
+            stranded = _services_left_without_relay(service_dns, dead_keys)
+            if stranded:
+                self.set_status(
+                    f"{', '.join(stranded)}: ни один сервер-посредник профиля не отвечает из вашей сети "
+                    f"({', '.join(dead)}) — похоже, их блокирует провайдер. Файл hosts не изменён. "
+                    "Выберите для этих сервисов другой профиль."
+                )
+                log(
+                    f"apply_service_dns_selections: у сервисов {', '.join(stranded)} не отвечает ни один посредник: "
+                    f"{', '.join(dead)}",
+                    "WARNING",
+                )
+                return False
+            selected_rows = [
+                (domain, ip) for domain, ip in selected_rows if str(ip).strip().casefold() not in dead_keys
+            ]
+            log(
+                f"apply_service_dns_selections: молчащие посредники не записаны, сервисы идут через остальные: "
+                f"{', '.join(dead)}",
+                "WARNING",
             )
-            log(f"apply_service_dns_selections: посредник недоступен: {', '.join(dead)}", "WARNING")
-            return False
 
         return self.apply_domain_ip_rows(selected_rows)
 
@@ -864,6 +900,7 @@ class HostsManager:
                     log("apply_domain_ip_rows: hosts уже актуален, запись пропущена", "DEBUG")
                     return True
                 if not safe_write_hosts_file(updated_content):
+                    self.set_status("Не удалось записать файл hosts")
                     return False
                 self.set_status(f"Файл hosts обновлён: удалено {removed_count} записей")
                 return True
@@ -901,6 +938,7 @@ class HostsManager:
             return False
         except Exception as e:
             log(f"Ошибка в apply_domain_ip_rows: {e}", "ERROR")
+            self.set_status(f"Не удалось записать файл hosts: {e}")
             return False
 
     # НОВЫЕ МЕТОДЫ ДЛЯ ADOBE

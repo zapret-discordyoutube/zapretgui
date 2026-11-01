@@ -187,6 +187,8 @@ class HostsPage(BasePage):
         self._applying = False
         # Пока шла запись, пользователь успел ещё что-то поменять.
         self._apply_pending = False
+        # Изменения, ушедшие текущей записью (HostsDraft.pending_changes).
+        self._inflight_changes: tuple[dict, bool | None] = ({}, None)
         self._apply_force_pending = False
         self._just_written = False
         # Проверка адресов идёт следом за записью и её не задерживает: тумблер щёлкает сразу.
@@ -453,6 +455,8 @@ class HostsPage(BasePage):
         self._applying = True
         self._just_written = False
         self._write_epoch += 1
+        # Что уходит этой записью: при отказе убирается только оно.
+        self._inflight_changes = draft.pending_changes()
         selection = draft.selection()
         adobe = draft.adobe if draft.adobe_changed else None
         self._render_changes()
@@ -475,7 +479,7 @@ class HostsPage(BasePage):
         pending, force = self._take_pending()
         snapshot = getattr(result, "snapshot", None)
         if not getattr(result, "success", False):
-            self._fail_write(str(getattr(result, "message", "") or ""), snapshot)
+            self._fail_write(str(getattr(result, "message", "") or ""), snapshot, pending=pending, force=force)
             return
         self._just_written = True
         self._unchecked.update(getattr(result, "touched", ()) or ())
@@ -531,18 +535,31 @@ class HostsPage(BasePage):
         if not self._apply_runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
             return
         self._applying = False
-        self._take_pending()
-        self._fail_write(error, None)
+        pending, force = self._take_pending()
+        self._fail_write(error, None, pending=pending, force=force)
 
-    def _fail_write(self, message: str, snapshot) -> None:
-        """Запись не удалась: плитки возвращаются к тому, что реально в файле."""
+    def _fail_write(self, message: str, snapshot, *, pending: bool = False, force: bool = False) -> None:
+        """Запись не удалась: плитки этой записи возвращаются к тому, что реально в файле.
+
+        Выбор, сделанный во время записи, не теряется: он уходит следующей записью.
+        """
         if self._draft is not None:
-            self._draft.reset()
+            self._draft.drop_failed(self._inflight_changes)
         if snapshot is not None:
             self._set_snapshot(snapshot)
         self._render()
-        self._show_error(self._tr("page.hosts.apply_failed.title", "Не удалось записать hosts"), message)
-        self._request_snapshot()
+        self._show_error(
+            self._tr("page.hosts.apply_failed.title", "Не удалось записать hosts"),
+            message
+            or self._tr(
+                "page.hosts.apply_failed.unknown",
+                "Причина не сообщена — подробности в журнале программы (папка logs).",
+            ),
+        )
+        if pending and (force or (self._draft is not None and self._draft.has_user_changes())):
+            self._commit(force=force)
+        else:
+            self._request_snapshot()
 
     def _restore_permissions(self) -> None:
         # Повторное нажатие гасит занятая дорожка; кнопку не отключаем — у нажатой

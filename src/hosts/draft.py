@@ -106,6 +106,23 @@ class HostsDraft:
         self._overrides.clear()
         self._adobe = None
 
+    def pending_changes(self) -> tuple[dict[str, str | None], bool | None]:
+        """Что сейчас отличается от файла: (сервис → профиль, Adobe). Копия."""
+        return dict(self._overrides), self._adobe
+
+    def drop_failed(self, changes: tuple[dict[str, str | None], bool | None]) -> None:
+        """Запись этих изменений не удалась: убрать их, кроме тех, что человек успел поменять снова.
+
+        Щелчок, сделанный во время неудачной записи, остаётся в черновике и
+        уходит следующей записью, а не пропадает вместе с неудачной.
+        """
+        overrides, adobe = changes
+        for service_name, profile_id in overrides.items():
+            if service_name in self._overrides and self._overrides[service_name] == profile_id:
+                del self._overrides[service_name]
+        if adobe is not None and self._adobe == adobe:
+            self._adobe = None
+
     def rebase(self, snapshot: HostsPageSnapshot) -> None:
         """Переносит черновик на свежий снимок, выбрасывая то, что уже совпало."""
         overrides = dict(self._overrides)

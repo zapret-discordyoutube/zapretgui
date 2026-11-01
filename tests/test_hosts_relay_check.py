@@ -57,6 +57,7 @@ class HostsRelayCheckTests(unittest.TestCase):
         manager.set_status = statuses.append
         with (
             patch.object(hosts_module, "_build_service_selection_rows", return_value=(list(self.ROWS), True)),
+            patch.object(hosts_module, "get_service_domain_ip_rows", return_value=list(self.ROWS)),
             patch.object(hosts_module, "service_has_proxy_profiles", return_value=True),
             patch.object(hosts_module, "safe_read_hosts_file", return_value=""),
             patch.object(hosts_module, "get_relay_addresses", return_value=set(self.RELAYS)),
@@ -79,6 +80,7 @@ class HostsRelayCheckTests(unittest.TestCase):
         manager.set_status = statuses.append
         with (
             patch.object(hosts_module, "_build_service_selection_rows", return_value=(list(self.ROWS), True)),
+            patch.object(hosts_module, "get_service_domain_ip_rows", return_value=list(self.ROWS)),
             patch.object(hosts_module, "service_has_proxy_profiles", return_value=True),
             patch.object(hosts_module, "safe_read_hosts_file", return_value=""),
             patch.object(hosts_module, "get_relay_addresses", return_value=set(self.RELAYS)),
@@ -131,6 +133,7 @@ class HostsRelayCheckTests(unittest.TestCase):
 
         with (
             patch.object(hosts_module, "_build_service_selection_rows", side_effect=build),
+            patch.object(hosts_module, "get_service_domain_ip_rows", side_effect=lambda name, _profile: list(rows_by_service[name])),
             patch.object(hosts_module, "service_has_proxy_profiles", side_effect=lambda name: name in proxy_services),
             patch.object(hosts_module, "safe_read_hosts_file", return_value=written),
             patch.object(hosts_module, "get_relay_addresses", return_value=set(self.RELAYS)),
@@ -159,6 +162,43 @@ class HostsRelayCheckTests(unittest.TestCase):
         self.assertFalse(ok)
         write.assert_not_called()
         self.assertEqual(probed, ["144.31.82.230"])
+
+    # Как у GeoHide для Gemini: четыре посредника на имя, один из них провайдер закрыл.
+    GEMINI_ROWS = [
+        (domain, address)
+        for domain in ("gemini.google.com", "aistudio.google.com")
+        for address in ("159.194.200.33", "193.233.112.67", "193.233.112.68", "193.233.112.88")
+    ]
+
+    def test_one_silent_relay_is_skipped_and_the_service_goes_through_the_others(self) -> None:
+        from hosts import hosts as hosts_module
+
+        manager = hosts_module.HostsManager.__new__(hosts_module.HostsManager)
+        manager.set_status = lambda _text: None
+        relays = {"159.194.200.33", "193.233.112.67", "193.233.112.68", "193.233.112.88"}
+        with (
+            patch.object(hosts_module, "_build_service_selection_rows", return_value=(list(self.GEMINI_ROWS), True)),
+            patch.object(hosts_module, "get_service_domain_ip_rows", return_value=list(self.GEMINI_ROWS)),
+            patch.object(hosts_module, "service_has_proxy_profiles", return_value=True),
+            patch.object(hosts_module, "safe_read_hosts_file", return_value=""),
+            patch.object(hosts_module, "get_relay_addresses", return_value=relays),
+            patch.object(relay_check, "_connects", side_effect=lambda address: address != "159.194.200.33"),
+            patch.object(hosts_module, "internet_reachable", return_value=True),
+            patch.object(hosts_module, "is_ipv6_available", return_value=True),
+            patch.object(hosts_module.HostsManager, "apply_domain_ip_rows", return_value=True) as write,
+        ):
+            self.assertTrue(manager.apply_service_dns_selections({"Gemini AI": "geohide"}))
+        written = write.call_args.args[0]
+        self.assertNotIn("159.194.200.33", {ip for _domain, ip in written})
+        self.assertEqual(len(written), 6)
+
+    def test_service_without_a_single_answering_relay_is_named(self) -> None:
+        ok, write, _probed = self._apply(
+            {"ChatGPT": "zapret_dns"}, proxy_services={"ChatGPT"}, rows_by_service={"ChatGPT": self.ROWS}
+        )
+        self.assertFalse(ok)
+        write.assert_not_called()
+        self.assertTrue(self.statuses[-1].startswith("ChatGPT: ни один сервер-посредник"))
 
     def test_relay_already_written_to_hosts_does_not_block_edits(self) -> None:
         from hosts import hosts as hosts_module

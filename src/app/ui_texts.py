@@ -1889,6 +1889,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "записывается",
         "en": "being written",
     },
+    "page.hosts.apply_failed.unknown": {
+        "ru": "Причина не сообщена — подробности в журнале программы (папка logs).",
+        "en": "No reason was given; see the program log (the logs folder) for details.",
+    },
     "page.hosts.apply_failed.title": {
         "ru": "Не удалось записать hosts",
         "en": "Could not write hosts",

@@ -513,6 +513,29 @@ class HostsPageTests(unittest.TestCase):
         self.assertFalse(page._draft.has_user_changes())
         self.assertFalse(page._draft.value("Direct"))
 
+    def test_click_made_during_a_failed_write_is_written_next(self) -> None:
+        # Раньше неудачная запись сбрасывала весь черновик: щелчок, сделанный пока она шла, пропадал молча.
+        page = self._page(_manual_snapshot())
+        page._on_tile_activated("Direct")
+        page._set_service_profile("Alpha", "p1")
+
+        with patch("hosts.ui.page.InfoBar"):
+            self._finish_write(page, success=False, message="посредник молчит")
+
+        self.assertFalse(page._draft.value("Direct"))
+        self.assertEqual(page._draft.value("Alpha"), "p1")
+        self.assertEqual(len(self.writes), 2)
+        self.assertEqual(self.writes[1]["selection"], {"Alpha": "p1"})
+
+    def test_failed_write_without_a_reason_points_to_the_log(self) -> None:
+        page = self._page(_manual_snapshot())
+        page._on_tile_activated("Direct")
+
+        with patch("hosts.ui.page.InfoBar") as info_bar:
+            self._finish_write(page, success=False, message="")
+
+        self.assertIn("журнале программы", info_bar.error.call_args.kwargs["content"])
+
     def test_turn_all_off_removes_extra_block_lines_too(self) -> None:
         page = self._page(_manual_snapshot(block_lines=("5.5.5.5 gone.example",)))
 
