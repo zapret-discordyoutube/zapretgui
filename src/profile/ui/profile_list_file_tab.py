@@ -16,6 +16,7 @@ from ui.code_editor.find_bar import FindReplaceBar
 from ui.code_editor.find_controller import FindController
 from ui.code_editor.syntax import ListFileSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
+from profile.list_file_language import HOSTLIST_PREFIX_HELP, HOSTLIST_PREFIX_HELP_ZAPRET1, HostlistEditorLanguage
 
 
 # С этой ширины свои записи и база стоят рядом, а не друг под другом.
@@ -55,6 +56,11 @@ class ProfileListFileTab(QWidget):
         self.user_title.setWordWrap(True)
         user_layout.addWidget(self.user_title)
 
+        # Памятка о префиксах ^ и ! — только для hostlist (страница прячет её у ipset).
+        self.prefix_help = CaptionLabel(HOSTLIST_PREFIX_HELP, self.user_pane)
+        self.prefix_help.setWordWrap(True)
+        user_layout.addWidget(self.prefix_help)
+
         self.find_bar = FindReplaceBar(self.user_pane)
         self.find_bar.setVisible(False)
         user_layout.addWidget(self.find_bar)
@@ -63,11 +69,15 @@ class ProfileListFileTab(QWidget):
             highlighter_factory=lambda document: ListFileSyntaxHighlighter(document),
         )
         self.find_controller = FindController(self.user_text, self.find_bar, parent=self)
+        self.language = HostlistEditorLanguage()
+        self.user_text.set_language_support(self.language)
         self.user_text.setMinimumHeight(220)
         self.user_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         set_tooltip(
             self.user_text,
-            "Ваша часть списка. Сохраняется сама в lists/user и добавляется к встроенным записям.",
+            "Ваша часть списка. Сохраняется сама в lists/user и стоит перед встроенными записями: "
+            "«!домен» отключит встроенную запись, «^домен» сузит её до самого домена. "
+            "Наведите на строку — подсказка покажет, что она делает; Ctrl+. — быстрые действия.",
         )
         set_control_accessibility(
             self.user_text,
@@ -129,6 +139,11 @@ class ProfileListFileTab(QWidget):
         self.status_label.setWordWrap(True)
         status_layout.addWidget(self.status_label, 1)
         layout.addWidget(status_row)
+
+    def set_exceptions_supported(self, supported: bool) -> None:
+        """Режим Zapret 1: winws не понимает «!» — памятка и подсказки об этом говорят."""
+        self.language.exceptions = bool(supported)
+        self.prefix_help.setText(HOSTLIST_PREFIX_HELP if supported else HOSTLIST_PREFIX_HELP_ZAPRET1)
 
     def side_by_side(self) -> bool:
         return self._panes_layout.direction() == QBoxLayout.Direction.LeftToRight

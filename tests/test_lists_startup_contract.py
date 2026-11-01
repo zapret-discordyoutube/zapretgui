@@ -254,7 +254,7 @@ class ListsStartupContractTests(unittest.TestCase):
 
             self.assertEqual(
                 (lists_root / "ipset-ru.txt").read_text(encoding="utf-8"),
-                "2.2.2.0/24\n9.9.9.9\n",
+                "9.9.9.9\n2.2.2.0/24\n",
             )
 
     def test_fast_required_files_check_skips_unreferenced_user_only_lists(self) -> None:

@@ -19,12 +19,13 @@ import difflib
 import re
 
 from fakes.public import BLOB_REFERENCE_ARG_NAMES, NFQWS2_BUILTIN_BLOBS
+from lists.core.hostlist_syntax import HostlistIndex, HostlistLine, hostlist_line_problem, parse_hostlist_line
 from profile.preset_blob_declarations import LUA_DEFINED_BLOB_NAMES
 from profile.winws2_preset_source import is_winws2_circular_preset_source
 
 from .analysis import ParsedOption, PresetAnalysis, analyze_winws2_text
 from .context import EMPTY_CONTEXT, LanguageContext
-from .file_refs import file_references
+from .file_refs import file_references, reference_key
 from .lua_catalog import (
     KNOWN_LUA_FILES,
     LUA_ARGS,
@@ -623,6 +624,96 @@ def _check_files(c: _Collector, context: LanguageContext) -> None:
                   f"Файл не найден: {expected or reference.path}. winws2 не запустится.")
 
 
+# ------------------------------------------------------------- hostlist/ipset
+
+# Тип списка в профиле для правила «один файл — один раз» (zapret2 abbe480,
+# RegisterHostlist_/RegisterIpset_): --hostlist-auto ложится в ту же
+# коллекцию, что --hostlist (nfqws.c, IDX_HOSTLIST_AUTO).
+_LIST_COLLECTIONS = {
+    "hostlist": "hostlist",
+    "hostlist-auto": "hostlist",
+    "hostlist-exclude": "hostlist-exclude",
+    "ipset": "ipset",
+    "ipset-exclude": "ipset-exclude",
+}
+# Все --hostlist-domains профиля — один встроенный список, исключающие — второй.
+_STATIC_HOSTLISTS = {"hostlist-domains": "include", "hostlist-exclude-domains": "exclude"}
+
+
+def _list_file_key(value: str) -> str:
+    key = reference_key(value)
+    if key.startswith("@"):
+        key = reference_key(key[1:])
+    while key.startswith("./"):
+        key = key[2:]
+    return key
+
+
+def _check_lists(c: _Collector) -> None:
+    for profile in c.analysis.profiles:
+        if profile.skipped:
+            # С --skip winws2 профиль не разбирает — и списки не регистрирует.
+            continue
+        seen_files: dict[tuple[str, str], ParsedOption] = {}
+        static: dict[str, list[tuple[ParsedOption, int, HostlistLine]]] = {}
+        for option in profile.options:
+            spec = option.spec
+            if spec is None or option.value is None:
+                continue
+            collection = _LIST_COLLECTIONS.get(spec.name)
+            if collection is not None:
+                key = (collection, _list_file_key(option.value))
+                previous = seen_files.get(key)
+                if previous is not None and key[1]:
+                    c.on_value(option, SEVERITY_ERROR,
+                               f"Этот файл уже подключён в профиле строкой {previous.token.line + 1} "
+                               f"({previous.spec.flag}) — winws2 не запустится: один файл списка можно "
+                               "подключить в профиле только один раз.",
+                               (c.remove_line_fix(option.token),))
+                else:
+                    seen_files[key] = option
+                continue
+            which = _STATIC_HOSTLISTS.get(spec.name)
+            if which is None or option.value_line < 0:
+                continue
+            offset = option.value_start
+            for item in option.value.split(","):
+                entry = parse_hostlist_line(item)
+                if entry.is_entry:
+                    static.setdefault(which, []).append((option, offset, entry))
+                offset += len(item) + 1
+        for items in static.values():
+            _check_static_hostlist(c, items)
+
+
+def _check_static_hostlist(c: _Collector, items) -> None:
+    index = HostlistIndex()
+    first: dict[str, tuple[ParsedOption, HostlistLine]] = {}
+    for option, _offset, entry in items:
+        if entry.domain and entry.domain not in first:
+            first[entry.domain] = (option, entry)
+    index.add_text("\n".join(f"{entry.prefix}{entry.domain}" for _o, _off, entry in items))
+    for option, offset, entry in items:
+        start, end = offset + entry.start, offset + entry.domain_end
+        problem = hostlist_line_problem(f"{entry.prefix}{entry.domain}")
+        if problem:
+            c.on_value(option, SEVERITY_WARNING, problem, start=start, end=end)
+            continue
+        owner, kept = first[entry.domain]
+        if kept is not entry:
+            c.on_value(option, SEVERITY_WARNING,
+                       f"{entry.domain} уже записан как «{kept.prefix}{kept.domain}» "
+                       f"(строка {owner.token.line + 1}). Все {option.spec.flag} профиля — один список, "
+                       "а в списке winws2 учитывает только первую запись домена.",
+                       start=start, end=end)
+            continue
+        if entry.exception and index.covering_parent(entry.domain) is None:
+            c.on_value(option, SEVERITY_WARNING,
+                       f"Исключению «!{entry.domain}» нечего исключать: в этом списке нет записи, которая "
+                       f"захватывает {entry.domain}. «!» действует только внутри своего списка.",
+                       start=start, end=end)
+
+
 # ------------------------------------------------------------------ вход
 
 
@@ -663,6 +754,7 @@ def diagnose_winws2_text(
     _check_values(collector, context, known_blob_names(analysis, context_analysis), loaded_files, lua_known,
                   circular)
     _check_structure(collector, circular)
+    _check_lists(collector)
     _check_files(collector, context)
     order = {SEVERITY_ERROR: 0, SEVERITY_WARNING: 1, SEVERITY_HINT: 2}
     return tuple(sorted(collector.items, key=lambda d: (d.line, d.start, order.get(d.severity, 3))))

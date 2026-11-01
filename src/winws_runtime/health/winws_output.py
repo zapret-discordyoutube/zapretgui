@@ -98,3 +98,32 @@ def relevant_error_line(output: str, *, fallback: FallbackLine = "first") -> str
     if fallback == "last":
         return lines[-1]
     return ""
+
+
+# Отказы winws2 из-за файлов списков (nfq2/hostlist.c, nfq2/ipset.c:
+# RegisterHostlist/RegisterIpset). «cannot access» — файла нет или он пустой;
+# «failed to register» без него — с 31.10.2026 (zapret2 abbe480) почти всегда
+# повтор: один и тот же файл подключён в одном профиле дважды одного типа
+# (--hostlist и --hostlist-auto считаются одним типом).
+_LIST_ACCESS_RE = re.compile(r"cannot access (hostlist|ipset) file '([^']*)'", re.IGNORECASE)
+_LIST_REGISTER_RE = re.compile(r"failed to register (hostlist|ipset) '([^']*)'", re.IGNORECASE)
+
+
+def explain_list_registration_failure(output: str) -> str:
+    """Понятная причина отказа winws2 из-за файла списка; пусто — не этот случай."""
+    text = str(output or "")
+    access = _LIST_ACCESS_RE.search(text)
+    if access:
+        return (
+            f"не найден или пуст файл списка {access.group(2)}. "
+            "Проверьте, что файл есть в папке lists и в нём есть хотя бы одна запись"
+        )
+    register = _LIST_REGISTER_RE.search(text)
+    if register:
+        option = "--hostlist/--hostlist-auto/--hostlist-exclude" if register.group(1).lower() == "hostlist" else "--ipset/--ipset-exclude"
+        return (
+            f"файл списка {register.group(2)} подключён в одном профиле дважды. "
+            f"Новые версии winws2 так не запускаются: оставьте в профиле одну строку {option} с этим файлом "
+            "(редактор пресета подчеркнёт повтор)"
+        )
+    return ""

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import ipaddress
 from pathlib import Path
-import re
 
 from lists.core.layered_files import (
     layered_list_file,
@@ -13,6 +12,7 @@ from lists.core.layered_files import (
     write_profile_user_list_text,
 )
 from lists.core.files import read_text_file_safe
+from lists.core.hostlist_syntax import hostlist_line_problem
 
 from .models import Profile
 
@@ -139,7 +139,7 @@ def validate_profile_list_file_text(kind: str, text: str) -> tuple[tuple[int, st
             if not _valid_ipset_line(line):
                 invalid.append((line_number, line))
             continue
-        if not _valid_hostlist_line(line):
+        if hostlist_line_problem(line):
             invalid.append((line_number, line))
     return tuple(invalid)
 
@@ -172,42 +172,11 @@ def _valid_ipset_line(line: str) -> bool:
         return False
 
 
-def _valid_hostlist_line(line: str) -> bool:
-    value = str(line or "").strip().lower()
-    if value.startswith("^"):
-        value = value[1:].strip()
-    if value.startswith("*."):
-        value = value[2:].strip()
-    if value.startswith("."):
-        value = value[1:].strip()
-    if not value or "://" in value or "/" in value or ":" in value:
-        return False
-    try:
-        ipaddress.ip_address(value)
-        return False
-    except ValueError:
-        pass
-    try:
-        ascii_domain = value.encode("idna").decode("ascii")
-    except Exception:
-        return False
-    if len(ascii_domain) > 253:
-        return False
-    labels = ascii_domain.rstrip(".").split(".")
-    # Оригинальный nfqws2 ищет hostname по суффиксам:
-    # www.example.ru -> example.ru -> ru. Поэтому одиночная DNS-метка вроде
-    # ru или su — допустимая и осмысленная запись hostlist.
-    # Числового TLD не существует (RFC 3696): такое значение — IP-подобная
-    # запись, которой место в ipset, а не в hostlist.
-    if labels[-1].isdigit():
-        return False
-    label_re = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
-    return all(label_re.fullmatch(label or "") for label in labels)
-
-
 def _join_visible_layers(base_text: str, user_text: str) -> str:
+    # Тот же порядок, что в итоговом файле (lists.core.builders): записи
+    # пользователя первыми — в hostlist побеждает первая запись домена.
     chunks = []
-    for text in (base_text, user_text):
+    for text in (user_text, base_text):
         value = str(text or "").strip()
         if value:
             chunks.append(value)

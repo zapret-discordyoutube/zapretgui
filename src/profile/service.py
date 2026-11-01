@@ -45,6 +45,7 @@ from .key_resolution import (
     resolve_preset_profile_reference_index,
     resolve_preset_profile_row_index,
 )
+from lists.core.hostlist_syntax import HostlistIndex
 from .list_file_editor import (
     count_profile_list_entries,
     profile_list_file_reference,
@@ -1527,6 +1528,11 @@ class ProfilePresetService:
         text_parts = read_profile_list_file_text_parts(self._lists_root(), reference)
         invalid_lines = validate_profile_list_file_text(reference.kind, text_parts.user_text) if reference.editable else ()
         base_entries_count = count_profile_list_entries(text_parts.base_text) if reference.editable else 0
+        base_index = (
+            HostlistIndex.from_texts(("base", text_parts.base_text))
+            if reference.editable and reference.kind == "hostlist"
+            else None
+        )
         user_entries_count = count_profile_list_entries(
             text_parts.user_text if reference.editable else text_parts.final_text
         )
@@ -1543,6 +1549,7 @@ class ProfilePresetService:
             error_text=reference.error_text,
             base_entries_count=base_entries_count,
             user_entries_count=user_entries_count,
+            base_index=base_index,
         )
 
     def _append_template_profile_to_preset(

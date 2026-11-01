@@ -130,17 +130,26 @@ class PresetSyntaxHighlighter(BaseSyntaxHighlighter):
 
 
 class ListFileSyntaxHighlighter(BaseSyntaxHighlighter):
-    """Файлы списков: домены, IP/CIDR, маски и комментарии `#`."""
+    """Файлы списков: домены, IP/CIDR и комментарии.
+
+    Синтаксис hostlist — ``lists.core.hostlist_syntax``: префиксы ``^``
+    (только сам домен) и ``!`` (исключение из этого списка) выделены акцентом,
+    строка-исключение целиком — приглушённым акцентом, чтобы исключения
+    читались отдельно от обычных записей. Комментарии — как у движка:
+    строка с ``#``, ``;`` или ``/`` в начале.
+    """
 
     RULES = (
-        (r"^\s*[\w.*-]+", "path"),
+        (r"^\s*[!^]*[\w.*-]+", "path"),
         (r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?", "number"),
         (r"\*", "section"),
         (r":\d+", "number"),
+        (r"^\s*(?=[!^]*!)[!^]+[\w.*-]*", "label"),
+        (r"^\s*[!^]+", "section"),
     )
-    COMMENT_RULE = r"^\s*[#;].*$"
+    COMMENT_RULE = r"^\s*[#;/].*$"
 
 
 def is_comment_line(line: str) -> bool:
     """Строка целиком является комментарием."""
-    return bool(re.match(r"^\s*[#;]", str(line or "")))
+    return bool(re.match(r"^\s*[#;/]", str(line or "")))

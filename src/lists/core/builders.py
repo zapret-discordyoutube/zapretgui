@@ -14,14 +14,21 @@ def dedup_preserve_order(items: list[str]) -> list[str]:
     return list(dict.fromkeys(items))
 
 
-def merge_base_and_user(base_entries: list[str], user_entries: list[str]) -> list[str]:
-    """Объединяет базовые и пользовательские строки, сохраняя базу первой."""
-    return list(dict.fromkeys(chain(base_entries, user_entries)))
+def merge_user_over_base(base_entries: list[str], user_entries: list[str]) -> list[str]:
+    """Объединяет строки: сначала пользовательские, потом базовые.
+
+    Порядок важен для движка: в одном hostlist домен хранится один раз и
+    работает его ПЕРВАЯ запись (nfq2/pools.c, ADD_HOSTLIST_POOL). Записи
+    пользователя идут первыми, поэтому его ``!youtube.com`` или
+    ``^youtube.com`` перебивает встроенное ``youtube.com``, а не теряется
+    за ним. Подробно — ``lists.core.hostlist_syntax``.
+    """
+    return list(dict.fromkeys(chain(user_entries, base_entries)))
 
 
 def build_combined_content(base_entries: list[str], user_entries: list[str]) -> str:
     """Собирает текст итогового файла из базовых и пользовательских строк."""
-    combined = merge_base_and_user(base_entries, user_entries)
+    combined = merge_user_over_base(base_entries, user_entries)
     return "\n".join(combined) + ("\n" if combined else "")
 
 

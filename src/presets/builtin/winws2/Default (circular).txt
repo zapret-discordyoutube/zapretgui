@@ -175,8 +175,6 @@
 --lua-desync=multisplit:seqovl=625:seqovl_pattern=tls5:strategy=27
 --lua-desync=multisplit:seqovl=625:seqovl_pattern=tls_google:strategy=28
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:strategy=29
---in-range=-s3508
---payload=all
 
 --new
 

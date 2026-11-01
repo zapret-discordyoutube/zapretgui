@@ -176,7 +176,6 @@
 --out-range=-d10
 --lua-desync=send:repeats=3
 --lua-desync=syndata:blob=tls_google
---ipcache-hostname
 --lua-desync=syndata
 
 --new
@@ -187,7 +186,6 @@
 --out-range=-d10
 --lua-desync=send:repeats=3
 --lua-desync=syndata:blob=tls_google
---ipcache-hostname
 --lua-desync=syndata
 
 --new
@@ -198,7 +196,6 @@
 --out-range=-d10
 --lua-desync=send:repeats=3
 --lua-desync=syndata:blob=tls_google
---ipcache-hostname
 --lua-desync=syndata
 
 --new

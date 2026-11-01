@@ -110,16 +110,24 @@ WINWS2_OPTIONS: tuple[OptionSpec, ...] = (
        "Принудительная сборка мусора Lua каждые N секунд (0 — выключить).", int_min=0),
     # ------------------------------------------------------ списки хостов/IP
     _o("hostlist", "required", "profile", "file",
-       "Профиль работает только для доменов из файла (поддомены тоже).",
+       "Профиль работает только для доменов из файла (поддомены тоже). В файле «^домен» — без поддоменов, "
+       "«!домен» — исключение из этого файла: «ru» и «!torrents.ru» — все .ru, кроме torrents.ru.",
        repeat="accumulate", placeholder="lists/файл.txt"),
     _o("hostlist-domains", "required", "profile", "text",
-       "Домены прямо в строке через запятую.", repeat="accumulate", placeholder="example.com,example.org"),
+       "Домены прямо в строке через запятую; работают «^» (без поддоменов) и «!» (исключение): "
+       "«ru,!torrents.ru». Все --hostlist-domains профиля складываются в один список.",
+       repeat="accumulate", placeholder="example.com,example.org"),
     _o("hostlist-exclude", "required", "profile", "file",
-       "Не применять профиль к доменам из файла.", repeat="accumulate", placeholder="lists/файл.txt"),
+       "Не применять профиль к доменам из файла (поддомены тоже). «!домен» в файле — не исключать этот "
+       "домен: «ru» и «!torrents.ru» исключают все .ru, кроме torrents.ru.",
+       repeat="accumulate", placeholder="lists/файл.txt"),
     _o("hostlist-exclude-domains", "required", "profile", "text",
-       "Исключаемые домены прямо в строке через запятую.", repeat="accumulate"),
+       "Исключаемые домены прямо в строке через запятую; «!» — не исключать: «ru,!torrents.ru».",
+       repeat="accumulate"),
     _o("hostlist-auto", "required", "profile", "file",
-       "Автосписок: winws2 сам дописывает в файл домены, где заметил блокировку. Один на профиль.",
+       "Автосписок: winws2 сам дописывает в файл домены, где заметил блокировку. Один на профиль. "
+       "«!домен» в автосписке действует как исключение для всего профиля (так автор движка защитил "
+       "автосписок от повторного дописывания), но писать «!» туда не рекомендуется.",
        repeat="once", placeholder="lists/autohostlist.txt"),
     _o("hostlist-auto-fail-threshold", "required", "profile", "int",
        "Сколько неудач подряд добавляют домен в автосписок (1..20).", int_min=1, int_max=20),

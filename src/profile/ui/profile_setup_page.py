@@ -969,6 +969,9 @@ class ProfileSetupPageBase(BasePage):
         self._list_file_find_bar = tab.find_bar
         self._list_file_find_controller = tab.find_controller
         self._list_file_text = tab.user_text
+        tab.set_exceptions_supported(is_zapret2_launch_method(self.launch_method))
+        self._list_file_language = tab.language
+        self._list_file_prefix_help = tab.prefix_help
         self._list_file_error_label = tab.error_label
         self._list_file_status_label = tab.status_label
         # Кнопки «Сохранить» нет: валидный текст сохраняется сам
@@ -2093,6 +2096,14 @@ class ProfileSetupPageBase(BasePage):
                     set_placeholder_text_if_changed(self._list_file_text, "Домены по одному на строку:\nexample.com\nsub.example.org")
             finally:
                 self._list_file_text.blockSignals(False)
+        language = self.__dict__.get("_list_file_language")
+        if language is not None:
+            language.set_list(kind=kind if editable else "", base_index=getattr(state, "base_index", None))
+            if self._list_file_text is not None:
+                self._list_file_text.refresh_diagnostics()
+        prefix_help = self.__dict__.get("_list_file_prefix_help")
+        if prefix_help is not None:
+            set_widget_visible_if_changed(prefix_help, editable and kind == "hostlist")
         # Что сервер знает — фиксируем всегда; текст пользователя — только
         # когда его правки не старше пришедшего состояния.
         self._list_file_server_text_snapshot = visible_user_text

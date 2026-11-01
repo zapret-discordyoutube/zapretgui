@@ -150,7 +150,7 @@ class ProfileListFileEditorTests(unittest.TestCase):
             self.assertEqual(list_editor.user_display_path, "lists/user/ipset-youtube.txt")
             self.assertEqual(list_editor.base_text, "1.1.1.1\n")
             self.assertEqual(list_editor.user_text, "2.2.2.2\n")
-            self.assertEqual(list_editor.text, "1.1.1.1\n2.2.2.2\n")
+            self.assertEqual(list_editor.text, "2.2.2.2\n1.1.1.1\n")
             self.assertEqual(list_editor.base_entries_count, 1)
             self.assertEqual(list_editor.user_entries_count, 1)
 
@@ -160,7 +160,7 @@ class ProfileListFileEditorTests(unittest.TestCase):
 
             self.assertIsNotNone(saved)
             self.assertEqual(saved_text, "8.8.8.8\n")
-            self.assertEqual(final_text, "1.1.1.1\n8.8.8.8\n")
+            self.assertEqual(final_text, "8.8.8.8\n1.1.1.1\n")
 
     def test_service_read_does_not_create_user_layer_for_base_only_list(self) -> None:
         # Чтение состояния редактора — read-only операция: user-слой и итоговый
@@ -206,7 +206,7 @@ class ProfileListFileEditorTests(unittest.TestCase):
             for name in ("other.txt", "ipset-all.txt", "ipset-ru.txt", "ipset-dns.txt", "ipset-exclude.txt", "netrogat.txt", "youtube.txt"):
                 self.assertEqual(
                     (lists_dir / name).read_text(encoding="utf-8"),
-                    f"base-{name}\nuser-{name}\n",
+                    f"user-{name}\nbase-{name}\n",
                 )
 
     def test_rebuild_all_skips_unreferenced_user_only_lists(self) -> None:
@@ -397,7 +397,7 @@ class ProfileListFileEditorTests(unittest.TestCase):
             self.assertEqual(list_editor.display_path, "lists/ipset-ru.txt")
             self.assertEqual(list_editor.base_text, "1.1.1.1\n")
             self.assertEqual(list_editor.user_text, "2.2.2.2\n")
-            self.assertEqual(list_editor.text, "1.1.1.1\n2.2.2.2\n")
+            self.assertEqual(list_editor.text, "2.2.2.2\n1.1.1.1\n")
 
     def test_service_exclusion_dns_file_is_not_gui_editable(self) -> None:
         preset = parse_preset_text(

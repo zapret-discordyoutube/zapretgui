@@ -21,6 +21,9 @@ class ProfileListFileEditorState:
     error_text: str = ""
     base_entries_count: int = 0
     user_entries_count: int = 0
+    # Встроенные записи hostlist в виде индекса (lists.core.hostlist_syntax):
+    # строится в рабочем потоке загрузки, редактор по нему только ищет.
+    base_index: object = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)

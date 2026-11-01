@@ -44,7 +44,7 @@ from winws_runtime.health.silent_exit_probe import (
     format_silent_exit_message,
     probe_silent_exit,
 )
-from winws_runtime.health.winws_output import relevant_error_line
+from winws_runtime.health.winws_output import explain_list_registration_failure, relevant_error_line
 from winws_runtime.engine.process_control import adopt_engine_process, stop_process
 from winws_runtime.engine.startup import (
     DEFAULT_SETTLE_SECONDS,
@@ -495,8 +495,11 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             )
             return
 
+        list_failure = explain_list_registration_failure(output)
         summary = self._summarize_startup_output(output)
-        if summary:
+        if list_failure:
+            self._set_last_error(f"{ENGINE_WINWS2} не запустился: {list_failure}", notify=False)
+        elif summary:
             self._set_last_error(
                 f"{ENGINE_WINWS2} завершился сразу (код {exit_code}): {summary[:300]}",
                 notify=False,
@@ -888,7 +891,10 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             reason="dry_run_failed_before_spawn",
             publish_failure=False,
         )
-        if output_summary:
+        list_failure = explain_list_registration_failure(output)
+        if list_failure:
+            self._set_last_error(f"Проверка пресета через winws2 не прошла: {list_failure}", notify=False)
+        elif output_summary:
             self._set_last_error(
                 f"Проверка пресета через winws2 не прошла (код {self._last_spawn_exit_code}): "
                 f"{output_summary[:300]}",

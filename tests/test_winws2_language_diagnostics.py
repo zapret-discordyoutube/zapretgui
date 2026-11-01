@@ -166,5 +166,41 @@ class Winws2DiagnosticsTests(unittest.TestCase):
         self.assertEqual(text, before)
 
 
+class Winws2ListRulesTests(unittest.TestCase):
+    """Правила списков движка от 31.10.2026 (zapret2 48ec126, abbe480)."""
+
+    def problems(self, text: str):
+        return [(d.line, d.severity, d.message) for d in diagnose(text)]
+
+    def test_same_list_file_twice_in_profile_is_error(self) -> None:
+        text = HEAD + "--filter-tcp=443\n--hostlist=lists/a.txt\n--hostlist=@lists\\A.txt\n--lua-desync=pass\n"
+        found = [p for p in self.problems(text) if "уже подключён" in p[2]]
+        self.assertEqual([(line, severity) for line, severity, _ in found], [(3, "error")])
+
+    def test_hostlist_and_autolist_are_one_list_type(self) -> None:
+        text = HEAD + "--filter-tcp=443\n--hostlist=lists/a.txt\n--hostlist-auto=lists/a.txt\n--lua-desync=pass\n"
+        self.assertTrue(any("уже подключён" in p[2] for p in self.problems(text)))
+
+    def test_same_file_in_include_and_exclude_or_other_profile_is_fine(self) -> None:
+        text = (
+            HEAD + "--filter-tcp=443\n--hostlist=lists/a.txt\n--hostlist-exclude=lists/a.txt\n--lua-desync=pass\n"
+            "--new\n--filter-tcp=443\n--hostlist=lists/a.txt\n--lua-desync=pass\n"
+            "--new\n--skip\n--hostlist=lists/b.txt\n--hostlist=lists/b.txt\n"
+        )
+        self.assertFalse(any("уже подключён" in p[2] for p in self.problems(text)))
+
+    def test_static_hostlist_prefixes(self) -> None:
+        good = HEAD + "--filter-tcp=443\n--hostlist-exclude-domains=ru,!torrents.ru\n--lua-desync=pass\n"
+        self.assertFalse([p for p in self.problems(good) if p[1] != "hint"])
+        text = (
+            HEAD + "--filter-tcp=443\n--hostlist-domains=ru,!vk.com\n--hostlist-domains=!ru,*.x.com\n"
+            "--lua-desync=pass\n"
+        )
+        messages = [p[2] for p in self.problems(text) if p[1] == "warning"]
+        self.assertTrue(any("нечего исключать" in m and "vk.com" in m for m in messages), messages)
+        self.assertTrue(any("только первую запись" in m for m in messages), messages)
+        self.assertTrue(any("Звёздочки" in m for m in messages), messages)
+
+
 if __name__ == "__main__":
     unittest.main()

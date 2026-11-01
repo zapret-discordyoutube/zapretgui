@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from lists import ipsets_manager  # noqa: E402
 from lists.core import layered_files  # noqa: E402
-from lists.core.builders import dedup_preserve_order, merge_base_and_user  # noqa: E402
+from lists.core.builders import dedup_preserve_order, merge_user_over_base  # noqa: E402
 from lists.core.layered_files import (  # noqa: E402
     rebuild_all_layered_list_files,
     rebuild_profile_list_file,
@@ -67,7 +67,7 @@ class UnchangedListSkipTests(unittest.TestCase):
 
         rebuild_profile_list_file(self.root, "site.txt")
 
-        self.assertEqual((self.root / "site.txt").read_text(encoding="utf-8"), "a.com\nb.com\nmine.com\n")
+        self.assertEqual((self.root / "site.txt").read_text(encoding="utf-8"), "mine.com\na.com\nb.com\n")
 
     def test_same_size_edit_with_new_time_is_merged_again(self) -> None:
         user_path = self.root / "user" / "site.txt"
@@ -78,7 +78,7 @@ class UnchangedListSkipTests(unittest.TestCase):
         self._touch_later(user_path)
         rebuild_profile_list_file(self.root, "site.txt")
 
-        self.assertEqual((self.root / "site.txt").read_text(encoding="utf-8"), "a.com\nb.com\ntwo.com\n")
+        self.assertEqual((self.root / "site.txt").read_text(encoding="utf-8"), "two.com\na.com\nb.com\n")
 
     def test_changed_base_layer_is_merged_again(self) -> None:
         rebuild_profile_list_file(self.root, "site.txt")
@@ -121,7 +121,7 @@ class UnchangedListSkipTests(unittest.TestCase):
             rebuild_profile_list_file(self.root, "site.txt")
 
         snapshots.assert_not_called()
-        self.assertEqual((self.root / "site.txt").read_text(encoding="utf-8"), "a.com\nb.com\nmine.com\n")
+        self.assertEqual((self.root / "site.txt").read_text(encoding="utf-8"), "mine.com\na.com\nb.com\n")
 
     def test_failed_pass_is_not_remembered(self) -> None:
         with patch.object(layered_files, "_apply_plan", side_effect=OSError("диск")):
@@ -135,13 +135,14 @@ class UnchangedListSkipTests(unittest.TestCase):
 
 
 class MergeOrderTests(unittest.TestCase):
-    def test_base_goes_first_and_repeats_are_dropped(self) -> None:
+    def test_user_goes_first_and_repeats_are_dropped(self) -> None:
+        # Пользователь первым: в hostlist движок оставляет первую запись домена.
         self.assertEqual(
-            merge_base_and_user(["b.com", "a.com", "b.com"], ["c.com", "a.com", "c.com", "d.com"]),
-            ["b.com", "a.com", "c.com", "d.com"],
+            merge_user_over_base(["b.com", "a.com", "b.com"], ["c.com", "a.com", "c.com", "d.com"]),
+            ["c.com", "a.com", "d.com", "b.com"],
         )
         self.assertEqual(dedup_preserve_order(["x", "y", "x", "z", "y"]), ["x", "y", "z"])
-        self.assertEqual(merge_base_and_user([], []), [])
+        self.assertEqual(merge_user_over_base([], []), [])
 
 
 class StartupLogLineCountTests(unittest.TestCase):

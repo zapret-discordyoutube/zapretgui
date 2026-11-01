@@ -142,7 +142,7 @@ class PlanRebuildTableTests(unittest.TestCase):
             with self.subTest(authoritative=authoritative):
                 plan = _plan_rebuild("youtube.txt", snapshot, authoritative=authoritative)
                 self.assertIsNone(plan.write_user)
-                self.assertEqual(plan.write_final, "base.com\nuser.com\n")
+                self.assertEqual(plan.write_final, "user.com\nbase.com\n")
 
     def test_layered_plan_seeds_placeholder_for_empty_layers(self) -> None:
         # Существующий пустой список (например, только комментарии) обязан
