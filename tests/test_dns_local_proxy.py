@@ -27,6 +27,8 @@ class FakeSystem:
         self.granted = None
         # Отвечает ли запущенный движок; список — ответы по очереди запусков.
         self.answers_after_start = [True]
+        # Что движок допишет в свой журнал при запуске (так он говорит, что серверов нет).
+        self.log_on_start = ""
         self._answering = False
         self.calls: list[str] = []
         self.slept = 0.0
@@ -56,6 +58,10 @@ class FakeSystem:
             return False, "Отказано в доступе."
         self.state = "running"
         self._answering = self.answers_after_start.pop(0) if self.answers_after_start else True
+        if self.log_on_start:
+            log_path = self.work_dir() / local_proxy.LOG_NAME
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(self.log_on_start)
         return True, ""
 
     def grant_service_access(self, folder: Path) -> None:
@@ -244,6 +250,36 @@ class LocalProxyTests(unittest.TestCase):
         self.assertFalse(self._config().exists())
         self.assertGreaterEqual(self.system.slept, local_proxy.START_TIMEOUT_S)
         self.assertEqual(local_proxy.active_mode(system=self.system), "")
+
+    # Так dnscrypt-proxy 2.1.18 запускался с серверами GeoHide на win10 2026-11-01.
+    NO_SERVERS_LOG = (
+        "[2026-11-01 12:35:00] [ERROR] [doh-2] may be a lying resolver -- skipping\n"
+        "[2026-11-01 12:35:00] [NOTICE] dnscrypt-proxy is waiting for at least one server to be reachable\n"
+    )
+
+    def test_engine_that_says_no_server_works_is_not_waited_for(self) -> None:
+        self.system.answers_after_start = [False]
+        self.system.log_on_start = self.NO_SERVERS_LOG
+
+        result = local_proxy.start("anonymized", system=self.system)
+
+        self.assertFalse(result.success)
+        self.assertLess(self.system.slept, 1.0)
+        # Строки журнала движка попадают в сообщение: по ним видно, почему.
+        self.assertIn("lying resolver", result.message)
+        self.assertEqual(self.system.state, "")
+
+    def test_old_no_server_lines_of_a_previous_run_do_not_stop_a_good_start(self) -> None:
+        log_path = self.system.work_dir() / local_proxy.LOG_NAME
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(self.NO_SERVERS_LOG, encoding="utf-8")
+        answers = iter([False, False, True])
+        self.system.answers = lambda _address: next(answers)
+
+        result = local_proxy.start("anonymized", system=self.system)
+
+        self.assertTrue(result.success)
+        self.assertEqual(self.system.slept, 2 * local_proxy._POLL_S)
 
     def test_failed_switch_brings_the_previous_mode_back(self) -> None:
         self.assertTrue(local_proxy.start("dnscrypt", system=self.system).success)
