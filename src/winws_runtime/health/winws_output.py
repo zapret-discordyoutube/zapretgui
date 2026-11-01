@@ -101,7 +101,7 @@ def relevant_error_line(output: str, *, fallback: FallbackLine = "first") -> str
 
 
 # Отказы winws2 из-за файлов списков (nfq2/hostlist.c, nfq2/ipset.c:
-# RegisterHostlist/RegisterIpset). «cannot access» — файла нет или он пустой;
+# RegisterHostlist/RegisterIpset). «cannot access» — файла нет (stat не прошёл);
 # «failed to register» без него — с 31.10.2026 (zapret2 abbe480) почти всегда
 # повтор: один и тот же файл подключён в одном профиле дважды одного типа
 # (--hostlist и --hostlist-auto считаются одним типом).
@@ -115,8 +115,8 @@ def explain_list_registration_failure(output: str) -> str:
     access = _LIST_ACCESS_RE.search(text)
     if access:
         return (
-            f"не найден или пуст файл списка {access.group(2)}. "
-            "Проверьте, что файл есть в папке lists и в нём есть хотя бы одна запись"
+            f"не найден файл списка {access.group(2)}. "
+            "Проверьте, что файл есть в папке lists"
         )
     register = _LIST_REGISTER_RE.search(text)
     if register:

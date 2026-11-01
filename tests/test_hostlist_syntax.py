@@ -129,7 +129,7 @@ class ListRegistrationFailureTests(unittest.TestCase):
         duplicate = "github version v1.0.6\nfailed to register hostlist 'lists/a.txt'\n"
         self.assertIn("дважды", explain_list_registration_failure(duplicate))
         missing = "cannot access ipset file 'lists/ipset-x.txt'\nfailed to register ipset 'lists/ipset-x.txt'\n"
-        self.assertIn("не найден или пуст", explain_list_registration_failure(missing))
+        self.assertIn("не найден файл списка", explain_list_registration_failure(missing))
         self.assertEqual(explain_list_registration_failure("windivert: error opening filter"), "")
 
 
