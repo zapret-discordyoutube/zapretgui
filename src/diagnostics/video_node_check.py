@@ -226,6 +226,18 @@ def _ladder(facts: NodeFacts) -> tuple[LadderStep, ...]:
                 "начало ответа сервера приходит (дважды подряд)" if window.answered else _HELLO_WORDS.get(window.kind, (UNKNOWN, "проверить не удалось"))[1],
             )
         )
+    control = cause.window_control
+    if control is not None and control.kind != block_cause.HELLO_CANCELLED:
+        steps.append(
+            LadderStep(
+                "window_control",
+                "То же с окном приёма в 1 КБ",
+                INFO if control.answered else OK,
+                "ответ приходит и так — дело не в окне приёма, а в размере пакетов, линии или фильтре «через раз»"
+                if control.answered
+                else "ответа снова нет — фильтр режет ответ, когда видит его начало",
+            )
+        )
     return tuple(steps)
 
 
@@ -305,7 +317,7 @@ def _advice(code: str, facts: NodeFacts, provider_cache: bool) -> tuple[str, ...
         lines.append(
             f"Этот же видеосервер сейчас отдаёт данные через адрес Google {working.ip} ({working.name}). Строка "
             f"«{working.ip} {facts.host}» в файле hosts вернёт видео, пока YouTube выдаёт вам именно этот узел"
-            + (" — и без потери скорости." if code == NODE_WINDOW else ".")
+            + (" — и без малого окна, которое замедляет видео." if code == NODE_WINDOW else ".")
         )
     if code == NODE_WINDOW:
         return tuple(lines)
@@ -345,7 +357,7 @@ def judge(facts: NodeFacts | None, *, outside: str = "") -> NodeVerdict | None:
         if http_alive:
             text += ", хотя по обычному HTTP на порту 80 тот же адрес отвечает — закрыт именно порт 443"
         return verdict(NODE_NO_ROUTE, FAIL, text, False)
-    if cause is None or (cause.real_again is not None and cause.real_again.kind == block_cause.HELLO_OK):
+    if cause is None or (cause.real_again is not None and cause.real_again.answered):
         # Проб причины нет или настоящее имя прошло со второго раза: судить не о чем.
         return verdict(NODE_UNCLEAR, INFO, "по пробам не видно, режут имя видеосервера или его адрес", True)
     real_cut = result.kind in (KIND_RESET, KIND_TIMEOUT)
@@ -366,12 +378,17 @@ def judge(facts: NodeFacts | None, *, outside: str = "") -> NodeVerdict | None:
             "режут именно имя — такую блокировку стратегия Zapret обходит",
             True,
         )
-    if real_cut and others and all(_cut(item) for item in others) and _answered(cause.small_window):
+    if (
+        real_cut
+        and others
+        and all(_cut(item) for item in others)
+        and block_cause.reply_window_proven(cause.small_window, cause.window_control)
+    ):
         return verdict(
             NODE_WINDOW,
             FAIL,
             "видеосервер не принимает шифрованные соединения ни с каким именем, но когда программа говорит ему, что "
-            "может принять всего 1 байт, начало его ответа приходит. Фильтр на пути режет любое шифрованное соединение "
+            "может принять всего 1 байт, начало его ответа приходит, а с окном в 1 КБ — снова нет. Фильтр на пути режет любое шифрованное соединение "
             "с этого адреса, узнавая его по первым байтам ответа, и читает ответ только в пределах окна приёма. Так с "
             "октября 2026 года закрыта часть зарубежных узлов Google. Это обходит стратегия с малым окном (wssize) "
             "в профиле по адресу узла, но видео через неё идёт в десятки раз медленнее",

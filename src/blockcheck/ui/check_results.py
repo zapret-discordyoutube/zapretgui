@@ -587,7 +587,7 @@ class CompareBand(QWidget):
 
 
 # Значок страницы находки — по виду проблемы.
-_KIND_ICONS = {"cut16": "fa5s.cut", "quic": "fa5s.bolt", "voice": "fa5s.phone-alt", "dns": "fa5s.network-wired", "ip": "fa5s.ban", "sni": "fa5s.lock"}
+_KIND_ICONS = {"cut16": "fa5s.cut", "quic": "fa5s.bolt", "voice": "fa5s.phone-alt", "dns": "fa5s.network-wired", "ip": "fa5s.ban", "sni": "fa5s.lock", "tls_reply": "fa5s.lock-open"}
 
 
 def problem_detail_card(problem: dict) -> Card:

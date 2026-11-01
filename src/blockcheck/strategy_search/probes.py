@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import re
 import secrets
 import socket
 import struct
@@ -69,6 +70,20 @@ def resolve_target_addresses(host: str, port: int, *, udp: bool = False) -> tupl
     if not addresses:
         return [], f"адрес {host} не найден"
     return addresses, ""
+
+
+# Видеосерверы одного узла YouTube: rr1---sn-xxxx … rr20---sn-xxxx. Плеер берёт видео с любого из них.
+_VIDEO_NODE = re.compile(r"^rr(\d+)---(sn-[a-z0-9-]+)\.googlevideo\.com$")
+VIDEO_SIBLINGS = 20
+
+
+def sibling_video_hosts(host: str) -> list[str]:
+    """Остальные видеосерверы того же узла (имена, без проверки). Не видеосервер — пусто."""
+    match = _VIDEO_NODE.match(str(host or "").strip().lower().rstrip("."))
+    if not match:
+        return []
+    number, node = int(match.group(1)), match.group(2)
+    return [f"rr{index}---{node}.googlevideo.com" for index in range(1, VIDEO_SIBLINGS + 1) if index != number]
 
 
 def stub_addresses(addresses: Sequence[str]) -> list[str]:

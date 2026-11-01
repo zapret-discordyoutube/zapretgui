@@ -499,6 +499,22 @@ class WhitelistKindTests(unittest.TestCase):
     def test_without_probes_nothing_extra_is_claimed(self) -> None:
         self.assertEqual(self._kind(""), "провайдер пропускает только разрешённые адреса")
 
+    def test_control_cut_by_the_reply_filter_is_not_a_closed_road(self) -> None:
+        """Такой адрес открывает малое окно: «белые списки, Zapret не поможет» по нему не назначаются."""
+        from diagnostics import problems
+        from diagnostics.run_context import Probe
+        from diagnostics.services import Target
+        from diagnostics.verdict import ReachState
+
+        def probe(code):
+            item = Probe(target=Target("www.google.com", "сайт"), service="control", host="www.google.com")
+            item.reach_state = ReachState.DPI
+            item.cause = bc.Cause(code, "")
+            return item
+
+        self.assertFalse(problems._control_down({"control": [probe(bc.CAUSE_REPLY_WINDOW)]}, "control"))
+        self.assertTrue(problems._control_down({"control": [probe(bc.CAUSE_BY_ADDRESS)]}, "control"))
+
 
 class CaseVariantTests(unittest.TestCase):
     """То же имя другими буквами: сервер регистр не различает, фильтр, ищущий имя буква в букву, — различает."""
@@ -573,21 +589,33 @@ class ReplyWindowTests(unittest.TestCase):
     def test_window_answer_after_every_name_cut_is_a_confident_reply_filter(self) -> None:
         for any_name in (False, True):
             with self.subTest(any_name=any_name):
-                cause = bc.judge(_facts(small_window=ANSWER, any_name=any_name, **self.CUT))
+                cause = bc.judge(_facts(small_window=ANSWER, window_control=SILENCE, any_name=any_name, **self.CUT))
 
                 self.assertEqual((cause.code, cause.confident), (bc.CAUSE_REPLY_WINDOW, True))
                 self.assertIn("1 байт", cause.text)
                 self.assertEqual(bk.site_kind("dpi", cause.code), bk.KIND_TLS_REPLY)
 
     def test_window_refusal_also_proves_the_road(self) -> None:
-        self.assertEqual(bc.judge(_facts(small_window=REFUSAL, **self.CUT)).code, bc.CAUSE_REPLY_WINDOW)
+        self.assertEqual(bc.judge(_facts(small_window=REFUSAL, window_control=RESET, **self.CUT)).code, bc.CAUSE_REPLY_WINDOW)
+
+    def test_answer_with_a_1_kb_window_too_means_it_is_not_the_window(self) -> None:
+        """Потери больших пакетов, медленная линия или фильтр «через раз» тоже дают «обычное не прошло, байт прошёл».
+
+        Окно в 1 КБ их различает: пакеты в нём маленькие, а фильтр по ответу видит подпись TLS целиком.
+        """
+        for control in (ANSWER, REFUSAL):
+            with self.subTest(control=control.kind):
+                cause = bc.judge(_facts(small_window=ANSWER, window_control=control, any_name=True, **self.CUT))
+                self.assertEqual(cause.code, bc.CAUSE_BY_ADDRESS)
+        # Без контроля (старые данные) малое окно ничего не доказывает.
+        self.assertEqual(bc.judge(_facts(small_window=ANSWER, any_name=True, **self.CUT)).code, bc.CAUSE_BY_ADDRESS)
 
     def test_window_silence_keeps_the_old_verdicts(self) -> None:
         self.assertEqual(bc.judge(_facts(small_window=SILENCE, any_name=True, **self.CUT)).code, bc.CAUSE_BY_ADDRESS)
         self.assertEqual(bc.judge(_facts(small_window=RESET, **self.CUT)).code, bc.CAUSE_NO_NAME_WORKS)
 
     def test_name_passing_wins_over_the_window(self) -> None:
-        cause = bc.judge(_facts(small_window=ANSWER, **{**self.CUT, "neutral": ANSWER}))
+        cause = bc.judge(_facts(small_window=ANSWER, window_control=SILENCE, **{**self.CUT, "neutral": ANSWER}))
 
         self.assertEqual(cause.code, bc.CAUSE_BY_NAME)
 
@@ -596,8 +624,8 @@ class ReplyWindowTests(unittest.TestCase):
 
         calls = []
 
-        def windowed(ip, name, **_kwargs):
-            calls.append((ip, name))
+        def windowed(ip, name, **kwargs):
+            calls.append((ip, name, kwargs.get("window", bc.SMALL_WINDOW_BYTES)))
             return window(len(calls))
 
         with (
@@ -610,18 +638,19 @@ class ReplyWindowTests(unittest.TestCase):
             facts = bc.collect("rr5---sn-4g5ednsr.googlevideo.com", _broken(), submit=pool.submit, cancel=SocketCancel(), any_name=True)
         return facts, calls
 
-    def test_window_is_probed_twice_with_a_foreign_name_when_no_name_passes(self) -> None:
-        facts, calls = self._collect(lambda *_a, **_k: RESET, lambda _n: ANSWER)
+    def test_window_is_probed_twice_then_controlled_with_1_kb(self) -> None:
+        facts, calls = self._collect(lambda *_a, **_k: RESET, lambda number: ANSWER if number <= 2 else SILENCE)
 
-        self.assertEqual(calls, [("203.0.113.5", bc.NEUTRAL_NAME)] * 2)
-        self.assertEqual(facts.small_window, ANSWER)
+        small = ("203.0.113.5", bc.NEUTRAL_NAME, bc.SMALL_WINDOW_BYTES)
+        self.assertEqual(calls, [small, small, ("203.0.113.5", bc.NEUTRAL_NAME, bc.CONTROL_WINDOW_BYTES)])
+        self.assertEqual((facts.small_window, facts.window_control), (ANSWER, SILENCE))
         self.assertEqual(bc.judge(facts).code, bc.CAUSE_REPLY_WINDOW)
 
     def test_one_lucky_window_answer_is_not_enough(self) -> None:
         facts, calls = self._collect(lambda *_a, **_k: RESET, lambda number: ANSWER if number == 1 else SILENCE)
 
         self.assertEqual(len(calls), 2)
-        self.assertEqual(facts.small_window, SILENCE)
+        self.assertEqual((facts.small_window, facts.window_control), (SILENCE, None))
         self.assertEqual(bc.judge(facts).code, bc.CAUSE_BY_ADDRESS)
 
     def test_window_is_not_probed_when_some_name_passes(self) -> None:
@@ -660,6 +689,14 @@ class WindowHelloTests(unittest.TestCase):
             connection.sendall(b"\x15\x03\x03\x00\x02")
 
         self.assertEqual(self._window(reply).kind, bc.HELLO_ALERT)
+
+    def test_reply_that_stops_after_one_byte_is_silence_not_a_foreign_server(self) -> None:
+        def one_byte(connection) -> None:
+            connection.recv(4096)
+            connection.sendall(b"\x16")
+            connection.recv(1)
+
+        self.assertEqual(self._window(one_byte).kind, bc.HELLO_TIMEOUT)
 
     def test_reply_bytes_arriving_one_by_one_are_gathered(self) -> None:
         import time

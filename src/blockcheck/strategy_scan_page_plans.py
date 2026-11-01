@@ -359,7 +359,14 @@ def build_result_presentation(result, *, row_number: int) -> StrategyScanResultP
             status_tooltip = f"Открылось {attempts_ok} раза подряд на свежих соединениях"
         if (getattr(result, "raw_data", None) or {}).get("volume") == "unknown":
             status_tooltip += ". Объём не проверен: сайт отвечает коротко"
-        if (getattr(result, "raw_data", None) or {}).get("transfer"):
+        raw = getattr(result, "raw_data", None) or {}
+        if raw.get("window_addresses"):
+            # Малое окно замедляет эти адреса само: это свойство приёма, а не сервера.
+            status_tooltip += (
+                ". С малым окном приёма (wssize) для " + ", ".join(map(str, raw["window_addresses"]))
+                + ": соединения с этими адресами в десятки раз медленнее"
+            )
+        elif raw.get("transfer"):
             status_tooltip += ". Сервер отвечает медленно или с паузами — от стратегии это не зависит"
     elif verdict == "unstable":
         status_tooltip = f"Открылось не каждый раз ({attempts_ok} из {attempts_total}): {error_text}"

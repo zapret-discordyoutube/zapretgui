@@ -246,7 +246,7 @@ class ReplyWindowNodeTests(unittest.TestCase):
     """rr5---sn-4g5ednsr.googlevideo.com (ноябрь 2026): TLS с узла режут по ответу сервера, малое окно проходит."""
 
     def test_window_answer_turns_a_closed_address_into_a_window_fix(self) -> None:
-        verdict = vc.judge(_facts(_cause(small_window=ANSWER), owner=GOOGLE))
+        verdict = vc.judge(_facts(_cause(small_window=ANSWER, window_control=RESET), owner=GOOGLE))
 
         self.assertEqual(verdict.code, vc.NODE_WINDOW)
         self.assertTrue(verdict.strategy_helps)
@@ -259,10 +259,17 @@ class ReplyWindowNodeTests(unittest.TestCase):
     def test_working_google_address_is_offered_as_the_fast_way(self) -> None:
         via = (vc.ViaAddress("i.ytimg.com", "192.178.40.6", ANSWER, fetched=True, status=200, size=48_000),)
 
-        verdict = vc.judge(_facts(_cause(small_window=ANSWER), via=via))
+        verdict = vc.judge(_facts(_cause(small_window=ANSWER, window_control=RESET), via=via))
 
         self.assertIn(f"«192.178.40.6 {HOST}» в файле hosts", verdict.advice[1])
-        self.assertIn("без потери скорости", verdict.advice[1])
+        self.assertIn("без малого окна", verdict.advice[1])
+
+    def test_window_control_answering_keeps_the_closed_address(self) -> None:
+        verdict = vc.judge(_facts(_cause(small_window=ANSWER, window_control=ANSWER)))
+
+        self.assertEqual(verdict.code, vc.NODE_ADDRESS)
+        steps = {step.key: step for step in verdict.ladder}
+        self.assertIn("дело не в окне", steps["window_control"].text)
 
     def test_window_silence_keeps_the_closed_address(self) -> None:
         verdict = vc.judge(_facts(_cause(small_window=RESET)))
@@ -275,8 +282,8 @@ class ReplyWindowNodeTests(unittest.TestCase):
     def test_summary_gives_the_window_advice_and_keeps_the_strategy_button(self) -> None:
         from diagnostics import block_kind as bk
 
-        probe_cause = bc.judge(_cause(small_window=ANSWER))
-        node = vc.judge(_facts(_cause(small_window=ANSWER)))
+        probe_cause = bc.judge(_cause(small_window=ANSWER, window_control=RESET))
+        node = vc.judge(_facts(_cause(small_window=ANSWER, window_control=RESET)))
         kind = bk.site_kind("dpi", probe_cause.code)
         targets = [
             TargetOutcome("www.youtube.com", "сайт", ReachState.OK, DnsState.OK, main=True),

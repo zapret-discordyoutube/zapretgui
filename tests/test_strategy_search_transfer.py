@@ -165,3 +165,11 @@ class PresentationTests(unittest.TestCase):
         # Строка остаётся «Работает»: пауза сервера стратегию не опровергает.
         self.assertTrue(paused.status_text.startswith("Работает"))
         self.assertTrue(paused.can_apply)
+
+    def test_window_row_says_the_slowness_is_the_window_not_the_server(self) -> None:
+        from blockcheck.strategy_scan_page_plans import build_result_presentation
+
+        row = build_result_presentation(self._result({"transfer": "slow", "window_addresses": ["74.125.110.106"]}), row_number=1)
+
+        self.assertIn("малым окном приёма (wssize) для 74.125.110.106", row.status_tooltip)
+        self.assertNotIn("от стратегии это не зависит", row.status_tooltip)

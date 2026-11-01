@@ -73,6 +73,7 @@ _LEGACY_CAUSE_WORDS = {
     "by_name": "блокировка по имени",
     "name_whitelist": "проходят только разрешённые имена",
     "by_address": "закрыт адрес",
+    "reply_window": "режут ответ сервера",
     "stub_page": "страница провайдера",
     "address_closed": "адрес закрыт",
     "address_silent": "адрес молчит",

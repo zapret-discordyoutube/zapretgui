@@ -200,6 +200,8 @@ class SearchEnvironment(Protocol):
     def quic_blocked_by_name(self, host: str, address: str) -> bool: ...
     def probe_hello(self, address: str, name: str | None) -> bool | None: ...
     def probe_window(self, address: str) -> bool | None: ...
+    def video_siblings(self, host: str) -> list[str]: ...
+    def reply_window_among(self, addresses: Sequence[str]) -> list[str]: ...
     def probe_udp(self, specs: Sequence[UdpProbeSpec]) -> list[tuple[UdpProbeSpec, ProbeOutcome]]: ...
     def tcp_port_open(self, address: str, port: int) -> bool: ...
     def cancel_probes(self) -> None: ...
@@ -476,8 +478,11 @@ class StrategySearch:
         # такой подбор ничего не говорит о них и в историю не идёт.
         if self._target.forced or not (confirmed_ids or failed_ids):
             return
+        # Провал рядом с малым окном говорит о паре «стратегия + окно», а не о стратегии: без окна
+        # она могла бы работать. В историю на 14 дней такие провалы не идут.
+        failed = [] if self._target.window_addresses else list(failed_ids)
         try:
-            self._env.record_history(key, confirmed=list(confirmed_ids), failed=list(failed_ids))
+            self._env.record_history(key, confirmed=list(confirmed_ids), failed=failed)
         except Exception:
             logger.exception("strategy search history save failed")
         confirmed_ids.clear()
@@ -585,11 +590,12 @@ class StrategySearch:
             raise ScanFatal(self._not_dpi_reason(host, addresses, decision.reason), STOP_ADDRESS_BLOCK)
         if decision.state == rules.BASELINE_OPEN:
             decision = self._recheck_open_baseline(host, addresses, outcomes, decision)
-        if decision.state == rules.BASELINE_OPEN and self._baseline_quic(host, decision.probe_addresses):
-            return True
         if decision.state == rules.BASELINE_OPEN and self._companion_closed(companions):
             # Страница открывается, а другое имя сервиса (видеосервер, превью) нет: подбирать есть что.
+            # Раньше QUIC: без видеосервера видео не пойдёт, как бы ни открывалась страница.
             self._target = _Target(host=host, addresses=decision.probe_addresses, companions=companions)
+            return True
+        if decision.state == rules.BASELINE_OPEN and self._baseline_quic(host, decision.probe_addresses):
             return True
         if decision.state == rules.BASELINE_OPEN:
             report.baseline_accessible = True
@@ -827,9 +833,10 @@ class StrategySearch:
         )
         seconds = self._env.monotonic() - started
         extra = self._names_extra(ordered, batch, search, address, seconds)
-        windows = self._reply_window_addresses(search.kind == sni_discovery.FILTER_REPLY_WINDOW)
+        target_found = search.kind == sni_discovery.FILTER_REPLY_WINDOW
+        windows = self._reply_window_addresses(target_found)
         if windows:
-            extra = [*self._start_window_mode(windows), *extra]
+            extra = [*self._start_window_mode(windows, target_found), *extra]
         return extra
 
     def _names_extra(self, ordered: list[Candidate], batch: list[Candidate], search, address: str, seconds: float) -> list[Candidate]:
@@ -876,9 +883,11 @@ class StrategySearch:
         from blockcheck.strategy_search.sni_discovery import NEUTRAL_NAME
 
         found: list[str] = []
+        hosts: list[str] = []
         first = self._target.addresses[0] if self._target.addresses else ""
         if target_found and first:
             found.append(first)
+            hosts.append(self._target.host)
         others = [(self._target.host, address) for address in self._target.addresses[1:]] if target_found else []
         others += [(host, addresses[0]) for host, addresses in self._target.companions if addresses]
         for host, address in others:
@@ -893,18 +902,41 @@ class StrategySearch:
                         "ответ сервера приходит — этот адрес тоже режут по ответу сервера"
                     )
                 found.append(address)
+                hosts.append(host)
+        found.extend(self._sibling_windows(hosts, found))
         return tuple(dict.fromkeys(found))
 
-    def _start_window_mode(self, addresses: tuple[str, ...]) -> list[Candidate]:
+    def _sibling_windows(self, hosts: Sequence[str], known: Sequence[str]) -> list[str]:
+        """Соседние видеосерверы узла (rr1…rr20 того же sn-…), на которых тот же фильтр доказан пробой.
+
+        Плеер берёт видео с любого из них: без них профиль малого окна закрыл бы один видеосервер из двадцати.
+        В профиль идут только проверенные адреса — соседи по сети бывают серверами других городов.
+        """
+        candidates: list[str] = []
+        for host in dict.fromkeys(hosts):
+            if self.cancelled:
+                return []
+            candidates.extend(address for address in self._env.video_siblings(host) if address not in known)
+        candidates = list(dict.fromkeys(candidates))
+        if not candidates or self.cancelled:
+            return []
+        found = [address for address in self._env.reply_window_among(candidates) if address in candidates]
+        self._events.log(
+            f"  Соседние видеосерверы того же узла: проверено {len(candidates)}, тот же фильтр на {len(found)}"
+        )
+        return found
+
+    def _start_window_mode(self, addresses: tuple[str, ...], target_found: bool) -> list[Candidate]:
         """Стратегии дальше проверяются с профилем малого окна по ``addresses``; первым — малое окно без приёмов."""
         from blockcheck.strategy_search.probe_profile import window_groups
 
         self._target.window_addresses = addresses
         groups = ", ".join(window_groups(addresses))
+        whose = "Цели" if target_found else "Другого имени сервиса"
         self._events.log(
-            "  Шифрование с адреса режут по ответу сервера: с обычным окном приёма ответа нет ни с каким именем, "
-            "а с окном в 1 байт он приходит. Имена тут не помогут — каждую стратегию проверим вместе с малым окном "
-            f"(wssize 1:1) в отдельном профиле по адресам {groups}. Скорость через такой профиль ниже в десятки раз."
+            f"  {whose}: шифрование с адреса режут по ответу сервера — с обычным окном приёма ответа нет ни с каким "
+            "именем, с окном в 1 байт он приходит, с окном в 1 КБ снова нет. Каждую стратегию проверим вместе с малым "
+            f"окном (wssize 1:1) в отдельном профиле по адресам {groups}. Скорость через такой профиль ниже в десятки раз."
         )
         self._stage(STEP_NAMES, "done", f"TLS режут по ответу сервера — добавляем малое окно для {groups}")
         # Первым — одно малое окно: если хватит его, приёмы против фильтра имён не нужны,
@@ -999,6 +1031,12 @@ class StrategySearch:
             # Сервис открыт, только когда открыты все его имена: страница без видеосервера — не победа.
             for companion, addresses in self._target.companions if passed else ():
                 extra = self._env.probe_https(companion, addresses)
+                if volume and rules.attempt_passed(extra):
+                    # Видеосервер тоже обязан набрать объём: рукопожатие без видео — не победа.
+                    extra = [
+                        self._env.probe_volume(companion, address, outcome) if rules.needs_volume(outcome) else outcome
+                        for address, outcome in zip(addresses, extra)
+                    ]
                 if not rules.attempt_passed(extra):
                     passed, reason, outcomes = False, f"{companion}: {rules.attempt_reason(extra)}", extra
                     break

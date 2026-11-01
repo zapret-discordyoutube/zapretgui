@@ -30,9 +30,9 @@ UDP_GAMES_PORT_FILTER = "443,50000-65535"
 # при открытии соединения и потом не меняется: скорость падает до конца соединения, поэтому приём
 # пишется только в профиль по адресам — список доменов на первом пакете ещё не известен.
 WINDOW_STRATEGY_LINE = "--lua-desync=wssize:wsize=1:scale=1"
-# Фильтр держит в списке группы серверов Google по 32 адреса: профиль малого окна берёт всю группу
-# адреса (IPv4 /27), чтобы покрыть соседние видеосерверы того же узла. IPv6 — только сам адрес.
-WINDOW_GROUP_PREFIX_V4 = 27
+# Имя профиля малого окна: по нему «Применить» находит и заменяет прежний такой профиль сайта,
+# даже если набор адресов с тех пор сменился (отбор трафика в подпись входит, имя — нет).
+WINDOW_PROFILE_NAME_PREFIX = "wssize: "
 VOICE_PORT_FILTER = "443-65535"
 
 
@@ -76,18 +76,25 @@ class ProbeProfile:
 
 
 def window_groups(addresses: Sequence[str]) -> tuple[str, ...]:
-    """Группы адресов для профиля малого окна: IPv4 — сеть /27 адреса, IPv6 — сам адрес."""
-    groups: list[str] = []
+    """Адреса для профиля малого окна — только те, на которых фильтр доказан пробой, без соседей по сети.
+
+    Соседние адреса той же сети бывают серверами других городов, которых фильтр не трогает, а малое
+    окно замедлило бы их в десятки раз. Соседние видеосерверы узла подбор проверяет сам и добавляет
+    по одному (``engine._reply_window_addresses``).
+    """
+    found: list[str] = []
     for raw in addresses:
         try:
-            address = ipaddress.ip_address(str(raw or "").strip())
+            found.append(str(ipaddress.ip_address(str(raw or "").strip())))
         except ValueError:
             continue
-        if address.version == 4:
-            groups.append(str(ipaddress.ip_network(f"{address}/{WINDOW_GROUP_PREFIX_V4}", strict=False)))
-        else:
-            groups.append(str(address))
-    return tuple(dict.fromkeys(groups))
+    return tuple(dict.fromkeys(found))
+
+
+def window_profile_name(domain: str) -> str:
+    """``--name`` профиля малого окна сайта ``domain`` (первое имя профиля)."""
+    first = str(domain or "").split(",")[0].strip().lower()
+    return f"{WINDOW_PROFILE_NAME_PREFIX}{first}" if first else WINDOW_PROFILE_NAME_PREFIX.strip()
 
 
 def strategy_lines_from_args(strategy_args: str) -> tuple[str, ...]:
@@ -170,15 +177,12 @@ def build_probe_profile(
     full_flow = needs_full_flow(strategy)
     ranges = ("--in-range=a", "--out-range=a", "--payload=all") if full_flow else ("--out-range=-d8",)
     groups = window_groups(window_addresses)
+    by_address = (f"--name={window_profile_name(domain)}", "--filter-tcp=443", f"--ipset-ip={','.join(groups)}", *ranges)
     if groups and strategy == (WINDOW_STRATEGY_LINE,):
         # Одно малое окно — это профиль по адресам и только он: профиль по именам с пустой стратегией
         # ничего бы не делал, а «Применить» перебил бы им рабочую стратегию сайта на остальных адресах.
-        return ProbeProfile(("--wf-tcp-out=443",), ("--filter-tcp=443", f"--ipset-ip={','.join(groups)}", *ranges), strategy)
-    window = (
-        ("--filter-tcp=443", f"--ipset-ip={','.join(groups)}", *ranges, WINDOW_STRATEGY_LINE, *strategy)
-        if groups
-        else ()
-    )
+        return ProbeProfile(("--wf-tcp-out=443",), by_address, strategy)
+    window = (*by_address, WINDOW_STRATEGY_LINE, *strategy) if groups else ()
     return ProbeProfile(
         ("--wf-tcp-out=443", "--wf-tcp-in=443") if full_flow else ("--wf-tcp-out=443",),
         ("--filter-tcp=443", f"--hostlist-domains={domain}", *ranges),

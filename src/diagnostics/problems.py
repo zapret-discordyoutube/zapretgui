@@ -182,7 +182,13 @@ def _control_down(collected: dict[str, list[Probe]], key: str) -> bool:
     # времени) — не «нет интернета», иначе такой прогон спрятал бы найденные
     # блокировки остальных сайтов.
     probes = collected.get(key) or ()
-    return bool(probes) and all(probe.reach_state in _NO_ROAD for probe in probes)
+    # TLS, который режут по ответу сервера, обходится малым окном: такой адрес не «закрыт», и режим
+    # «белых списков» (где Zapret не помогает) по нему не назначается.
+    return bool(probes) and all(
+        probe.reach_state in _NO_ROAD
+        and not (probe.cause is not None and probe.cause.code == block_cause.CAUSE_REPLY_WINDOW)
+        for probe in probes
+    )
 
 
 def _foreign_reachable(reference: list[dict] | None) -> bool:

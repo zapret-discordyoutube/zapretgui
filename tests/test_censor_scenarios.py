@@ -81,7 +81,8 @@ class Censor:
     def window_hello(self, ip: str, name: str | None, **_kwargs) -> HelloResult:
         """Окно приёма в 1 байт: фильтр по ответу сервера не видит подписи TLS и пропускает."""
         if ip in self.reply_cut_ips:
-            return HelloResult(HELLO_OK, ms=20.0)
+            # Окно в 1 КБ фильтр читает и режет, в 1 байт — не видит подписи TLS.
+            return HelloResult(HELLO_TIMEOUT) if _kwargs.get("window", 1) > 2 else HelloResult(HELLO_OK, ms=20.0)
         return self.hello(ip, name)
 
     def http(self, _host: str, ip: str, **_kwargs) -> HttpFacts:

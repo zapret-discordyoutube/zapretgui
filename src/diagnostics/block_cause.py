@@ -18,7 +18,10 @@
    Часть фильтров (ТСПУ, октябрь 2026) режет любой TLS с адреса, узнавая его по
    первым трём байтам ответа сервера, но читает ответ только в пределах окна
    приёма, которое объявил компьютер. Если с окном в 1 байт начало ответа
-   приходит, закрыт не адрес, а TLS с него — и это обходит приём ``wssize``.
+   приходит, а с окном в 1 КБ — нет, закрыт не адрес, а TLS с него, и это
+   обходит приём ``wssize``. Окно в 1 КБ — контроль: фильтр его читает и должен
+   оборвать. Проходит и оно — дело не в окне, а в размере пакетов (потери
+   больших пакетов на пути), в медленной линии или в фильтре «через раз».
 
 Сбор (``collect``) отделён от вывода (``judge``): вывод — чистая функция над
 собранными фактами.
@@ -72,8 +75,10 @@ __all__ = [
     "judge",
     "needs_refining",
     "stub_reason",
+    "reply_window_proven",
     "small_window_twice",
     "tls_hello",
+    "window_facts",
     "window_hello",
 ]
 
@@ -117,6 +122,9 @@ SMALL_WINDOW_BYTES = 1
 # Сколько байт ответа ждать: тип записи TLS (0x16 — рукопожатие, 0x15 — отказ) и старший байт
 # версии (0x03). Подпись TLS фильтр узнаёт по трём байтам; двух ему мало, а нам хватает.
 _WINDOW_READ = 2
+# Окно контрольной пробы: меньше одного пакета (сервер шлёт порции не больше окна, и потеря
+# больших пакетов на пути их не задевает), но в нём фильтр видит подпись TLS целиком.
+CONTROL_WINDOW_BYTES = 1024
 _RECORD_HANDSHAKE = 0x16
 _RECORD_ALERT = 0x15
 HTTP_TIMEOUT_S = 4.0
@@ -193,6 +201,9 @@ class CauseFacts:
     # Постороннее имя с окном приёма в 1 байт (``window_hello``), когда не прошло ни одно имя.
     # «Ответил» записывается, только если начало ответа пришло дважды подряд. None — не проверяли.
     small_window: HelloResult | None = None
+    # Контроль после ответа малого окна: то же с окном в ``CONTROL_WINDOW_BYTES``. Фильтр по ответу
+    # его режет; ответ здесь значит, что дело не в окне. None — не проверяли.
+    window_control: HelloResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,8 +326,9 @@ def window_hello(
     port: int = 443,
     timeout: float = HELLO_TIMEOUT_S,
     cancel: SocketCancel | None = None,
+    window: int = SMALL_WINDOW_BYTES,
 ) -> HelloResult:
-    """Приветствие с окном приёма в ``SMALL_WINDOW_BYTES``: дошло ли начало ответа сервера.
+    """Приветствие с окном приёма в ``window`` байт: дошло ли начало ответа сервера.
 
     Окно — сколько байт компьютер готов принять, пока не подтвердит полученное; сервер не
     шлёт больше. Шифрование до конца здесь не доводится (по байту оно шло бы минутами):
@@ -333,7 +345,7 @@ def window_hello(
         if not token.track(sock):
             return HelloResult(HELLO_CANCELLED)
         # До соединения: окно и его множитель объявляются в первом пакете и потом не меняются.
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SMALL_WINDOW_BYTES)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, int(window))
         sock.settimeout(timeout)
         sock.connect((ip, int(port)))
         connected = True
@@ -347,13 +359,12 @@ def window_hello(
     except (socket.timeout, TimeoutError):
         if token.cancelled:
             return HelloResult(HELLO_CANCELLED)
-        if not data:
-            return HelloResult(HELLO_TIMEOUT if connected else HELLO_CONNECT)
+        # Пришла часть начала ответа и замерла — это не «ответил», а «ответа нет».
+        return HelloResult(HELLO_TIMEOUT if connected else HELLO_CONNECT, data.hex())
     except OSError as error:
         if token.cancelled:
             return HelloResult(HELLO_CANCELLED)
-        if not data:
-            return HelloResult(HELLO_RESET if connected else HELLO_CONNECT, str(error))
+        return HelloResult(HELLO_RESET if connected else HELLO_CONNECT, str(error))
     finally:
         if sock is not None:
             token.release(sock)
@@ -511,9 +522,9 @@ def collect(
     answers = [(name, future.result()) for name, future in allowed]
     allowed_name, allowed_result = next((item for item in answers if item[1].answered), answers[-1])
     hellos = (neutral.result(), nameless.result(), allowed_result, real_again.result(), *([recased.result()] if recased is not None else []))
-    small_window = None
+    small_window = window_control = None
     if result.kind in (KIND_RESET, KIND_TIMEOUT) and not any(item.answered for item in hellos):
-        small_window = small_window_twice(ip, cancel)
+        small_window, window_control = window_facts(ip, cancel)
     return CauseFacts(
         host=host,
         result=result,
@@ -527,6 +538,7 @@ def collect(
         recased_name=recased_name,
         any_name=any_name,
         small_window=small_window,
+        window_control=window_control,
     )
 
 
@@ -542,6 +554,26 @@ def small_window_twice(ip: str, cancel: SocketCancel, *, timeout: float = HELLO_
         return first
     again = later(STAGGER_S, cancel, window_hello, ip, NEUTRAL_NAME, cancel=cancel, timeout=timeout)
     return first if again.answered else again
+
+
+def window_facts(ip: str, cancel: SocketCancel, *, timeout: float = HELLO_TIMEOUT_S) -> tuple[HelloResult, HelloResult | None]:
+    """(малое окно дважды, контроль окном в 1 КБ). Контроль идёт только после ответа малого окна и
+    последним: он же поздняя проверка, что адрес не стал отвечать сам. Общая проба BlockCheck и подбора."""
+    small = small_window_twice(ip, cancel, timeout=timeout)
+    if not small.answered:
+        return small, None
+    control = later(STAGGER_S, cancel, window_hello, ip, NEUTRAL_NAME, cancel=cancel, timeout=timeout, window=CONTROL_WINDOW_BYTES)
+    return small, control
+
+
+def reply_window_proven(small: HelloResult | None, control: HelloResult | None) -> bool:
+    """Малое окно ответило дважды, а окно в 1 КБ оборвали или заглушили — фильтр по ответу в пределах окна."""
+    return (
+        small is not None
+        and small.answered
+        and control is not None
+        and control.kind in (HELLO_RESET, HELLO_TIMEOUT)
+    )
 
 
 def _how(result: ProbeResult) -> str:
@@ -630,15 +662,16 @@ def judge(facts: CauseFacts) -> Cause | None:
         *([recased] if recased is not None and recased.kind != HELLO_CANCELLED else []),
     ]
     checked = "ни с каким именем, даже с разрешённым" if allowed is not None and not allowed.answered else "ни с каким именем"
-    window = facts.small_window
-    if window is not None and window.answered and all(item.kind in (HELLO_RESET, HELLO_TIMEOUT) for item in probes):
-        # Прямое сравнение на одном адресе: обычное окно — ответа нет, окно в 1 байт — есть.
+    if reply_window_proven(facts.small_window, facts.window_control) and all(
+        item.kind in (HELLO_RESET, HELLO_TIMEOUT) for item in probes
+    ):
+        # Прямое сравнение на одном адресе: окно в 1 байт — ответ есть, окно в 1 КБ и обычное — нет.
         return Cause(
             CAUSE_REPLY_WINDOW,
             f"соединение с адресом устанавливается, а шифрование не проходит {checked}; но когда программа "
-            "говорит серверу, что может принять всего 1 байт, начало его ответа приходит (дважды подряд). "
-            "Фильтр на пути режет любое шифрованное соединение с этого адреса, узнавая его по первым байтам "
-            "ответа сервера, и читает этот ответ только в пределах окна приёма",
+            "говорит серверу, что может принять всего 1 байт, начало его ответа приходит (дважды подряд), а с "
+            "окном в 1 КБ — снова нет. Фильтр на пути режет любое шифрованное соединение с этого адреса, узнавая "
+            "его по первым байтам ответа сервера, и читает этот ответ только в пределах окна приёма",
             confident=True,
         )
     if all(item.kind == HELLO_TIMEOUT for item in probes):

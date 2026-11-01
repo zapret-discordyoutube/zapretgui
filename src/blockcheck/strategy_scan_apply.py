@@ -263,6 +263,12 @@ def plan_selected_preset_strategy_apply(
 
     new_profile = profile_preset.profiles[-1]
     window_profiles = list(profile_preset.profiles[:-1])
+    if str(scan_protocol or "").strip() == PROTOCOL_TCP_HTTPS:
+        from blockcheck.strategy_search.probe_profile import window_profile_name
+
+        # «Применить» пишет ровно то, что проверено: прежний профиль малого окна сайта уходит, а если
+        # проверено с окном — его заменит новый (набор адресов мог смениться).
+        updated = _without_profiles_named(updated, window_profile_name(profile_domain(match_target) or match_target))
     # Обновляется только profile самой цели: тот же отбор трафика и те же имена,
     # что у найденной стратегии (его создало прошлое «Применить»). Общий profile,
     # в списке которого цель лишь одна из многих, не трогается: стратегия
@@ -310,25 +316,46 @@ def plan_selected_preset_strategy_apply(
 
 
 def _with_window_profiles(preset, window_profiles, main_index: int):
-    """Профили малого окна над основным: (пресет, новый номер основного profile-а).
+    """Профили малого окна прямо над основным: (пресет, новый номер основного profile-а).
 
-    Такой же профиль (тот же отбор трафика) обновляется на месте, новый
-    вставляется прямо над основным и сдвигает его на одну строку вниз.
+    Прежний профиль малого окна этого сайта (то же имя ``wssize: <сайт>`` или тот же отбор трафика)
+    удаляется целиком: набор адресов мог смениться, а старые адреса иначе замедлялись бы и дальше.
+    Новый вставляется прямо над основным — иначе соединение ушло бы в основной, как только станет
+    известно имя сайта.
     """
-    from profile.serializer import append_profile_from_template, with_profile_enabled, with_profile_strategy_lines
+    from profile.serializer import append_profile_from_template, with_profile_deleted
 
     for window in window_profiles:
-        same = next(
-            (profile for profile in preset.profiles if window.match_signature and profile.match_signature == window.match_signature),
-            None,
-        )
-        lines = list(getattr(window.strategy, "strategy_lines", ()) or ())
-        if same is not None:
-            preset = with_profile_enabled(with_profile_strategy_lines(preset, same.index, lines), same.index, True)
-            continue
+        while True:
+            stale = next(
+                (
+                    profile
+                    for profile in preset.profiles
+                    if (window.name and profile.name == window.name)
+                    or (window.match_signature and profile.match_signature == window.match_signature)
+                ),
+                None,
+            )
+            if stale is None:
+                break
+            preset = with_profile_deleted(preset, stale.index)
+            if stale.index < main_index:
+                main_index -= 1
         preset = append_profile_from_template(preset, window, enabled=True, position=main_index)
         main_index += 1
     return preset, main_index
+
+
+def _without_profiles_named(preset, name: str):
+    """Пресет без profile-ов с этим именем."""
+    from profile.serializer import with_profile_deleted
+
+    while name:
+        stale = next((profile for profile in preset.profiles if profile.name == name), None)
+        if stale is None:
+            break
+        preset = with_profile_deleted(preset, stale.index)
+    return preset
 
 
 def apply_profile_to_selected_preset(

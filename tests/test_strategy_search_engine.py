@@ -90,6 +90,9 @@ class FakeEnv:
     quic: object = None
     # Проба малого окна до запуска winws2: адрес -> True / False / None. По умолчанию не проходит.
     window: object = None
+    # Соседние видеосерверы узла: хост -> адреса; и какие из адресов режут по ответу сервера.
+    siblings: object = None
+    sibling_windows: tuple = ()
 
     def __post_init__(self):
         self.running = None
@@ -200,6 +203,13 @@ class FakeEnv:
     def probe_window(self, address):
         self.hellos.append((address, "window"))
         return self.window(address) if self.window is not None else False
+
+    def video_siblings(self, host):
+        return list((self.siblings or {}).get(host, ()))
+
+    def reply_window_among(self, addresses):
+        self.hellos.append((tuple(addresses), "siblings"))
+        return [address for address in addresses if address in self.sibling_windows]
 
     def probe_udp(self, specs):
         return [(spec, self.network(self.running, spec)) for spec in specs]
@@ -424,6 +434,38 @@ class CompanionTests(unittest.TestCase):
         self.assertFalse(report.baseline_accessible)
         self.assertTrue(any("без обхода video.example.com" in line for line in events.logs))
         self.assertTrue(any(result.strategy_id == "both" and result.success for result in events.results))
+
+    def test_video_server_must_pass_the_volume_too(self) -> None:
+        """Рукопожатие с видеосервером без видео — не победа: он набирает объём, как и цель."""
+        env = self._env(
+            lambda running, _n: OK if running in ("page_only", "both") else RESET,
+            lambda running: OK if running in ("page_only", "both") else RESET,
+        )
+        hosts: list = []
+        original = env.probe_volume
+
+        def volume(host, address, answered):
+            hosts.append(host)
+            if host == "video.example.com" and env.running == "page_only":
+                return ProbeOutcome(rules.PROBE_BLOCKED, "соединение замирает после ~16 КБ (блокировка по объёму)", 1.0, "reset", 0, rules.VOLUME_CUT)
+            return original(host, address, answered)
+
+        env.probe_volume = volume
+        _report, events = run(env, **self.REQUEST)
+
+        by_id = {result.strategy_id: result for result in events.results}
+        self.assertIn("video.example.com", hosts)
+        self.assertFalse(by_id["page_only"].success)
+        self.assertIn("16 КБ", by_id["page_only"].error)
+        self.assertTrue(by_id["both"].success)
+
+    def test_closed_video_server_wins_over_quic(self) -> None:
+        """Страница открыта, QUIC режут по имени, а видеосервер закрыт: подбирать надо TCP для видео, не QUIC."""
+        env = self._env(lambda running, _n: OK, lambda running: OK if running == "both" else RESET, quic_cut_by_name=True)
+        report, _events = run(env, FakeEvents(answer=False), **self.REQUEST)
+
+        self.assertEqual(report.scan_protocol, "tcp_https")
+        self.assertTrue(any(result.strategy_id == "both" and result.success for result in report.working_strategies))
 
     def test_everything_open_without_bypass_still_asks(self) -> None:
         env = self._env(lambda running, _n: OK, lambda running: OK)
@@ -684,7 +726,7 @@ class ReplyWindowTests(unittest.TestCase):
         report, _events = run(env)
 
         lines = report.working_strategies[0].apply_lines
-        self.assertIn("--ipset-ip=1.1.1.0/27", lines)
+        self.assertIn("--ipset-ip=1.1.1.10", lines)
         self.assertNotIn("--new", lines)
         # Профиль по именам с пустой стратегией перебил бы рабочую стратегию сайта на других адресах.
         self.assertFalse(any(line.startswith("--hostlist-domains=") for line in lines))
@@ -699,7 +741,7 @@ class ReplyWindowTests(unittest.TestCase):
         self.assertIn("малое окно", found.strategy_name)
         lines = list(found.apply_lines)
         window_at, new_at, names_at = (
-            lines.index("--ipset-ip=1.1.1.0/27"),
+            lines.index("--ipset-ip=1.1.1.10"),
             lines.index("--new"),
             lines.index("--hostlist-domains=discord.com"),
         )
@@ -731,6 +773,29 @@ class ReplyWindowTests(unittest.TestCase):
         self.assertGreater(len(env.hellos), 5)
         self.assertFalse(any("wssize" in session.config_text for session in env.sessions))
 
+    def test_sibling_video_servers_with_the_same_filter_join_the_profile(self) -> None:
+        """Плеер берёт видео с rr1…rr20 узла: в профиль идут соседи, на которых фильтр доказан, и только они."""
+        env = self._env(
+            lambda running, _n: OK if running == "wssize" else RESET,
+            siblings={"rr5---sn-4g5ednsr.googlevideo.com": ["74.125.110.101", "74.125.110.102", "1.1.1.10"]},
+            sibling_windows=("74.125.110.101",),
+        )
+        report, events = run(env, target="googlevideo.com", probe_host="rr5---sn-4g5ednsr.googlevideo.com")
+
+        lines = report.working_strategies[0].apply_lines
+        self.assertIn("--ipset-ip=1.1.1.10,74.125.110.101", lines)
+        # Уже найденный адрес второй раз не проверяется.
+        self.assertIn((("74.125.110.101", "74.125.110.102"), "siblings"), env.hellos)
+        self.assertTrue(any("проверено 2, тот же фильтр на 1" in line for line in events.logs))
+
+    def test_window_failures_do_not_go_into_history(self) -> None:
+        env = self._env(lambda running, _n: OK if running == "b+w" else RESET)
+        run(env)
+
+        _key, confirmed, failed = env.history_saved
+        self.assertEqual(confirmed, ["b"])
+        self.assertEqual(failed, [])
+
     def test_companion_cut_by_reply_gets_the_window_too(self) -> None:
         """У YouTube страница режется по имени, а видеосервер — по ответу сервера: окно нужно ему."""
 
@@ -750,7 +815,7 @@ class ReplyWindowTests(unittest.TestCase):
         report, events = run(env, target="www.youtube.com", companions=(("googlevideo.com", "video.example.com"),))
 
         self.assertEqual([item.strategy_id for item in report.working_strategies], ["b"])
-        self.assertIn("--ipset-ip=9.9.9.0/27", report.working_strategies[0].apply_lines)
+        self.assertIn("--ipset-ip=9.9.9.9", report.working_strategies[0].apply_lines)
         self.assertTrue(any("video.example.com (9.9.9.9)" in line for line in events.logs))
 
 
