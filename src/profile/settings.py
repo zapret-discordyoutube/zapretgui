@@ -17,7 +17,15 @@ from .parser import parse_preset_text
 from .serializer import serialize_preset
 
 
-_WINWS2_WSSIZE_LINE = "--lua-desync=wssize:wsize=1:scale=6"
+# Малое окно приёма: окно 1 с множителем 2¹ — сервер видит «принимаю 2 байта». С октября 2026 ТСПУ режет TLS
+# с части адресов по ответу сервера, читая его в пределах окна клиента; окно больше 2 байт (прежнее scale=6 —
+# 64 байта) он читает и режет. Множитель задаётся при открытии соединения: скорость падает до его конца.
+WINWS2_WSSIZE_LINE = "--lua-desync=wssize:wsize=1:scale=1"
+_WINWS2_WSSIZE_LINE = WINWS2_WSSIZE_LINE
+# Любая прежняя строка малого окна (scale=6 из старых версий): переключатель её узнаёт и убирает.
+_ANY_WINWS2_WSSIZE_LINE = re.compile(r"^--lua-desync=wssize:wsize=\d+:scale=\d+$")
+# Профили малого окна, которые пишет «Подбор стратегии» («wssize: <сайт>»): ими управляет он, не переключатель.
+SEARCH_WINDOW_PROFILE_PREFIX = "wssize: "
 _WINWS1_WSSIZE_LINES = ("--wssize", "1:6", "--wssize-forced-cutoff=0")
 
 
@@ -42,6 +50,10 @@ def get_wssize_enabled(profile_services, *, launch_method: str = DEFAULT_LAUNCH_
     return any(_profile_has_wssize(profile) for profile in _wssize_target_profiles(preset))
 
 
+class WssizeNoAddressProfiles(ValueError):
+    """В пресете нет профиля по адресам, куда малое окно можно поставить."""
+
+
 def set_wssize_enabled(profile_services, enabled: bool, *, launch_method: str = DEFAULT_LAUNCH_METHOD) -> bool:
     """Включает/выключает wssize во включённых TCP/443 profile-ах.
 
@@ -55,16 +67,31 @@ def set_wssize_enabled(profile_services, enabled: bool, *, launch_method: str = 
     `--payload=tls_client_hello` его бы не увидел. Диапазон по умолчанию
     (`--out-range=a`) ему не вреден — wssize сам отключается (cutoff) на
     первом пакете с данными.
+
+    winws2: малое окно ставится только в profile-ы по адресам (ipset) без
+    списка доменов. В SYN имени сайта ещё нет, и profile по доменам его не
+    видит: там строка ничего не делала (руководство zapret2, wssize). Прежние
+    строки малого окна (scale=6) убираются из всех TCP/443 profile-ов.
+    Profile-ы «wssize: <сайт>» от подбора стратегии не трогаются.
     """
     preset, _manifest = _load_selected_profile_preset(profile_services, launch_method)
     targets = _wssize_target_profiles(preset)
-    if not targets:
-        return False if enabled else True
+    winws2 = str(preset.engine or "").strip().lower() != ENGINE_WINWS1
+    if enabled and not targets:
+        if winws2:
+            raise WssizeNoAddressProfiles(
+                "в выбранном пресете нет профиля по адресам (ipset) для порта 443. В профиле по списку доменов "
+                "малое окно не работает: имя сайта в первом пакете соединения ещё не известно. Адреса, где оно "
+                "нужно, найдёт «Подбор стратегии» в BlockCheck"
+            )
+        return False
+    cleaned = _wssize_cleanup_profiles(preset) if winws2 else targets
 
     changed = False
-    for profile in targets:
+    target_ids = {id(profile) for profile in targets}
+    for profile in cleaned:
         segments = _segments_without_wssize(preset.engine, profile.segments)
-        if enabled:
+        if enabled and id(profile) in target_ids:
             segments = _segments_with_wssize(preset.engine, segments)
         if [segment.text for segment in segments] == [segment.text for segment in profile.segments]:
             continue
@@ -77,11 +104,36 @@ def set_wssize_enabled(profile_services, enabled: bool, *, launch_method: str = 
 
 
 def _wssize_target_profiles(preset) -> list:
+    """Куда ставится малое окно: включённые TCP/443 profile-ы; у winws2 — только по адресам."""
+    winws2 = str(getattr(preset, "engine", "") or "").strip().lower() != ENGINE_WINWS1
     return [
         profile
         for profile in preset.profiles
-        if bool(getattr(profile, "enabled", False)) and _profile_tcp_includes_443(profile)
+        if bool(getattr(profile, "enabled", False))
+        and _profile_tcp_includes_443(profile)
+        and (not winws2 or (_profile_matches_by_address(profile) and not _is_search_window_profile(profile)))
     ]
+
+
+def _wssize_cleanup_profiles(preset) -> list:
+    """Откуда убирается прежнее малое окно: все TCP/443 profile-ы, кроме тех, что ведёт подбор стратегии."""
+    return [
+        profile
+        for profile in preset.profiles
+        if _profile_tcp_includes_443(profile) and not _is_search_window_profile(profile)
+    ]
+
+
+def _profile_matches_by_address(profile) -> bool:
+    """Profile выбирается по адресу уже на первом пакете: есть ipset и нет списка доменов."""
+    match = profile.match
+    by_address = bool(getattr(match, "ipset_lines", None) or getattr(match, "inline_ipset_lines", None))
+    by_names = bool(getattr(match, "hostlist_lines", None) or getattr(match, "hostlist_domains_lines", None))
+    return by_address and not by_names
+
+
+def _is_search_window_profile(profile) -> bool:
+    return str(getattr(profile, "name", "") or "").startswith(SEARCH_WINDOW_PROFILE_PREFIX)
 
 
 def _segments_with_wssize(engine: str, segments: list) -> list:
@@ -178,7 +230,7 @@ def _profile_has_wssize(profile) -> bool:
 
 def _remove_wssize_lines(engine: str, lines: list[str]) -> list[str]:
     if str(engine or "").strip().lower() != ENGINE_WINWS1:
-        return [line for line in lines if line.lower() != _WINWS2_WSSIZE_LINE]
+        return [line for line in lines if not _ANY_WINWS2_WSSIZE_LINE.match(line.strip().lower())]
 
     cleaned: list[str] = []
     skip_next_value = False

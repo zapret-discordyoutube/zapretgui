@@ -172,7 +172,7 @@ def apply_profile_language(
     )
     wssize_toggle.set_texts(
         tr_catalog("page.dpi_settings.advanced.wssize.title", language=language, default="Включить --wssize"),
-        tr_catalog("page.dpi_settings.advanced.wssize.desc", language=language, default="Добавляет параметр размера окна TCP"),
+        tr_catalog("page.dpi_settings.advanced.wssize.desc", language=language, default="Малое окно приёма (1:1) в профилях по адресам (ipset): обходит фильтр, который режет ответ сервера, но замедляет эти адреса в десятки раз. В профилях по списку доменов не работает"),
     )
     debug_log_toggle.set_texts(
         tr_catalog("page.dpi_settings.advanced.debug_log.title", language=language, default="Включить лог-файл (--debug)"),

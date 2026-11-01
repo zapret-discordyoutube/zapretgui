@@ -349,7 +349,8 @@ class WssizeToggleTests(unittest.TestCase):
         store = _PresetStore(text)
         return SimpleNamespace(_presets_feature=store), store
 
-    def test_enabling_wssize_touches_only_enabled_tcp443_profiles_and_one_line(self) -> None:
+    def test_enabling_wssize_touches_only_enabled_tcp443_address_profiles_and_one_line(self) -> None:
+        """Малое окно — только в profile по адресам: в SYN имени сайта нет, и profile по доменам его не видит."""
         from profile.settings import get_wssize_enabled, set_wssize_enabled
 
         text = "\n".join(
@@ -357,6 +358,15 @@ class WssizeToggleTests(unittest.TestCase):
                 "--name=YouTube",
                 "--filter-tcp=80,443",
                 "--hostlist=lists/youtube.txt",
+                "--out-range=-d8",
+                "--payload=tls_client_hello",
+                "--lua-desync=fake:blob=tls_google",
+                "",
+                "--new",
+                "",
+                "--name=Cloudflare",
+                "--filter-tcp=443",
+                "--ipset=lists/ipset-cloudflare.txt",
                 "--out-range=-d8",
                 "--payload=tls_client_hello",
                 "--lua-desync=fake:blob=tls_google",
@@ -369,7 +379,7 @@ class WssizeToggleTests(unittest.TestCase):
                 "--skip",
                 "--name=Disabled",
                 "--filter-tcp=443",
-                "--hostlist=lists/disabled.txt",
+                "--ipset=lists/disabled.txt",
                 "--lua-desync=fake:blob=tls_google",
                 "",
             )
@@ -386,12 +396,41 @@ class WssizeToggleTests(unittest.TestCase):
         self.assertEqual(
             enabled_text,
             text.replace(
-                "--hostlist=lists/youtube.txt\n",
-                "--hostlist=lists/youtube.txt\n--lua-desync=wssize:wsize=1:scale=6\n",
+                "--ipset=lists/ipset-cloudflare.txt\n",
+                "--ipset=lists/ipset-cloudflare.txt\n--lua-desync=wssize:wsize=1:scale=1\n",
             ),
         )
-        # Выключенный profile не тронут, выключение — точный откат.
+        # Profile по доменам и выключенный profile не тронуты, выключение — точный откат.
         self.assertEqual(store.text, text)
+
+    def test_preset_without_address_profiles_says_why_instead_of_a_silent_no_op(self) -> None:
+        from profile.settings import WssizeNoAddressProfiles, set_wssize_enabled
+
+        services, store = self._profile_services(
+            "--name=YouTube\n--filter-tcp=443\n--hostlist=lists/youtube.txt\n--lua-desync=fake:blob=tls_google\n"
+        )
+
+        with self.assertRaisesRegex(WssizeNoAddressProfiles, "профиле по списку доменов"):
+            set_wssize_enabled(services, True, launch_method=ZAPRET2_MODE)
+        self.assertNotIn("wssize", store.text)
+
+    def test_old_64_byte_window_is_removed_and_search_window_profile_is_left_alone(self) -> None:
+        """Прежнее scale=6 фильтр уже читает: выключатель его убирает везде, кроме profile-ов подбора."""
+        from profile.settings import get_wssize_enabled, set_wssize_enabled
+
+        search_profile = "--name=wssize: googlevideo.com\n--filter-tcp=443\n--ipset-ip=74.125.110.106\n--lua-desync=wssize:wsize=1:scale=1\n"
+        text = (
+            "--name=YouTube\n--filter-tcp=443\n--hostlist=lists/youtube.txt\n--lua-desync=wssize:wsize=1:scale=6\n"
+            "--lua-desync=fake:blob=tls_google\n\n--new\n" + search_profile
+        )
+        services, store = self._profile_services(text)
+
+        # Profile подбора — не цель переключателя: переключатель показывает «выключено».
+        self.assertFalse(get_wssize_enabled(services, launch_method=ZAPRET2_MODE))
+        self.assertTrue(set_wssize_enabled(services, False, launch_method=ZAPRET2_MODE))
+
+        self.assertNotIn("scale=6", store.text)
+        self.assertIn(search_profile, store.text)
 
     def test_wssize_state_ignores_disabled_profiles(self) -> None:
         from profile.settings import get_wssize_enabled

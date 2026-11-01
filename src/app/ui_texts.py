@@ -1624,8 +1624,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Enable --wssize",
     },
     "page.dpi_settings.advanced.wssize.desc": {
-        "ru": "Добавляет параметр размера окна TCP",
-        "en": "Adds TCP window size parameter",
+        "ru": (
+            "Малое окно приёма (1:1) в профилях по адресам (ipset): обходит фильтр, который режет ответ сервера, "
+            "но замедляет эти адреса в десятки раз. В профилях по списку доменов не работает"
+        ),
+        "en": (
+            "Tiny receive window (1:1) in address (ipset) profiles: passes a filter that cuts the server's reply, "
+            "but slows these addresses tens of times. Has no effect in domain-list profiles"
+        ),
     },
     "page.dpi_settings.advanced.debug_log.title": {
         "ru": "Включить лог-файл (--debug)",

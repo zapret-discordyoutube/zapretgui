@@ -73,14 +73,16 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
     "onboarding.step.fine_tuning.body": {
         "ru": (
             "Параметры для опытных — менять их стоит, только если понимаете зачем:\n"
-            "• «Включить --wssize» — добавляет движку параметр размера окна TCP;\n"
+            "• «Включить --wssize» — малое окно приёма в профилях по адресам (ipset): обходит фильтр, "
+            "который режет ответ сервера, но сильно замедляет эти адреса;\n"
             "• «Включить лог-файл (--debug)» — движок пишет подробный журнал в папку logs. Он нужен, "
             "чтобы разобраться, почему стратегия не срабатывает, и для обращения в поддержку.\n\n"
             "В режиме Zapret 2 здесь же вход в «Фейки» — к ним экскурсия ещё вернётся."
         ),
         "en": (
             "Settings for advanced users — change them only if you know why:\n"
-            "• Enable --wssize — adds the TCP window size option to the engine;\n"
+            "• Enable --wssize — a tiny receive window in address (ipset) profiles: passes a filter that "
+            "cuts the server's reply, but slows these addresses a lot;\n"
             "• Enable log file (--debug) — the engine writes a detailed log to the logs folder. It is "
             "needed to find out why a strategy does not work and for a support request.\n\n"
             "In Zapret 2 mode the entry to Fakes is here too — the tour will come back to them."

@@ -11,6 +11,8 @@ import ipaddress
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from profile.settings import SEARCH_WINDOW_PROFILE_PREFIX, WINWS2_WSSIZE_LINE
+
 PROTOCOL_TCP_HTTPS = "tcp_https"
 # Сайт без HTTPS: подбор переходит сюда сам, когда порт 443 не отвечает, а
 # обычный HTTP на порту 80 закрыт фильтром (заглушка, сброс). Отдельной плитки
@@ -29,10 +31,10 @@ UDP_GAMES_PORT_FILTER = "443,50000-65535"
 # С окном от 3 байт фильтр проходит через раз (bolvan, ntc.party, 29.10.2026). Множитель задаётся
 # при открытии соединения и потом не меняется: скорость падает до конца соединения, поэтому приём
 # пишется только в профиль по адресам — список доменов на первом пакете ещё не известен.
-WINDOW_STRATEGY_LINE = "--lua-desync=wssize:wsize=1:scale=1"
+WINDOW_STRATEGY_LINE = WINWS2_WSSIZE_LINE
 # Имя профиля малого окна: по нему «Применить» находит и заменяет прежний такой профиль сайта,
 # даже если набор адресов с тех пор сменился (отбор трафика в подпись входит, имя — нет).
-WINDOW_PROFILE_NAME_PREFIX = "wssize: "
+WINDOW_PROFILE_NAME_PREFIX = SEARCH_WINDOW_PROFILE_PREFIX
 VOICE_PORT_FILTER = "443-65535"
 
 

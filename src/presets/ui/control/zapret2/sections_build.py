@@ -115,7 +115,7 @@ def build_fine_tuning_group(
     wssize_toggle = win11_toggle_row_cls(
         "fa5s.ruler-horizontal",
         "Включить --wssize",
-        "Добавляет параметр размера окна TCP",
+        "Малое окно приёма (1:1) в профилях по адресам (ipset): обходит фильтр, который режет ответ сервера, но замедляет эти адреса в десятки раз. В профилях по списку доменов не работает",
     )
     wssize_toggle.toggled.connect(on_wssize_toggled)
 
