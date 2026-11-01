@@ -239,7 +239,22 @@ class Flowseal1103Winws1PresetTests(unittest.TestCase):
                 )
                 if result.returncode != 0:
                     self.skipTest("git HEAD is not available")
-                self.assertEqual(path.read_bytes(), result.stdout)
+                self.assertEqual(_without_format_wide_edits(path.read_bytes()), _without_format_wide_edits(result.stdout))
+
+
+# Edits made to every builtin winws1 preset at once, which the old ports take too: the
+# zapret.moe profile put first (2026-11-01) and its # BuiltinVersion line. Everything else in
+# an old port must stay byte for byte.
+ZAPRET_MOE_BLOCK = (
+    "--comment=zapret.moe\n--filter-tcp=443\n--hostlist=lists/zapret-moe.txt\n"
+    "--dpi-desync=hostfakesplit\n--dpi-desync-repeats=4\n--dpi-desync-fooling=ts,md5sig\n"
+    "--dpi-desync-hostfakesplit-mod=host=ozon.ru\n\n--new\n\n"
+)
+
+
+def _without_format_wide_edits(data: bytes) -> str:
+    text = data.decode("utf-8").replace("# === zapret.moe ===\n" + ZAPRET_MOE_BLOCK, "").replace(ZAPRET_MOE_BLOCK, "")
+    return "\n".join(line for line in text.split("\n") if not line.startswith("# BuiltinVersion: "))
 
 
 if __name__ == "__main__":

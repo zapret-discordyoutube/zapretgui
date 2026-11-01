@@ -1,9 +1,21 @@
 # Preset: YTDisBystro_31_3
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Imported from bat/YTDisBystro_31_3.txt
 
 --wf-tcp=80,443
 --wf-udp=443,50000-50090
+
+# === zapret.moe ===
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 # === HTTPS YouTube ===
 --comment=YouTube · трансляции (RTMPS)

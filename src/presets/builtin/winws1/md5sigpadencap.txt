@@ -1,10 +1,22 @@
 
 # Preset: md5sigpadencap
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Imported from bat/md5sigpadencap.txt
 
 --wf-tcp=443
 --wf-udp=443,50000-59000
+
+# === zapret.moe ===
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 # === HTTPS ===
 --comment=Мои сайты

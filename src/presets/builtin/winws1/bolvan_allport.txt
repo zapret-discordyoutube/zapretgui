@@ -1,9 +1,21 @@
 # Preset: bolvan_allport
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Imported from bat/bolvan_allport.txt
 
 --wf-tcp=80,443,4950-4955,6695-6705
 --wf-udp=443,50000-50099
+
+# === zapret.moe ===
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 # === HTTP (порт 80) ===
 --filter-tcp=80

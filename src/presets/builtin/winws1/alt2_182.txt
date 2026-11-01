@@ -1,9 +1,20 @@
 # Preset: alt2_182
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Imported from bat/alt2_182.txt
 
 --wf-tcp=80,443,1024-65535,6695-6705
 --wf-udp=443,1024-65535,5056,27002,50000-50100
+
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 --filter-udp=443
 --hostlist=lists/list-general.txt

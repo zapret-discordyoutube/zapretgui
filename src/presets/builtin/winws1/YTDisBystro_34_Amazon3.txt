@@ -1,10 +1,21 @@
 # Preset: YTDisBystro_34_Amazon3
-# BuiltinVersion: 1.2
+# BuiltinVersion: 1.3
 # IconColor: #60cdff
 # Description: Imported from bat/YTDisBystro_34_Amazon3.txt
 
 --wf-tcp=80,443,444-65535
 --wf-udp=443,444-65535,50000-50090
+
+# === zapret.moe ===
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 # === QUIC YouTube ===
 --filter-udp=443

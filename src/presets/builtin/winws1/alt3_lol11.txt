@@ -1,10 +1,21 @@
 # Preset: alt3_lol11
-# BuiltinVersion: 1.3
+# BuiltinVersion: 1.4
 # IconColor: #60cdff
 # Description: Imported from bat/alt3_lol11.txt
 
 --wf-tcp=80,443,2099,5222,5223,6695-6705,8393-8400
 --wf-udp=443,2099,5000-5500,5056,5222,5223,8393-8400,27002,50000-50100
+
+# === zapret.moe ===
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 # === QUIC ===
 --filter-udp=443

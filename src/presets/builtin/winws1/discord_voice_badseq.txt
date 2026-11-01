@@ -1,9 +1,21 @@
 # Preset: discord_voice_badseq
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Imported from bat/discord_voice_badseq.txt
 
 --wf-tcp=80,443
 --wf-udp=443,50000-50099
+
+# === zapret.moe ===
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 # === Discord Voice ===
 --filter-udp=50000-50099

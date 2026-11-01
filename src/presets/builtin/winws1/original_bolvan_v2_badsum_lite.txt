@@ -1,9 +1,21 @@
 # Preset: original_bolvan_v2_badsum_lite
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Imported from bat/original_bolvan_v2_badsum_lite.txt
 
 --wf-tcp=443
 --wf-udp=443,50000-50099
+
+# === zapret.moe ===
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 # === HTTPS YouTube ===
 --filter-tcp=443

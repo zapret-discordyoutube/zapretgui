@@ -232,7 +232,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         blocks = text.split("\n--new\n")
 
-        self.assertEqual(len(blocks), 53)
+        self.assertEqual(len(blocks), 54)  # 53 from the port + zapret.moe first (2026-11-01)
         for obsolete_source_path in (
             "list-general.txt",
             "list-general-user.txt",

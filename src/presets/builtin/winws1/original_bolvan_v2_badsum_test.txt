@@ -1,8 +1,20 @@
 # Preset: original_bolvan_v2_badsum_test
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Imported from bat/original_bolvan_v2_badsum_test.txt
 
 --wf-tcp=80,443
+
+# === zapret.moe ===
+--comment=zapret.moe
+--filter-tcp=443
+--hostlist=lists/zapret-moe.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-repeats=4
+--dpi-desync-fooling=ts,md5sig
+--dpi-desync-hostfakesplit-mod=host=ozon.ru
+
+--new
 
 # === Общее ===
 --comment=YouTube · сайт и приложение
