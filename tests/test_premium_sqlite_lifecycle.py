@@ -23,17 +23,20 @@ class _Api:
 
     def post_pair_start(self, *, request_id, device_id, device_name=None):
         _ = device_name
-        return self._response(
+        server_now = int(time.time())
+        raw, nonce = self._response(
             {
                 "type": "zapret_pairing_started",
                 "request_id": request_id,
                 "device_id": device_id,
                 "pairing_id": "pairing-1",
                 "pair_code": "ABCDEFGH",
-                "pair_expires_at": int(time.time()) + 600,
+                "pair_expires_at": server_now + 600,
             },
             "start-nonce",
         )
+        raw["_server_time"] = server_now
+        return raw, nonce
 
     def post_pair_finish(self, *, request_id, device_id, pairing_id):
         _ = request_id, pairing_id
@@ -154,6 +157,32 @@ class PremiumSqliteLifecycleTest(unittest.TestCase):
         revoke = service._api.revoke_requests[0]
         self.assertEqual(revoke["binding_id"], "binding-1")
         self.assertEqual(revoke["binding_generation"], 1)
+
+    def test_pc_clock_ahead_of_server_still_accepts_fresh_code(self) -> None:
+        """Часы ПК спешат на 3 часа (неверный часовой пояс): код всё равно создаётся."""
+
+        from types import SimpleNamespace
+
+        from donater.storage import PremiumStorage
+
+        service = self._service()
+        pc_clock = SimpleNamespace(time=lambda: time.time() + 3 * 3600)
+        with (
+            patch("donater.service.verify_signed_response", side_effect=self._verify),
+            patch("donater.service.time", pc_clock),
+        ):
+            ok, message, code = service.pair_start(device_name="Test PC")
+            self.assertTrue(ok, message)
+            self.assertEqual(code, "ABCDEFGH")
+            pending = PremiumStorage.get_pending_pairing()
+            self.assertEqual(pending["pairing_id"], "pairing-1")
+            # Срок переведён на часы ПК: те же 10 минут от «сейчас» ПК.
+            self.assertAlmostEqual(
+                int(pending["expires_at"]) - int(pc_clock.time()), 600, delta=5
+            )
+            # Код не считается истёкшим: статус опрашивает finish и сохраняет привязку.
+            service.check_status()
+        self.assertEqual(PremiumStorage.get_binding()["binding_id"], "binding-1")
 
     def test_server_inactive_subscription_closes_access(self) -> None:
         service = self._service()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import time
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Optional, Tuple
 
 import requests
@@ -188,6 +189,7 @@ class PremiumApiClient:
             }
         data["_nonce"] = nonce
         data["_http_status"] = int(response.status_code)
+        data["_server_time"] = self._server_time(response)
         if response.status_code >= 400 and not isinstance(data.get("signed"), dict):
             data["success"] = False
             data["error"] = {
@@ -195,6 +197,16 @@ class PremiumApiClient:
                 "retryable": response.status_code in {408, 429, 500, 502, 503, 504},
             }
         return data
+
+    @staticmethod
+    def _server_time(response: Any) -> int | None:
+        """Часы сервера из заголовка Date: по ним считается срок кода, а не по часам ПК."""
+
+        try:
+            value = response.headers.get("Date")
+            return int(parsedate_to_datetime(value).timestamp()) if value else None
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return None
 
     @staticmethod
     def _is_name_resolution_error(exc: BaseException) -> bool:

@@ -115,17 +115,25 @@ class PremiumService:
             pairing_id = str(signed.get("pairing_id") or "").strip()
             code = str(signed.get("pair_code") or "").strip().upper()
             try:
-                expires_at = int(signed.get("pair_expires_at"))
+                server_expires_at = int(signed.get("pair_expires_at"))
             except (TypeError, ValueError):
-                expires_at = 0
-            if not pairing_id or not code or expires_at <= int(time.time()):
+                server_expires_at = 0
+            # Срок кода задан по часам сервера. Часы ПК могут спешить на часы
+            # (неверный часовой пояс), поэтому остаток считаем от времени
+            # сервера, а хранимый срок переводим на часы ПК.
+            local_now = int(time.time())
+            server_now = raw.get("_server_time") if isinstance(raw, dict) else None
+            if not isinstance(server_now, int) or server_now <= 0:
+                server_now = local_now
+            remaining = server_expires_at - server_now
+            if not pairing_id or not code or remaining <= 0:
                 PremiumStorage.clear_pair_code()
                 return False, "Сервер вернул некорректное сопряжение.", None
             if not PremiumStorage.store_pairing_started(
                 request_id=operation["start_request_id"],
                 pairing_id=pairing_id,
                 code=code,
-                expires_at=expires_at,
+                expires_at=local_now + remaining,
             ):
                 return False, "Не удалось сохранить код сопряжения.", None
             return (
