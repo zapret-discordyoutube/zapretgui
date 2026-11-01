@@ -25,6 +25,7 @@ class HostsFeature:
     create_file_save_worker: Callable
     load_geo_sites: Callable
     load_geo_services_for_site_list: Callable
+    load_geo_services_for_name: Callable
 
 
 def build_hosts_feature() -> HostsFeature:
@@ -128,4 +129,6 @@ def build_hosts_feature() -> HostsFeature:
         load_geo_sites=lambda: _public().load_geo_sites(),
         # Гео-сервисы, которым посвящён список сайтов. Тоже читает каталог с диска.
         load_geo_services_for_site_list=lambda text: _public().load_geo_services_for_site_list(text),
+        # Гео-сервисы, на которые похоже название профиля («gemini»). Тоже читает каталог с диска.
+        load_geo_services_for_name=lambda name: _public().load_geo_services_for_name(name),
     )

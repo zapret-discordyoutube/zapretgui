@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from PyQt6.QtCore import QTimer
 from qfluentwidgets import BodyLabel, CaptionLabel, ComboBox, LineEdit, SubtitleLabel
 from ui.fluent_dialog import MessageBoxBase
 
@@ -47,6 +50,9 @@ class CreateUserProfileDialog(MessageBoxBase):
         name: str = "",
         protocol: str = "tcp",
         ports: str = "",
+        create_geo_worker=None,
+        open_hosts_editor=None,
+        open_dns_settings=None,
     ):
         if parent is not None and not parent.isWindow():
             parent = parent.window()
@@ -97,6 +103,49 @@ class CreateUserProfileDialog(MessageBoxBase):
         self.nameEdit.returnPressed.connect(self._validate_and_accept)
         self.portsEdit.returnPressed.connect(self._validate_and_accept)
         self.protocolCombo.currentIndexChanged.connect(self._update_protocol_ui)
+        self._geo_notice = self._build_geo_notice(create_geo_worker, open_hosts_editor, open_dns_settings)
+
+    def _build_geo_notice(self, create_geo_worker, open_hosts_editor, open_dns_settings):
+        """Название похоже на гео-сервис («gemini» → Gemini AI): та же карточка, что на странице профиля.
+
+        Окно накрывает всю программу, поэтому карточка встаёт в тот же правый
+        нижний угол. Кнопки карточки закрывают окно и открывают нужный раздел.
+        """
+        if create_geo_worker is None:
+            return None
+        from profile.ui.profile_geo_notice import ProfileGeoNotice
+
+        notice = ProfileGeoNotice(
+            self,
+            create_worker=create_geo_worker,
+            open_hosts_editor=self._leave_for(open_hosts_editor) if open_hosts_editor is not None else None,
+            open_dns_settings=self._leave_for(open_dns_settings) if open_dns_settings is not None else None,
+        )
+        self.nameEdit.textChanged.connect(self._check_geo_name)
+        self._geo_notice = notice
+        self._check_geo_name()
+        return notice
+
+    def _leave_for(self, open_page):
+        def _leave() -> None:
+            self.reject()
+            # Раздел открывается, когда окно уже закрыто.
+            QTimer.singleShot(0, open_page)
+
+        return _leave
+
+    def _check_geo_name(self, *_args) -> None:
+        name = self.nameEdit.text().strip()
+        if not name:
+            self._geo_notice.show_services(())
+            return
+        self._geo_notice.request(name, SimpleNamespace(display_name=name, match_lines=()), keep_shown=True)
+
+    def done(self, code) -> None:  # noqa: N802 (Qt API)
+        if self._geo_notice is not None:
+            # Окно удаляется сразу после закрытия — проверка в его потоке должна закончиться раньше.
+            self._geo_notice.cleanup(blocking=True)
+        super().done(code)
 
     def values(self) -> tuple[str, str, str]:
         protocol = str(self.protocolCombo.itemData(self.protocolCombo.currentIndex()) or "tcp")

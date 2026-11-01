@@ -169,6 +169,9 @@ class PresetSetupPageBase(BasePage):
         open_profile_order,
         ui_state_store=None,
         create_profile_display_order_notice_worker=None,
+        create_profile_name_geo_worker=None,
+        open_hosts_editor=None,
+        open_dns_settings=None,
     ):
         super().__init__(
             title=self.page_title,
@@ -189,6 +192,11 @@ class PresetSetupPageBase(BasePage):
         self._create_profile_display_order_notice_worker_fn = create_profile_display_order_notice_worker
         self._open_profile_setup = open_profile_setup
         self._open_profile_order_page = open_profile_order
+        # Окно «Добавить / Изменить profile» узнаёт гео-сервис по названию и
+        # показывает ту же карточку, что страница профиля.
+        self._create_profile_name_geo_worker_fn = create_profile_name_geo_worker
+        self._open_hosts_editor = open_hosts_editor
+        self._open_dns_settings = open_dns_settings
 
         self._profiles_list: ProfilesList | None = None
         self._empty_state_label = None
@@ -1003,6 +1011,9 @@ class PresetSetupPageBase(BasePage):
             name=str(getattr(item, "display_name", "") or ""),
             protocol=protocol,
             ports=ports,
+            create_geo_worker=self._create_profile_name_geo_worker_fn,
+            open_hosts_editor=self._open_hosts_editor,
+            open_dns_settings=self._open_dns_settings,
         )
         if not dialog.exec():
             return
@@ -1604,7 +1615,12 @@ class PresetSetupPageBase(BasePage):
         box.exec()
 
     def _on_add_user_profile_clicked(self) -> None:
-        dialog = CreateUserProfileDialog(self)
+        dialog = CreateUserProfileDialog(
+            self,
+            create_geo_worker=self._create_profile_name_geo_worker_fn,
+            open_hosts_editor=self._open_hosts_editor,
+            open_dns_settings=self._open_dns_settings,
+        )
         if not dialog.exec():
             return
         name, protocol, ports = dialog.values()

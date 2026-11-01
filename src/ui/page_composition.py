@@ -62,13 +62,13 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
     ),
     PageName.ZAPRET2_PRESET_SETUP: PageDepsSpec(
         build_preset_setup_page_kwargs,
-        features=("profile", "external_actions"),
+        features=("profile", "external_actions", "hosts"),
         actions=("open_profile_setup", "show_page"),
         include_ui_state_store=True,
     ),
     PageName.ZAPRET1_PRESET_SETUP: PageDepsSpec(
         build_preset_setup_page_kwargs,
-        features=("profile", "external_actions"),
+        features=("profile", "external_actions", "hosts"),
         actions=("open_profile_setup", "show_page"),
         include_ui_state_store=True,
     ),

@@ -97,6 +97,28 @@ def build_control_page_kwargs(
     return kwargs
 
 
+def _profile_name_geo_worker_factory(hosts_feature):
+    """Проверка названия в окне «Добавить / Изменить profile»: похоже ли оно на гео-сервис.
+
+    «gemini» → Gemini AI: окно показывает ту же карточку, что страница профиля.
+    """
+    if hosts_feature is None:
+        return None
+
+    def _create(request_id: int, name: str, _profile_name: str = "", parent=None):
+        from profile.profile_geo_loader import ProfileGeoServicesWorker
+
+        return ProfileGeoServicesWorker(
+            request_id,
+            lambda key, _name: tuple(hosts_feature.load_geo_services_for_name(key)),
+            name,
+            "",
+            parent,
+        )
+
+    return _create
+
+
 def build_preset_setup_page_kwargs(
     *,
     page_name: PageName,
@@ -105,6 +127,7 @@ def build_preset_setup_page_kwargs(
     open_profile_setup,
     show_page,
     ui_state_store,
+    hosts_feature=None,
 ) -> dict:
     method = ZAPRET2_MODE if page_name == PageName.ZAPRET2_PRESET_SETUP else ZAPRET1_MODE
     return {
@@ -120,6 +143,9 @@ def build_preset_setup_page_kwargs(
         "create_profile_request_form_open_worker": external_actions_feature.create_open_url_worker,
         "open_profile_setup": lambda profile_key, m=method: open_profile_setup(m, profile_key),
         "open_profile_order": lambda m=method: show_page(resolve_profile_order_page_for_method(m), allow_internal=True),
+        "create_profile_name_geo_worker": _profile_name_geo_worker_factory(hosts_feature),
+        "open_hosts_editor": lambda: show_page(PageName.HOSTS),
+        "open_dns_settings": lambda: show_page(PageName.NETWORK),
         "ui_state_store": ui_state_store,
     }
 
@@ -135,18 +161,23 @@ def build_profile_setup_page_kwargs(
 ) -> dict:
     method = ZAPRET2_MODE if page_name == PageName.ZAPRET2_PROFILE_SETUP else ZAPRET1_MODE
 
-    def _load_profile_geo_services(profile_key: str, m=method) -> tuple[str, ...]:
+    def _load_profile_geo_services(profile_key: str, profile_name: str = "", m=method) -> tuple[str, ...]:
         # Гео-сервис сам закрыт для России: по списку сайтов профиля страница
         # подсказывает, что ему нужен hosts или DNS, а не перебор стратегий.
+        # Список пуст или не про гео-сервис — смотрим на название («gemini»).
         state = profile_feature.get_profile_list_file_editor_state(m, profile_key)
-        if state is None or str(getattr(state, "kind", "") or "") != "hostlist":
+        if state is not None and str(getattr(state, "kind", "") or "") == "hostlist":
+            found = tuple(hosts_feature.load_geo_services_for_site_list(str(getattr(state, "text", "") or "")))
+            if found:
+                return found
+        if not str(profile_name or "").strip():
             return ()
-        return tuple(hosts_feature.load_geo_services_for_site_list(str(getattr(state, "text", "") or "")))
+        return tuple(hosts_feature.load_geo_services_for_name(profile_name))
 
-    def _create_profile_geo_services_worker(request_id: int, profile_key: str, parent=None):
+    def _create_profile_geo_services_worker(request_id: int, profile_key: str, profile_name: str = "", parent=None):
         from profile.profile_geo_loader import ProfileGeoServicesWorker
 
-        return ProfileGeoServicesWorker(request_id, _load_profile_geo_services, profile_key, parent)
+        return ProfileGeoServicesWorker(request_id, _load_profile_geo_services, profile_key, profile_name, parent)
 
     profiles_page = (
         PageName.ZAPRET2_PRESET_SETUP
@@ -170,6 +201,7 @@ def build_profile_setup_page_kwargs(
         "create_profile_geo_services_worker": (
             _create_profile_geo_services_worker if hosts_feature is not None else None
         ),
+        "create_profile_name_geo_worker": _profile_name_geo_worker_factory(hosts_feature),
         "open_hosts_editor": lambda: show_page(PageName.HOSTS),
         "open_dns_settings": lambda: show_page(PageName.NETWORK),
         "open_profiles": lambda page=profiles_page: show_page(page, allow_internal=True, up=True),

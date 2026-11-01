@@ -5389,17 +5389,9 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "ru": "Отмена",
         "en": "Cancel",
     },
-    "page.strategy_scan.geo_site.notice": {
-        "ru": "{service} сам ограничивает доступ из России — стратегия Zapret его не чинит, подбор ничего не найдёт. Включите для него DNS-профиль в «Редакторе hosts» или смените DNS в «Настройке DNS».",
-        "en": "{service} restricts access from Russia on its own side — a Zapret strategy cannot fix it and the search will find nothing. Turn on a DNS profile for it in the Hosts editor or change DNS in DNS settings.",
-    },
     "page.strategy_scan.geo_site.open_hosts": {
         "ru": "Открыть «Редактор hosts»",
         "en": "Open the Hosts editor",
-    },
-    "page.strategy_scan.geo_site.open_dns": {
-        "ru": "Настройка DNS",
-        "en": "DNS settings",
     },
     "page.strategy_scan.geo_site.question_title": {
         "ru": "Стратегия здесь не поможет",

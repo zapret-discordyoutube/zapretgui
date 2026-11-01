@@ -375,6 +375,7 @@ class ProfileSetupPageBase(BasePage):
         create_profile_strategy_open_group_save_worker=None,
         create_profile_strategy_grouping_save_worker=None,
         create_profile_geo_services_worker=None,
+        create_profile_name_geo_worker=None,
         open_hosts_editor=None,
         open_dns_settings=None,
     ):
@@ -407,6 +408,7 @@ class ProfileSetupPageBase(BasePage):
         # Гео-сервису (сам закрыт для России) помогают hosts и DNS, а не
         # стратегия: страница говорит об этом всплывающей карточкой.
         self._create_profile_geo_services_worker_fn = create_profile_geo_services_worker
+        self._create_profile_name_geo_worker_fn = create_profile_name_geo_worker
         self._open_hosts_editor = open_hosts_editor
         self._open_dns_settings = open_dns_settings
         self._open_profiles = open_profiles
@@ -1361,6 +1363,9 @@ class ProfileSetupPageBase(BasePage):
             name=str(getattr(item, "display_name", "") or ""),
             protocol=protocol,
             ports=ports,
+            create_geo_worker=self._create_profile_name_geo_worker_fn,
+            open_hosts_editor=self._open_hosts_editor,
+            open_dns_settings=self._open_dns_settings,
         )
         if not dialog.exec():
             return

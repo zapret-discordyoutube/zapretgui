@@ -95,13 +95,10 @@ class StrategyScanGeoPlanTests(unittest.TestCase):
         self.assertEqual(service("tcp_https", "claude.ai", geo_sites=None), "")
 
     def test_texts_name_the_service_and_the_real_fix(self) -> None:
-        notice = plans.geo_site_notice_text("Claude", language="ru")
         question = plans.geo_site_question_text("Claude", "https://claude.ai/chats", language="ru")
 
-        for text in (notice, question):
-            self.assertIn("Claude", text)
-            self.assertIn("Редактор", text)
-            self.assertIn("DNS", text)
+        self.assertIn("Редактор", question)
+        self.assertIn("DNS", question)
         self.assertIn("claude.ai — это Claude", question)
 
 
@@ -138,35 +135,43 @@ class StrategyScanPageGeoWarningTests(unittest.TestCase):
         page._on_geo_sites_loaded(page._geo_sites_runtime.request_id, _GEO_SITES)
         return page
 
+    def test_notice_is_the_shared_geo_card(self) -> None:
+        # Та же всплывающая карточка, что на странице профиля, а не своя плашка под полем.
+        from profile.ui.profile_geo_notice import ProfileGeoNotice
+
+        page = self._page()
+        self.assertIsInstance(page._geo_notice, ProfileGeoNotice)
+        self.assertIs(page._geo_notice.card.parent(), page)
+
     def test_notice_follows_the_target(self) -> None:
         page = self._page()
-        notice = page._geo_notice
+        card = page._geo_notice.card
 
-        self.assertTrue(notice.isHidden())  # discord.com по умолчанию
+        self.assertTrue(card.isHidden())  # discord.com по умолчанию
 
         page._on_pick_quick_domain("claude.ai")
-        self.assertFalse(notice.isHidden())
-        self.assertIn("Claude сам ограничивает доступ из России", notice.text())
-        self.assertIn("Предупреждение", notice.notice.property("screenReaderStateText"))
+        self.assertFalse(card.isHidden())
+        self.assertEqual(card.title_label.text(), "Claude: стратегия не поможет")
+        self.assertIn("Этот сервис сам не пускает посетителей из России", card.text_label.text())
 
         page._target_input.setText("discord.com")
-        self.assertTrue(notice.isHidden())
+        self.assertTrue(card.isHidden())
 
     def test_notice_is_only_for_sites(self) -> None:
         page = self._page()
         page._target_input.setText("claude.ai")
-        self.assertFalse(page._geo_notice.isHidden())
+        self.assertFalse(page._geo_notice.card.isHidden())
 
         page._protocol_combo.setCurrentIndex(page._protocol_combo.findData("stun_voice"))
 
-        self.assertTrue(page._geo_notice.isHidden())
+        self.assertTrue(page._geo_notice.card.isHidden())
 
     def test_notice_buttons_open_hosts_and_dns(self) -> None:
         page = self._page()
         page._target_input.setText("claude.ai")
 
-        page._geo_notice.hosts_button.click()
-        page._geo_notice.dns_button.click()
+        page._geo_notice.card.hosts_button.click()
+        page._geo_notice.card.dns_button.click()
 
         self.assertEqual(self.opened, ["hosts", "dns"])
 
@@ -177,7 +182,7 @@ class StrategyScanPageGeoWarningTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
         page._target_input.setText("claude.ai")
 
-        self.assertTrue(page._geo_notice.isHidden())
+        self.assertTrue(page._geo_notice.card.isHidden())
         self.assertTrue(page._confirm_geo_site_scan())
 
     def _confirm(self, page, press: str):

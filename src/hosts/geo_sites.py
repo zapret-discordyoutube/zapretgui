@@ -7,6 +7,7 @@ Zapret им не помогает. Помогает DNS-профиль в «Ре
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -14,6 +15,71 @@ from typing import Mapping
 def _site_key(host: object) -> str:
     value = str(host or "").strip().lower().rstrip(".")
     return value[4:] if value.startswith("www.") else value
+
+
+# Отдельное слово названия сервиса считается его именем, только если оно не
+# короче этого: «AI», «Ray», «Web» встречаются в чужих названиях профилей.
+_NAME_WORD_MIN_LEN = 4
+
+
+# Как сервисы называют в жизни: по-русски и сокращённо. Слева — что человек
+# напишет в названии профиля, справа — слово из названия сервиса в каталоге.
+# Пробелы внутри не нужны: «чат гпт» сравнивается и слитно.
+_NAME_ALIASES = {
+    "gpt": "chatgpt",
+    "гпт": "chatgpt",
+    "жпт": "chatgpt",
+    "чатгпт": "chatgpt",
+    "чатжпт": "chatgpt",
+    "чатгбт": "chatgpt",
+    "чатджипити": "chatgpt",
+    "чатжипити": "chatgpt",
+    "опенаи": "openai",
+    "опенай": "openai",
+    "сора": "sora",
+    "джемини": "gemini",
+    "джеммини": "gemini",
+    "гемини": "gemini",
+    "геминай": "gemini",
+    "джеминай": "gemini",
+    "клод": "claude",
+    "клоуд": "claude",
+    "клауд": "claude",
+    "грок": "grok",
+    "копилот": "copilot",
+    "копайлот": "copilot",
+    "мета": "meta",
+    "манус": "manus",
+    "курсор": "cursor",
+    "виндсерф": "windsurf",
+    "опенроутер": "openrouter",
+    "дипл": "deepl",
+    "ноушн": "notion",
+    "ноушен": "notion",
+    "спотифай": "spotify",
+    "спотик": "spotify",
+    "твич": "twitch",
+    "канва": "canva",
+    "капкут": "capcut",
+}
+
+
+def _name_words(text: object) -> list[str]:
+    return re.findall(r"[0-9a-zа-яё]+", str(text or "").casefold())
+
+
+def _service_name_keys(service_name: str) -> set[str]:
+    """Слова, по которым название профиля узнаётся как этот сервис.
+
+    «Gemini AI» → gemini, geminiai; «ChatGPT & Sora (OpenAI)» → chatgpt, sora,
+    openai, chatgptsora. Всё название слитно («AMD», «Formula 1») — тоже ключ.
+    """
+    main = str(service_name or "").split("(", 1)[0]
+    keys = {word for word in _name_words(service_name) if len(word) >= _NAME_WORD_MIN_LEN}
+    joined = "".join(_name_words(main))
+    if joined:
+        keys.add(joined)
+    return keys
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +96,16 @@ class GeoSites:
             if service:
                 return service
         return ""
+
+    def services_for_name(self, name: str) -> tuple[str, ...]:
+        """Гео-сервисы, на которые похоже название нового профиля («gemini» → «Gemini AI»)."""
+        words = _name_words(name)
+        if not words:
+            return ()
+        typed = set(words) | {"".join(words)}
+        typed |= {_NAME_ALIASES[word] for word in typed if word in _NAME_ALIASES}
+        found = {service for service in self.service_by_site.values() if typed & _service_name_keys(service)}
+        return tuple(sorted(found))
 
 
 def build_geo_sites(profile_index: Mapping[str, object]) -> GeoSites:
@@ -85,10 +161,16 @@ def load_geo_services_for_site_list(text: str) -> tuple[str, ...]:
     return geo_services_for_site_list(load_geo_sites(), text)
 
 
+def load_geo_services_for_name(name: str) -> tuple[str, ...]:
+    """Читает каталог hosts (файл) — звать вне UI-потока."""
+    return load_geo_sites().services_for_name(name)
+
+
 __all__ = [
     "GeoSites",
     "build_geo_sites",
     "geo_services_for_site_list",
+    "load_geo_services_for_name",
     "load_geo_services_for_site_list",
     "load_geo_sites",
 ]

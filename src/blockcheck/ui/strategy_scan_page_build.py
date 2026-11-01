@@ -21,7 +21,6 @@ from blockcheck.ui.quick_service_cards import QuickServiceCards
 from blockcheck.ui.strategy_scan_widgets import (
     ChoiceRadios,
     ChoiceTiles,
-    GeoSiteNotice,
     ScanProgressPanel,
     StrategyResultsView,
 )
@@ -43,7 +42,6 @@ class StrategyScanControlWidgets:
     target_input: object
     quick_domain_btn: object
     quick_cards: object
-    geo_notice: object
     udp_scope_hint_label: object
     start_btn: object
     stop_btn: object
@@ -154,15 +152,6 @@ def build_strategy_scan_control_section(
     quick_cards.picked.connect(on_pick_quick_service)
     control_card.add_widget(quick_cards)
 
-    # Выбран гео-сайт: стратегия его не чинит, нужен hosts или DNS.
-    geo_notice = GeoSiteNotice()
-    geo_notice.set_button_texts(
-        tr_fn("page.strategy_scan.geo_site.open_hosts", "Открыть «Редактор hosts»"),
-        tr_fn("page.strategy_scan.geo_site.open_dns", "Настройка DNS"),
-    )
-    control_card.add_widget(geo_notice)
-    geo_notice.setVisible(False)
-
     udp_scope_hint_label = CaptionLabel("")
     udp_scope_hint_label.setWordWrap(True)
     control_card.add_widget(udp_scope_hint_label)
@@ -218,7 +207,6 @@ def build_strategy_scan_control_section(
         target_input=target_input,
         quick_domain_btn=quick_domain_btn,
         quick_cards=quick_cards,
-        geo_notice=geo_notice,
         udp_scope_hint_label=udp_scope_hint_label,
         start_btn=start_btn,
         stop_btn=stop_btn,

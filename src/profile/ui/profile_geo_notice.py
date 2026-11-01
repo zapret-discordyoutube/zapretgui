@@ -1,4 +1,4 @@
-"""Всплывающая подсказка на странице профиля: это гео-сервис, стратегия ему не поможет.
+"""Всплывающая подсказка: это гео-сервис, стратегия ему не поможет.
 
 Гео-сервис сам не пускает посетителей из России (ChatGPT, Gemini, Spotify).
 Провайдер его не режет, поэтому перебор готовых стратегий ничего не даст —
@@ -7,6 +7,11 @@
 Подсказка — отдельная карточка поверх страницы, в правом нижнем углу: её
 видно сразу, но места у списка стратегий она не отнимает. Закрытая крестиком
 карточка для этого сервиса больше не появляется до перезапуска программы.
+
+Та же карточка — единственное предупреждение про гео-сервис во всей
+программе: её показывают окно «Добавить profile» / «Изменить profile», когда
+название похоже на гео-сервис («gemini» → Gemini AI), и вкладка «Подбор
+стратегии», когда в поле цели адрес гео-сервиса.
 """
 
 from __future__ import annotations
@@ -347,8 +352,8 @@ EXAMPLE_SERVICES = ("Gemini",)
 class ProfileGeoNotice(QObject):
     """Решает, показывать ли карточку открытому профилю, и держит её в углу страницы.
 
-    Список сайтов профиля сверяется с каталогом hosts в фоне; сюда приходит
-    готовый ответ — названия гео-сервисов или пусто.
+    Список сайтов и название профиля сверяются с каталогом hosts в фоне; сюда
+    приходит готовый ответ — названия гео-сервисов или пусто.
     """
 
     def __init__(
@@ -367,6 +372,7 @@ class ProfileGeoNotice(QObject):
         self._runtime = OneShotWorkerRuntime()
         self._cleanup_in_progress = False
         self._profile_key = ""
+        self._profile_name = ""
         self._services: tuple[str, ...] = ()
         # Сервисы, чью карточку человек закрыл крестиком в этом запуске программы.
         self._dismissed: set[tuple[str, ...]] = set()
@@ -382,36 +388,53 @@ class ProfileGeoNotice(QObject):
         self.card.close_clicked.connect(self._on_close)
         host.installEventFilter(self)
 
-    def request(self, profile_key: str, item=None) -> None:
+    def request(self, profile_key: str, item=None, *, keep_shown: bool = False) -> None:
         """Профиль открыт или перечитан: проверить его список сайтов в фоне.
 
-        ``item`` — строка профиля: по её названию и условиям берётся значок.
+        ``item`` — строка профиля: по её названию и условиям берётся значок,
+        по названию же узнаётся гео-сервис, если список сайтов пуст.
+        ``keep_shown`` — ключ сменился, но речь о том же профиле (человек
+        печатает название): карточка не мигает, её снимет ответ проверки.
         """
         key = str(profile_key or "").strip()
-        if key != self._profile_key:
+        if key != self._profile_key and not (keep_shown and key):
             # Карточка прошлого профиля не должна висеть над новым.
             self._hide()
         self._profile_key = key
-        if item is not None:
-            icon = resolve_profile_icon(
-                getattr(item, "display_name", ""),
-                tuple(getattr(item, "match_lines", ()) or ()),
-            )
-            self.card.set_site_icon(icon.icon_name, icon.color)
-        else:
-            self.card.set_site_icon("", "")
+        self._profile_name = str(getattr(item, "display_name", "") or "").strip()
+        self._set_icon(item)
         if self._create_worker is None or not key or self._cleanup_in_progress:
             self._check_timer.stop()
             return
         # Перезапуск таймера: несколько перечитываний подряд дают одну проверку.
         self._check_timer.start()
 
+    def show_services(self, services, item=None) -> None:
+        """Готовый ответ без фоновой проверки: хозяин сам знает гео-сервис (пусто — убрать карточку).
+
+        ``item`` — откуда брать значок (``display_name``, ``match_lines``); без него глобус.
+        """
+        self._check_timer.stop()
+        self._set_icon(item)
+        self._show_found(services)
+
+    def _set_icon(self, item) -> None:
+        if item is None:
+            self.card.set_site_icon("", "")
+            return
+        icon = resolve_profile_icon(
+            getattr(item, "display_name", ""),
+            tuple(getattr(item, "match_lines", ()) or ()),
+        )
+        self.card.set_site_icon(icon.icon_name, icon.color)
+
     def _start_check(self) -> None:
         key = self._profile_key
+        name = self._profile_name
         if self._create_worker is None or not key or self._cleanup_in_progress:
             return
         self._runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self._create_worker(request_id, key, self._host),
+            worker_factory=lambda request_id: self._create_worker(request_id, key, name, self._host),
             on_loaded=self._on_loaded,
         )
 
@@ -419,6 +442,11 @@ class ProfileGeoNotice(QObject):
         if not self._runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
             return
         if str(profile_key or "") != self._profile_key:
+            return
+        self._show_found(services)
+
+    def _show_found(self, services) -> None:
+        if self._cleanup_in_progress:
             return
         found = tuple(str(name) for name in (services or ()) if str(name or "").strip())
         if not found or found in self._dismissed:
@@ -472,10 +500,11 @@ class ProfileGeoNotice(QObject):
             self.card.place()
         return False
 
-    def cleanup(self) -> None:
+    def cleanup(self, *, blocking: bool = False) -> None:
+        """``blocking`` — дождаться проверки: хозяин карточки (окно) сейчас удалится вместе с потоком."""
         self._cleanup_in_progress = True
         self._check_timer.stop()
-        self._runtime.stop(blocking=False, warning_prefix="profile geo notice worker")
+        self._runtime.stop(blocking=blocking, warning_prefix="profile geo notice worker")
         self._runtime.cancel()
         self.card.dismiss()
 

@@ -14,6 +14,7 @@ from blockcheck.strategy_scan_state import (
 from blockcheck.strategy_search.probe_profile import PROTOCOL_TCP_HTTPS, PROTOCOL_UDP_GAMES
 import logging
 from collections import deque
+from types import SimpleNamespace
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -224,11 +225,15 @@ class StrategyScanPage(BasePage):
         self._target_input = control_widgets.target_input
         self._quick_domain_btn = control_widgets.quick_domain_btn
         self._quick_cards = control_widgets.quick_cards
-        self._geo_notice = control_widgets.geo_notice
-        self._geo_notice.hosts_button.setVisible(self._open_hosts_editor is not None)
-        self._geo_notice.dns_button.setVisible(self._open_dns_settings is not None)
-        self._geo_notice.open_hosts_clicked.connect(self._open_hosts_editor_for_geo_site)
-        self._geo_notice.open_dns_clicked.connect(self._open_dns_settings_for_geo_site)
+        # Выбран гео-сайт: стратегия его не чинит, нужен hosts или DNS. Это та же
+        # всплывающая карточка, что на странице профиля, — в правом нижнем углу.
+        from profile.ui.profile_geo_notice import ProfileGeoNotice
+
+        self._geo_notice = ProfileGeoNotice(
+            self,
+            open_hosts_editor=self._open_hosts_editor_for_geo_site,
+            open_dns_settings=self._open_dns_settings_for_geo_site,
+        )
         self._target_input.textChanged.connect(self._refresh_geo_notice)
         # Карточка сервиса подсвечивается, когда его адрес стоит в поле, в том числе после ручного ввода.
         self._target_input.textChanged.connect(self._quick_cards.set_target)
@@ -315,12 +320,11 @@ class StrategyScanPage(BasePage):
     def _refresh_geo_notice(self, *_args) -> None:
         if self._geo_notice is None:
             return
-        from blockcheck.strategy_scan_page_plans import geo_site_notice_text
-
         service = self._geo_service_for_target()
-        if service:
-            self._geo_notice.set_text(geo_site_notice_text(service, language=self._ui_language))
-        self._geo_notice.setVisible(bool(service))
+        if not service:
+            self._geo_notice.show_services(())
+            return
+        self._geo_notice.show_services((service,), SimpleNamespace(display_name=service, match_lines=()))
 
     def _open_hosts_editor_for_geo_site(self) -> None:
         if self._open_hosts_editor is not None:
@@ -1634,6 +1638,8 @@ class StrategyScanPage(BasePage):
             warning_prefix="strategy scan geo sites worker",
         )
         self._geo_sites_runtime.cancel()
+        if self._geo_notice is not None:
+            self._geo_notice.cleanup()
         self._strategy_apply_runtime.stop(
             blocking=False,
             warning_prefix="strategy scan apply worker",

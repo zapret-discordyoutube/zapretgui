@@ -1,4 +1,4 @@
-"""Фоновая проверка: посвящён ли список сайтов профиля гео-сервису.
+"""Фоновая проверка: посвящён ли профиль гео-сервису (по списку сайтов или названию).
 
 Гео-сервис сам не пускает посетителей из России (ChatGPT, Gemini, Spotify).
 Стратегия Zapret ему не помогает — помогает DNS-профиль в «Редакторе hosts»
@@ -24,18 +24,20 @@ class ProfileGeoServicesWorker(QThread):
     def __init__(
         self,
         request_id: int,
-        load_geo_services: Callable[[str], tuple[str, ...]],
+        load_geo_services: Callable[[str, str], tuple[str, ...]],
         profile_key: str,
+        profile_name: str = "",
         parent=None,
     ):
         super().__init__(parent)
         self._request_id = int(request_id)
         self._load_geo_services = load_geo_services
         self._profile_key = str(profile_key or "").strip()
+        self._profile_name = str(profile_name or "").strip()
 
     def run(self) -> None:
         try:
-            services = tuple(self._load_geo_services(self._profile_key) or ())
+            services = tuple(self._load_geo_services(self._profile_key, self._profile_name) or ())
         except Exception as exc:
             # Подсказка необязательна: без неё страница профиля работает как раньше.
             log(f"ProfileGeoServicesWorker: не удалось проверить список сайтов profile: {exc}", "WARNING")
