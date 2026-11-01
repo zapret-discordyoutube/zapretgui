@@ -406,6 +406,7 @@ class MaxBlockerManager:
         """
         Добавляет блокировку доменов MAX в файл hosts
         """
+        from hosts.commands import hosts_write_lock
         from hosts.hosts import safe_read_hosts_file, safe_write_hosts_file
 
         blocked_domains = [
@@ -420,30 +421,31 @@ class MaxBlockerManager:
         ]
 
         try:
-            # Общий читатель hosts: путь берётся из SystemRoot (Windows может
-            # стоять не на C:), а файл в cp1251 тоже читается.
-            content = safe_read_hosts_file()
-            if content is None:
-                log("Файл hosts не читается: блокировка MAX не добавлена", "❌ ERROR")
-                return False
+            with hosts_write_lock():
+                # Общий читатель hosts: путь берётся из SystemRoot (Windows может
+                # стоять не на C:), а файл в cp1251 тоже читается.
+                content = safe_read_hosts_file()
+                if content is None:
+                    log("Файл hosts не читается: блокировка MAX не добавлена", "❌ ERROR")
+                    return False
 
-            if _MAX_HOSTS_BEGIN in content:
+                if _MAX_HOSTS_BEGIN in content:
+                    return True
+
+                new_entries = [_MAX_HOSTS_BEGIN]
+                for domain in blocked_domains:
+                    new_entries.append(f"127.0.0.1 {domain}")
+                    new_entries.append(f"::1 {domain}")
+                new_entries.append(_MAX_HOSTS_END)
+
+                prefix = content
+                if prefix and not prefix.endswith("\n"):
+                    prefix += "\n"
+                if not safe_write_hosts_file(prefix + "\n" + "\n".join(new_entries) + "\n"):
+                    return False
+
+                log("Домены MAX добавлены в hosts файл", "✅ INFO")
                 return True
-
-            new_entries = [_MAX_HOSTS_BEGIN]
-            for domain in blocked_domains:
-                new_entries.append(f"127.0.0.1 {domain}")
-                new_entries.append(f"::1 {domain}")
-            new_entries.append(_MAX_HOSTS_END)
-
-            prefix = content
-            if prefix and not prefix.endswith("\n"):
-                prefix += "\n"
-            if not safe_write_hosts_file(prefix + "\n" + "\n".join(new_entries) + "\n"):
-                return False
-
-            log("Домены MAX добавлены в hosts файл", "✅ INFO")
-            return True
 
         except Exception as e:
             log(f"Ошибка изменения hosts файла: {e}", "❌ ERROR")
@@ -453,21 +455,23 @@ class MaxBlockerManager:
         """
         Удаляет блокировку доменов MAX из файла hosts
         """
+        from hosts.commands import hosts_write_lock
         from hosts.hosts import safe_read_hosts_file, safe_write_hosts_file
 
         try:
-            content = safe_read_hosts_file()
-            if content is None:
-                log("Файл hosts не читается: блокировка MAX не снята", "❌ ERROR")
-                return False
-            new_content = _remove_max_hosts_block(content)
-            if new_content == content:
-                return True
-            if not safe_write_hosts_file(new_content):
-                return False
+            with hosts_write_lock():
+                content = safe_read_hosts_file()
+                if content is None:
+                    log("Файл hosts не читается: блокировка MAX не снята", "❌ ERROR")
+                    return False
+                new_content = _remove_max_hosts_block(content)
+                if new_content == content:
+                    return True
+                if not safe_write_hosts_file(new_content):
+                    return False
 
-            log("Домены MAX удалены из hosts файла", "✅ INFO")
-            return True
+                log("Домены MAX удалены из hosts файла", "✅ INFO")
+                return True
 
         except Exception as e:
             log(f"Ошибка изменения hosts файла: {e}", "❌ ERROR")

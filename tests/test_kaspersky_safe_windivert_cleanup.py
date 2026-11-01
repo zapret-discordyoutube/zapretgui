@@ -51,6 +51,32 @@ class KasperskyProbeTests(unittest.TestCase):
         with patch.object(antivirus_probe, "iter_process_names_winapi", side_effect=OSError("boom")):
             self.assertFalse(antivirus_probe.is_kaspersky_present(force_refresh=True))
 
+    def test_strict_probe_raises_when_the_process_snapshot_fails(self) -> None:
+        # Для выгрузки драйвера отказ снимка — не «Kaspersky нет»: драйвер остаётся.
+        from utils import antivirus_probe
+        from utils.windows_process_probe import ProcessSnapshotError
+
+        with patch(
+            "utils.windows_process_probe.iter_process_records_winapi_strict",
+            side_effect=ProcessSnapshotError("snapshot failed"),
+        ):
+            with self.assertRaises(ProcessSnapshotError):
+                antivirus_probe.is_kaspersky_present_strict()
+
+    def test_strict_probe_detects_and_does_not_cache(self) -> None:
+        from utils import antivirus_probe
+
+        with (
+            patch("utils.windows_process_probe.iter_process_records_winapi_strict", return_value=[(1, "explorer.exe"), (2, "AVP.exe")]),
+            patch.object(antivirus_probe, "iter_uninstall_display_names", return_value=[]),
+        ):
+            self.assertTrue(antivirus_probe.is_kaspersky_present_strict())
+        with (
+            patch("utils.windows_process_probe.iter_process_records_winapi_strict", return_value=[(1, "explorer.exe")]),
+            patch.object(antivirus_probe, "iter_uninstall_display_names", return_value=["7-Zip"]),
+        ):
+            self.assertFalse(antivirus_probe.is_kaspersky_present_strict())
+
     def test_result_is_cached_within_ttl(self) -> None:
         from utils import antivirus_probe
 
@@ -115,7 +141,7 @@ class DriverReleaseKasperskySafeTests(unittest.TestCase):
             return winapi.SERVICE_STOPPED
 
         probe = patch(
-            "utils.antivirus_probe.is_kaspersky_present",
+            "utils.antivirus_probe.is_kaspersky_present_strict",
             side_effect=kaspersky_error,
             return_value=kaspersky,
         )

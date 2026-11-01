@@ -43,6 +43,26 @@ def _probe_kaspersky_present() -> bool:
     return False
 
 
+def is_kaspersky_present_strict() -> bool:
+    """Детект Kaspersky для решения «выгружать ли драйвер»: сбой проб — исключение.
+
+    В отличие от ``is_kaspersky_present`` не кэшируется и не превращает отказ
+    снимка процессов в «Kaspersky нет»: выгрузка драйвера рядом с фильтрами
+    Kaspersky вызывала синий экран в tcpip.sys, поэтому при сомнении драйвер
+    остаётся на месте (ошибку вызывающий код читает как «нельзя выгружать»).
+    """
+    from utils.windows_process_probe import iter_process_records_winapi_strict
+
+    for _pid, process_name in iter_process_records_winapi_strict():
+        if str(process_name or "").strip().casefold() in _KASPERSKY_PROCESS_NAMES:
+            return True
+    for product_name in iter_uninstall_display_names():
+        normalized = str(product_name or "").casefold()
+        if any(marker in normalized for marker in _KASPERSKY_NAME_MARKERS):
+            return True
+    return False
+
+
 def is_kaspersky_present(*, force_refresh: bool = False) -> bool:
     global _cached_result, _cached_at
 

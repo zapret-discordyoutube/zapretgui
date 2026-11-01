@@ -31,6 +31,12 @@ STATE_MEDIA_DOMAIN_GROUPS: tuple[StateMediaDomainGroup, ...] = (
 )
 
 
+def _hosts_write_lock():
+    from hosts.commands import hosts_write_lock
+
+    return hosts_write_lock()
+
+
 def get_state_media_domains() -> tuple[str, ...]:
     domains: list[str] = []
     seen: set[str] = set()
@@ -144,12 +150,13 @@ class RussianStateMediaBlockerManager:
 
     def enable_blocking(self) -> tuple[bool, str]:
         self._set_status("Включение блокировки государственных СМИ РФ...")
-        content = self._read_hosts()
-        if content is None:
-            return False, "Не удалось прочитать файл hosts."
-        next_content = build_hosts_content_with_state_media_block(content, enabled=True)
-        if not self._write_hosts(next_content):
-            return False, "Не удалось записать файл hosts. Возможно, нужны права администратора."
+        with _hosts_write_lock():
+            content = self._read_hosts()
+            if content is None:
+                return False, "Не удалось прочитать файл hosts."
+            next_content = build_hosts_content_with_state_media_block(content, enabled=True)
+            if not self._write_hosts(next_content):
+                return False, "Не удалось записать файл hosts. Возможно, нужны права администратора."
         self.set_blocked_memory(True)
         count = len(get_state_media_domains())
         message = f"Блокировка государственных СМИ РФ включена. Добавлено доменов: {count}."
@@ -158,12 +165,13 @@ class RussianStateMediaBlockerManager:
 
     def disable_blocking(self) -> tuple[bool, str]:
         self._set_status("Отключение блокировки государственных СМИ РФ...")
-        content = self._read_hosts()
-        if content is None:
-            return False, "Не удалось прочитать файл hosts."
-        next_content = build_hosts_content_with_state_media_block(content, enabled=False)
-        if not self._write_hosts(next_content):
-            return False, "Не удалось записать файл hosts. Возможно, нужны права администратора."
+        with _hosts_write_lock():
+            content = self._read_hosts()
+            if content is None:
+                return False, "Не удалось прочитать файл hosts."
+            next_content = build_hosts_content_with_state_media_block(content, enabled=False)
+            if not self._write_hosts(next_content):
+                return False, "Не удалось записать файл hosts. Возможно, нужны права администратора."
         self.set_blocked_memory(False)
         message = "Блокировка государственных СМИ РФ отключена. Записи ZapretGUI удалены из hosts."
         self._set_status("Блокировка государственных СМИ РФ отключена")

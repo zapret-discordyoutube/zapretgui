@@ -266,12 +266,15 @@ def add_telegram_hosts() -> tuple[bool, str]:
 
     При ошибке чтения или записи бросает ``TelegramHostsError``.
     """
-    content = _read_hosts_text()
-    new_content = add_telegram_hosts_to_text(content)
+    from hosts.commands import hosts_write_lock
+
     total = len(TELEGRAM_DOMAINS)
-    if new_content == content:
-        return False, f"Все {total} записей Telegram уже прописаны в hosts"
-    _write_hosts_text(new_content)
+    with hosts_write_lock():
+        content = _read_hosts_text()
+        new_content = add_telegram_hosts_to_text(content)
+        if new_content == content:
+            return False, f"Все {total} записей Telegram уже прописаны в hosts"
+        _write_hosts_text(new_content)
     msg = f"Записи Telegram прописаны в hosts: {total}"
     log(f"Telegram hosts: {msg}")
     return True, msg
@@ -283,11 +286,14 @@ def remove_telegram_hosts() -> tuple[bool, str]:
     Если убирать нечего, файл не записывается. При ошибке чтения или записи
     бросает ``TelegramHostsError``.
     """
-    content = _read_hosts_text()
-    new_content = remove_telegram_hosts_from_text(content)
-    if new_content == content:
-        return False, "Записей Telegram в hosts нет"
-    _write_hosts_text(new_content)
+    from hosts.commands import hosts_write_lock
+
+    with hosts_write_lock():
+        content = _read_hosts_text()
+        new_content = remove_telegram_hosts_from_text(content)
+        if new_content == content:
+            return False, "Записей Telegram в hosts нет"
+        _write_hosts_text(new_content)
     msg = "Записи Telegram убраны из hosts"
     log(f"Telegram hosts: {msg}")
     return True, msg

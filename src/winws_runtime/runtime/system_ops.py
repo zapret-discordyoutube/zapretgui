@@ -115,9 +115,9 @@ def _is_kaspersky_present_strict() -> bool:
     выгружается: принудительная выгрузка рядом с фильтрами Kaspersky
     провоцировала синий экран в tcpip.sys.
     """
-    from utils.antivirus_probe import is_kaspersky_present
+    from utils.antivirus_probe import is_kaspersky_present_strict
 
-    return bool(is_kaspersky_present())
+    return bool(is_kaspersky_present_strict())
 
 
 def kill_process_by_pid_runtime(pid: int, *, wait_timeout_ms: int = 3000) -> bool:

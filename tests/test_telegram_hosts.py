@@ -155,6 +155,25 @@ class TelegramHostsFileTests(unittest.TestCase):
         self.assertFalse(changed)
         write.assert_not_called()
 
+    def test_add_and_remove_hold_the_shared_hosts_write_lock(self) -> None:
+        from hosts.commands import hosts_write_lock
+
+        held: list[bool] = []
+
+        def read():
+            held.append(hosts_write_lock().locked())
+            return _USER_LINES
+
+        def write(_content):
+            held.append(hosts_write_lock().locked())
+            return True
+
+        with patch("hosts.public.read_hosts_file", side_effect=read), patch("hosts.public.write_hosts_file", side_effect=write):
+            add_telegram_hosts()
+            remove_telegram_hosts()
+
+        self.assertTrue(held and all(held), held)
+
     def test_remove_without_changes_does_not_write(self) -> None:
         write = Mock(return_value=True)
         with (
