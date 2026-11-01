@@ -775,7 +775,11 @@ class StrategyScanPage(BasePage):
             if cancel_restore is not None:
                 cancel_restore()
             self._strategy_scan_run_runtime.stop()
-            self._on_finished(None)
+            # Это «Отмена», а не сбой: пустой отчёт про None читался бы как
+            # «Ошибка подбора».
+            from blockcheck.scan_models import StrategyScanReport
+
+            self._on_finished(StrategyScanReport(target="", total_tested=0, cancelled=True))
             return
         request_strategy_scan_stop(
             worker=self._strategy_scan_run_runtime.worker,

@@ -309,6 +309,21 @@ class WindowNavigationHistoryTests(unittest.TestCase):
         self.assertEqual(host.where(), (A, ""))
         self.assertEqual([e.page for e in nav.history.entries()], [A, C])
 
+    def test_a_screen_opened_by_the_user_resets_the_remembered_travel_direction(self) -> None:
+        host = self._host()
+        nav = host.navigation_history
+        host.user_opens(A)
+        host.user_opens(B)
+        host.user_opens(C)
+        nav.go_back()
+        self.assertTrue(nav.go_forward())
+        self.assertEqual(nav._last_step, 1)
+
+        # Дальше человек сам открыл экран: шаг «вперёд» по журналу не помнится.
+        host.user_opens(B)
+
+        self.assertEqual(nav._last_step, -1)
+
     def test_picking_a_screen_from_the_list_jumps_straight_to_it(self) -> None:
         host = self._host()
         nav = host.navigation_history

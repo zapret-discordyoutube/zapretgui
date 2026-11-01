@@ -187,6 +187,10 @@ class WindowNavigationHistory:
             history.replace_current(entry)
         else:
             history.visit(entry)
+            if not self._restoring:
+                # Новый экран открыт самим человеком, а не шагом по журналу: прежний
+                # шаг «вперёд» больше не говорит, в какую сторону он шёл.
+                self._last_step = -1
 
     def _current_entry(self) -> HistoryEntry | None:
         try:

@@ -206,9 +206,13 @@ def replace_all(
     replacement: str,
     options: SearchOptions | None = None,
     *,
-    limit: int = MAX_MATCHES,
+    limit: int = 0,
 ) -> ReplaceResult:
-    """Заменяет все совпадения; regex-режим поддерживает обратные ссылки."""
+    """Заменяет все совпадения; regex-режим поддерживает обратные ссылки.
+
+    ``limit`` 0 — без предела: предел в 5000 нужен подсветке, а «Заменить всё»
+    с ним молча заменяло бы только первые 5000 и сообщало бы это как успех.
+    """
     opts = options or SearchOptions()
     pattern, error = compile_query(query, opts)
     if error:
@@ -253,7 +257,12 @@ def expand_replacement(
     target = str(replacement or "")
     if not opts.regex or pattern is None:
         return target
-    found = pattern.match(str(text or ""), match.start, match.end)
+    source = str(text or "")
+    # Конец совпадения не передаётся: с endpos строка обрезается, и опережающая
+    # проверка в шаблоне, например (\w+)(?=:), перестаёт видеть то, что за ней.
+    found = pattern.match(source, match.start)
+    if found is None or found.end() != match.end:
+        found = pattern.match(source, match.start, match.end)
     if found is None:
         return target
     return found.expand(target)

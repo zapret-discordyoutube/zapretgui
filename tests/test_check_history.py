@@ -182,6 +182,18 @@ class ChangesTests(unittest.TestCase):
     def test_no_previous_run_means_nothing_to_compare(self) -> None:
         self.assertEqual(history.describe_changes(None, self._entry(Discord="fail")), [])
 
+    def test_previous_run_skips_runs_with_a_different_zapret_state(self) -> None:
+        on = {"kind": "blockcheck", "title": "Все сайты", "time": "1", "zapret": "on"}
+        off = {"kind": "blockcheck", "title": "Все сайты", "time": "2", "zapret": "off"}
+        unknown = {"kind": "blockcheck", "title": "Все сайты", "time": "3", "zapret": ""}
+        entry = {"kind": "blockcheck", "title": "Все сайты", "zapret": "off"}
+
+        # Прогон при включённом Zapret — не сравнение для прогона без него.
+        self.assertEqual(history.previous_run([on, off], entry)["time"], "2")
+        self.assertIsNone(history.previous_run([on], entry))
+        # Неизвестное состояние сравнению не мешает.
+        self.assertEqual(history.previous_run([on, unknown], entry)["time"], "3")
+
     def test_previous_run_is_the_latest_of_same_kind_and_scope(self) -> None:
         runs = [
             {"kind": "blockcheck", "title": "Все сайты", "time": "1"},

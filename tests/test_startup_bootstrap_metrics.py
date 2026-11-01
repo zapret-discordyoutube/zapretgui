@@ -189,3 +189,35 @@ class StartupBootstrapMetricsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartupAccentFollowsWindowsTests(unittest.TestCase):
+    def test_follow_switch_uses_the_current_windows_accent(self) -> None:
+        from unittest.mock import patch
+
+        from settings import appearance
+
+        with (
+            patch("settings.store.get_accent_color", return_value="#0078d4"),
+            patch("settings.store.get_follow_windows_accent", return_value=True),
+            patch("settings.store.get_windows_system_accent", return_value="#ff0000"),
+        ):
+            self.assertEqual(appearance.load_accent_color().hex_color, "#ff0000")
+
+    def test_saved_accent_is_used_when_the_switch_is_off_or_windows_gives_none(self) -> None:
+        from unittest.mock import patch
+
+        from settings import appearance
+
+        with (
+            patch("settings.store.get_accent_color", return_value="#0078d4"),
+            patch("settings.store.get_follow_windows_accent", return_value=False),
+            patch("settings.store.get_windows_system_accent", return_value="#ff0000"),
+        ):
+            self.assertEqual(appearance.load_accent_color().hex_color, "#0078d4")
+        with (
+            patch("settings.store.get_accent_color", return_value="#0078d4"),
+            patch("settings.store.get_follow_windows_accent", return_value=True),
+            patch("settings.store.get_windows_system_accent", return_value=None),
+        ):
+            self.assertEqual(appearance.load_accent_color().hex_color, "#0078d4")

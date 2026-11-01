@@ -112,6 +112,21 @@ class FindEngineTests(unittest.TestCase):
         self.assertTrue(result.changed)
         self.assertEqual(result.text, "gamma beta gamma")
 
+    def test_replace_all_is_not_cut_at_the_highlight_limit(self) -> None:
+        from ui.code_editor.find_engine import MAX_MATCHES, replace_all
+
+        result = replace_all("x " * (MAX_MATCHES + 1000), "x", "y")
+
+        self.assertEqual(result.count, MAX_MATCHES + 1000)
+        self.assertNotIn("x", result.text)
+
+    def test_replacement_groups_work_with_a_lookahead_in_the_pattern(self) -> None:
+        from ui.code_editor.find_engine import SearchOptions, replace_all
+
+        result = replace_all("name: x", r"(\w+)(?=:)", r"[\1]", SearchOptions(regex=True))
+
+        self.assertEqual(result.text, "[name]: x")
+
     def test_replace_all_expands_regex_groups(self) -> None:
         from ui.code_editor.find_engine import SearchOptions, replace_all
 

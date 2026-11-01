@@ -188,10 +188,21 @@ def same_run_kind(run: dict, entry: dict) -> bool:
 
 
 def previous_run(history: list[dict], entry: dict) -> dict | None:
-    """Последний прошлый прогон того же вида и с тем же набором сайтов."""
+    """Последний прошлый прогон того же вида, с тем же набором сайтов и при том же Zapret.
+
+    Прогон с включённым Zapret и прогон без него не сравниваются: сайт,
+    «переставший открываться» только потому, что Zapret выключили, — не новая
+    блокировка (для этого есть сравнение «с Zapret и без»). Если про Zapret в
+    одной из записей ничего не известно, сравнение разрешено.
+    """
+    mark = str(entry.get("zapret") or "")
     for run in reversed(history):
-        if same_run_kind(run, entry):
-            return run
+        if not same_run_kind(run, entry):
+            continue
+        other = str(run.get("zapret") or "")
+        if mark and other and mark != other:
+            continue
+        return run
     return None
 
 

@@ -50,7 +50,13 @@ class StrategyScanRunRuntimeArchitectureTest(unittest.TestCase):
         # Подбор не начинался: возвращать Zapret нечего, а из очереди он снят.
         worker.cancel_runtime_restore.assert_called_once_with()
         page._strategy_scan_run_runtime.stop.assert_called_once_with()
-        page._on_finished.assert_called_once_with(None)
+        (report,) = page._on_finished.call_args.args
+        self.assertTrue(report.cancelled)
+        # Отмена очереди читается как «Отменено», а не как «Ошибка подбора».
+        from blockcheck.strategy_scan_page_plans import finalize_scan_report
+
+        plan = finalize_scan_report(report, scan_protocol=report.scan_protocol, result_rows=[])
+        self.assertTrue(plan.status_text.startswith("Отменено"), plan.status_text)
 
     def test_exit_during_scan_stops_it_and_reports_the_restore_when_it_finishes(self) -> None:
         page = StrategyScanPage.__new__(StrategyScanPage)

@@ -651,12 +651,25 @@ def save_sidebar_icon_style(style: str) -> AppearanceSidebarIconStylePlan:
 
 
 def load_accent_color() -> AppearanceAccentColorPlan:
+    """Акцент при запуске: сохранённый, а при «Акцент из Windows» — нынешний акцент системы.
+
+    Сохранённый цвет остаётся прежним, пока человек не открыл страницу
+    оформления: без этого программа красилась бы в цвет, который Windows
+    давно сменила, хотя переключатель включён.
+    """
     try:
         from settings.store import get_accent_color
 
         hex_color = get_accent_color()
     except Exception:
         hex_color = None
+    try:
+        from settings.store import get_follow_windows_accent, get_windows_system_accent
+
+        if get_follow_windows_accent():
+            hex_color = get_windows_system_accent() or hex_color
+    except Exception:
+        pass
     return AppearanceAccentColorPlan(hex_color=hex_color)
 
 def save_accent_color(hex_color: str) -> AppearanceAccentColorPlan:

@@ -128,8 +128,27 @@ def cleanup_old_logs(logs_folder, max_files=MAX_LOG_FILES):
 
     return total_deleted, all_errors, total_found
 
+def unique_log_filename(folder: str, filename: str) -> str:
+    """Имя файла лога, которого в папке ещё нет.
+
+    Имя собрано из времени с точностью до секунды, а лог открывается заново
+    («w»): второй запуск в ту же секунду (двойной щелчок, автозапуск плюс ручной
+    запуск) стёр бы начало лога уже работающей программы. Занятое имя
+    получает номер процесса — у двух запусков он разный.
+    """
+    if not os.path.exists(os.path.join(folder, filename)):
+        return filename
+    stem, extension = os.path.splitext(filename)
+    candidate = f"{stem}_{os.getpid()}{extension}"
+    counter = 2
+    while os.path.exists(os.path.join(folder, candidate)):
+        candidate = f"{stem}_{os.getpid()}_{counter}{extension}"
+        counter += 1
+    return candidate
+
+
 # Создаем уникальное имя для текущей сессии
-CURRENT_LOG_FILENAME = get_current_log_filename()
+CURRENT_LOG_FILENAME = unique_log_filename(LOGS_FOLDER, get_current_log_filename())
 LOG_FILE = os.path.join(LOGS_FOLDER, CURRENT_LOG_FILENAME)
 
 

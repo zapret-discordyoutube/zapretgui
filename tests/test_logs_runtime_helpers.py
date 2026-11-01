@@ -39,3 +39,23 @@ class LogsRuntimeHelpersTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UniqueLogFilenameTests(unittest.TestCase):
+    def test_second_launch_in_the_same_second_gets_its_own_file(self) -> None:
+        import os
+        import tempfile
+
+        from log.log import unique_log_filename
+
+        with tempfile.TemporaryDirectory() as folder:
+            name = "zapret_log_2026-11-01_12-00-05.txt"
+            self.assertEqual(unique_log_filename(folder, name), name)
+            open(os.path.join(folder, name), "w").close()
+
+            second = unique_log_filename(folder, name)
+
+            self.assertNotEqual(second, name)
+            self.assertTrue(second.startswith("zapret_log_2026-11-01_12-00-05_") and second.endswith(".txt"))
+            open(os.path.join(folder, second), "w").close()
+            self.assertNotIn(unique_log_filename(folder, name), (name, second))
