@@ -53,6 +53,20 @@ class BuildResourceLayoutTests(unittest.TestCase):
         return reached
 
     @staticmethod
+    def _open_workspace(builder, root: Path, runtime_files: dict[str, bytes] | None = None):
+        """Рабочее место сборки с уже собранным runtime: так его оставляет сборщик."""
+        from build_zapret.build_workspace import BuildWorkspace
+
+        built = root / "built_runtime"
+        built.mkdir()
+        for name, payload in (runtime_files or {"Zapret.exe": b"exe"}).items():
+            (built / name).write_bytes(payload)
+        workspace = BuildWorkspace.at(root / "run")
+        workspace.adopt_runtime(built)
+        builder.workspace = workspace
+        return workspace
+
+    @staticmethod
     def _release_request(release_model, **overrides):
         values = {
             "channel": "dev",
@@ -221,10 +235,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 local_app_data = Path(temp_dir) / "LocalAppData"
-                network_build_dir = Path(r"\\10.20.0.1\zapretgui\private_zapretgui\build_zapret")
+                # Сборка идёт на машине Windows, а проект лежит на сетевом диске:
+                # C-файлы Nuitka всегда на локальном диске, путь проекта не нужен.
                 with (
                     patch.object(nuitka_builder.sys, "platform", "win32"),
-                    patch.object(nuitka_builder, "BUILD_DIR", network_build_dir),
                     patch.dict(os.environ, {"LOCALAPPDATA": str(local_app_data)}),
                 ):
                     work_dir = nuitka_builder._nuitka_work_dir()
@@ -265,7 +279,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         pyinstaller = (PRIVATE_ROOT / "build_zapret" / "pyinstaller_builder.py").read_text(encoding="utf-8")
 
         self.assertNotIn("def cleanup_pyinstaller_temp", pyinstaller)
-        self.assertIn('local_root / "ZapretGUI" / "build_zapret" / "pyinstaller"', pyinstaller)
+        self.assertIn('local_build_root() / "pyinstaller"', pyinstaller)
         self.assertIn("for generated in (work, out):", pyinstaller)
         self.assertIn("main.build Nuitka сохранён", pyinstaller)
 
@@ -436,10 +450,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
         ci = (PRIVATE_ROOT / "build_zapret" / "ci_build.py").read_text(encoding="utf-8")
         readme = (PRIVATE_ROOT / "build_zapret" / "README.md").read_text(encoding="utf-8")
 
-        self.assertIn("out_dir = artifact_root / RUNTIME_DIR_NAME", ci)
+        self.assertIn("workspace = BuildWorkspace.at(artifact_root)", ci)
         self.assertIn('choices=["nuitka", "pyinstaller"]', ci)
         self.assertIn('default="nuitka"', ci)
-        self.assertIn("target_dir=out_dir", ci)
+        self.assertIn("workspace=workspace", ci)
         self.assertIn("<корень установки>\\_internal\\Zapret.exe", readme)
         self.assertIn("Запуск самого приложения из Python-исходников запрещён", readme)
 
@@ -528,18 +542,20 @@ class BuildResourceLayoutTests(unittest.TestCase):
 
             calls: list[str] = []
 
-            def produce(name: str, *, target_dir: Path) -> Path:
+            def produce(name: str, *, workspace) -> Path:
+                # Компилятор собирает во временной папке, а в рабочее место
+                # runtime попадает только через adopt_runtime.
                 calls.append(name)
-                target_dir.mkdir(parents=True, exist_ok=True)
-                exe = target_dir / "Zapret.exe"
-                exe.write_bytes(name.encode("ascii"))
-                return exe
+                built = Path(tempfile.mkdtemp(prefix=f"fake_{name}_"))
+                self.addCleanup(shutil.rmtree, built, True)
+                (built / "Zapret.exe").write_bytes(name.encode("ascii"))
+                return workspace.adopt_runtime(built)
 
-            def fake_nuitka(*_args, target_dir: Path, **_kwargs) -> Path:
-                return produce("nuitka", target_dir=target_dir)
+            def fake_nuitka(*_args, workspace, **_kwargs) -> Path:
+                return produce("nuitka", workspace=workspace)
 
-            def fake_pyinstaller(*_args, target_dir: Path, **_kwargs) -> Path:
-                return produce("pyinstaller", target_dir=target_dir)
+            def fake_pyinstaller(*_args, workspace, **_kwargs) -> Path:
+                return produce("pyinstaller", workspace=workspace)
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 root = Path(temp_dir)
@@ -764,11 +780,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
         installer = self._read_inno_script()
 
         self.assertIn('RUNTIME_DIR_NAME = "_internal"', paths)
-        self.assertIn("target_dir = DIST_RUNTIME_DIR", nuitka)
+        # Оба сборщика кладут runtime в рабочее место сборки одним и тем же вызовом.
+        self.assertIn("workspace.adopt_runtime(dist_dir)", nuitka)
         self.assertIn("contents_directory='.'", pyinstaller)
-        self.assertIn("replace_runtime_output(dist_dir, target_dir)", nuitka)
-        self.assertIn("target_dir = Path(target_dir or DIST_RUNTIME_DIR).resolve()", pyinstaller)
-        self.assertIn("replace_runtime_output(source_runtime_dir, target_dir)", pyinstaller)
+        self.assertIn("workspace.adopt_runtime(source_runtime_dir)", pyinstaller)
         self.assertIn("runtime_stage = stage_root / RUNTIME_DIR_NAME", pipeline)
         self.assertNotIn("_nuitka_runtime", pipeline)
         self.assertNotIn("_nuitka_runtime", installer)
@@ -953,7 +968,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             sys.modules.pop("build_zapret.release_pipeline", None)
             sys.path[:] = old_path
 
-    def test_both_builders_use_strict_atomic_runtime_normalization(self) -> None:
+    def test_installed_runtime_replacement_is_strict_and_atomic(self) -> None:
         old_path = list(sys.path)
         sys.path.insert(0, str(PRIVATE_ROOT))
         try:
@@ -971,7 +986,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 (target / "Zapret.exe").write_bytes(b"old-exe")
                 (target / "old.dll").write_bytes(b"old-dll")
 
-                produced = runtime_output.replace_runtime_output(source, target)
+                produced = runtime_output.replace_installed_runtime(source, target)
 
                 self.assertEqual(produced, target / "Zapret.exe")
                 self.assertEqual(produced.read_bytes(), b"new-exe")
@@ -983,7 +998,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 invalid_source = root / "invalid"
                 invalid_source.mkdir()
                 with self.assertRaisesRegex(FileNotFoundError, "Zapret.exe"):
-                    runtime_output.replace_runtime_output(invalid_source, target)
+                    runtime_output.replace_installed_runtime(invalid_source, target)
 
                 self.assertEqual(produced.read_bytes(), b"new-exe")
         finally:
@@ -996,12 +1011,12 @@ class BuildResourceLayoutTests(unittest.TestCase):
         model = (PRIVATE_ROOT / "build_zapret" / "release_model.py").read_text(encoding="utf-8")
         pipeline = (PRIVATE_ROOT / "build_zapret" / "release_pipeline.py").read_text(encoding="utf-8")
 
-        self.assertIn("produced = replace_runtime_output(source_runtime, target_runtime)", pipeline)
+        self.assertIn("produced = replace_installed_runtime(source_runtime, target_runtime)", pipeline)
         self.assertNotIn("Синхронизация библиотек Nuitka рядом с Zapret.exe", gui)
         self.assertNotIn("def publish_exe_to_telegram", gui)
         self.assertIn("if request.fast_exe and request.publish_telegram:", model)
-        self.assertNotIn("replace_runtime_output(", gui)
-        self.assertNotIn("replace_runtime_output(", cli)
+        self.assertNotIn("replace_installed_runtime(", gui)
+        self.assertNotIn("replace_installed_runtime(", cli)
 
     def test_cli_rejects_publishing_internal_runtime_as_one_exe(self) -> None:
         old_path = list(sys.path)
@@ -1101,13 +1116,13 @@ class BuildResourceLayoutTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_root = Path(temp_dir)
                 source_root = temp_root / "source"
-                runtime_root = temp_root / "runtime"
-                stage_parent = temp_root / "stage"
-                stage_root = stage_parent / "installer_root"
                 source_root.mkdir()
-                runtime_root.mkdir()
-                (runtime_root / "Zapret.exe").write_bytes(b"exe")
-                (runtime_root / "python314.dll").write_bytes(b"dll")
+                workspace = self._open_workspace(
+                    builder,
+                    temp_root,
+                    {"Zapret.exe": b"exe", "python314.dll": b"dll"},
+                )
+                stage_root = workspace.root / "stage"
                 for dir_name in (
                     "bin",
                     "exe",
@@ -1150,11 +1165,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     if path.is_file()
                 }
 
-                with (
-                    patch.object(release_pipeline, "DIST_DIR", source_root),
-                    patch.object(release_pipeline, "DIST_RUNTIME_DIR", runtime_root),
-                    patch.object(release_pipeline, "STAGE_DIR", stage_parent),
-                ):
+                with patch.object(release_pipeline, "DIST_DIR", source_root):
                     prepared = builder.prepare_installer_stage()
 
                 self.assertEqual(prepared, stage_root)
@@ -1237,9 +1248,9 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 database = temp_root / "private" / "resources" / "data" / "hosts_catalog.sqlite3"
                 database.parent.mkdir(parents=True)
                 database.write_bytes(b"not a sqlite database")
+                self._open_workspace(builder, temp_root)
                 with (
                     patch.object(release_pipeline, "PRIVATE_ROOT", temp_root / "private"),
-                    patch.object(release_pipeline, "STAGE_DIR", temp_root / "stage"),
                     self.assertRaisesRegex(RuntimeError, "база каталога Hosts повреждена"),
                 ):
                     builder.prepare_installer_stage()
@@ -1268,13 +1279,13 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     system_dir / "hosts_catalog.sqlite3",
                 )
                 (system_dir / "fakes_catalog.sqlite3").write_bytes(b"not a sqlite database")
+                workspace = self._open_workspace(builder, temp_root)
                 with (
                     patch.object(release_pipeline, "PRIVATE_ROOT", temp_root / "private"),
-                    patch.object(release_pipeline, "STAGE_DIR", temp_root / "stage"),
                     self.assertRaisesRegex(RuntimeError, "база реестра фейков повреждена"),
                 ):
                     builder.prepare_installer_stage()
-                self.assertFalse((temp_root / "stage" / "installer_root" / "system").exists())
+                self.assertFalse((workspace.root / "stage" / "system").exists())
         finally:
             sys.modules.pop("build_zapret.release_pipeline", None)
             sys.path[:] = old_path
@@ -1351,11 +1362,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_root = Path(temp_dir)
                 source_root = temp_root / "source"
-                runtime_root = temp_root / "runtime"
-                stage_parent = temp_root / "stage"
                 source_root.mkdir()
-                runtime_root.mkdir()
-                (runtime_root / "Zapret.exe").write_bytes(b"exe")
+                self._open_workspace(builder, temp_root)
                 for dir_name in (
                     "bin",
                     "exe",
@@ -1379,8 +1387,6 @@ class BuildResourceLayoutTests(unittest.TestCase):
 
                 with (
                     patch.object(release_pipeline, "DIST_DIR", source_root),
-                    patch.object(release_pipeline, "DIST_RUNTIME_DIR", runtime_root),
-                    patch.object(release_pipeline, "STAGE_DIR", stage_parent),
                     self.assertRaisesRegex(FileNotFoundError, "winws2.exe"),
                 ):
                     builder.prepare_installer_stage()
@@ -1418,67 +1424,37 @@ class BuildResourceLayoutTests(unittest.TestCase):
             sys.modules.pop("build_zapret.release_pipeline", None)
             sys.path[:] = old_path
 
-    def test_successful_installer_stage_cleanup_removes_only_expected_directory(self) -> None:
+    def test_installer_stage_lives_in_the_workspace_and_is_removed_with_it(self) -> None:
+        # Отдельной уборки stage больше нет: всё рабочее место прогона удаляется
+        # целиком (подробно — private_zapretgui/tests/test_build_workspace.py).
         old_path = list(sys.path)
         sys.path.insert(0, str(PRIVATE_ROOT))
         try:
             sys.modules.pop("build_zapret.release_pipeline", None)
             from build_zapret import release_model, release_pipeline
 
-            log = Mock()
+            pipeline = (PRIVATE_ROOT / "build_zapret" / "release_pipeline.py").read_text(encoding="utf-8")
+            self.assertNotIn("_cleanup_installer_stage", pipeline)
+            self.assertNotIn("STAGE_DIR", pipeline)
+
             builder = release_pipeline.ReleasePipeline(
                 self._release_request(release_model),
-                log=log,
+                log=Mock(),
             )
-
             with tempfile.TemporaryDirectory() as temp_dir:
-                root = Path(temp_dir)
-                expected_stage = root / "stage" / "installer_root"
-                expected_stage.mkdir(parents=True)
-                (expected_stage / "prepared.txt").write_text("ready", encoding="utf-8")
+                temp_root = Path(temp_dir)
+                keep = temp_root / "keep"
+                keep.mkdir()
+                (keep / "keep.txt").write_text("unchanged", encoding="utf-8")
+                workspace = self._open_workspace(builder, temp_root)
+                stage = workspace.new_stage()
+                (stage / "prepared.txt").write_text("ready", encoding="utf-8")
 
-                with patch.object(release_pipeline, "STAGE_DIR", root / "stage"):
-                    builder._cleanup_installer_stage(expected_stage)
+                workspace.close()
 
-                self.assertFalse(expected_stage.exists())
-                log.put.assert_called_once()
-        finally:
-            sys.modules.pop("build_zapret.release_pipeline", None)
-            sys.path[:] = old_path
-
-    def test_successful_installer_stage_cleanup_rejects_unexpected_directory(self) -> None:
-        old_path = list(sys.path)
-        sys.path.insert(0, str(PRIVATE_ROOT))
-        try:
-            sys.modules.pop("build_zapret.release_pipeline", None)
-            from build_zapret import release_model, release_pipeline
-
-            log = Mock()
-            builder = release_pipeline.ReleasePipeline(
-                self._release_request(release_model),
-                log=log,
-            )
-
-            with tempfile.TemporaryDirectory() as temp_dir:
-                root = Path(temp_dir)
-                expected_stage = root / "stage" / "installer_root"
-                unexpected_stage = root / "keep"
-                expected_stage.mkdir(parents=True)
-                unexpected_stage.mkdir()
-                sentinel = unexpected_stage / "keep.txt"
-                sentinel.write_text("unchanged", encoding="utf-8")
-
-                with (
-                    patch.object(release_pipeline, "STAGE_DIR", root / "stage"),
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "неожиданного installer stage",
-                    ),
-                ):
-                    builder._cleanup_installer_stage(unexpected_stage)
-
-                self.assertEqual(sentinel.read_text(encoding="utf-8"), "unchanged")
-                log.put.assert_not_called()
+                self.assertFalse(stage.exists())
+                self.assertFalse(workspace.root.exists())
+                self.assertEqual((keep / "keep.txt").read_text(encoding="utf-8"), "unchanged")
         finally:
             sys.modules.pop("build_zapret.release_pipeline", None)
             sys.path[:] = old_path
@@ -1498,16 +1474,11 @@ class BuildResourceLayoutTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_root = Path(temp_dir)
                 source_root = temp_root / "source"
-                runtime_root = temp_root / "runtime"
-                stage_root = temp_root / "stage"
                 source_root.mkdir()
-                runtime_root.mkdir()
-                (runtime_root / "Zapret.exe").write_bytes(b"exe")
+                self._open_workspace(builder, temp_root)
 
                 with (
                     patch.object(release_pipeline, "DIST_DIR", source_root),
-                    patch.object(release_pipeline, "DIST_RUNTIME_DIR", runtime_root),
-                    patch.object(release_pipeline, "STAGE_DIR", stage_root),
                     self.assertRaisesRegex(
                         FileNotFoundError,
                         "обязательный каталог",
