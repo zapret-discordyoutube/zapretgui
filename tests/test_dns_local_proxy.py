@@ -393,6 +393,25 @@ class LocalProxyApplyWorkerTests(unittest.TestCase):
 
         self.assertEqual(self.log, [("start", "odoh"), ("apply", ["127.0.0.1"], [])])
 
+    def test_engine_nobody_got_is_removed_when_no_adapter_took_the_local_address(self) -> None:
+        from dns.state import DnsCommandResult
+
+        data = {"ipv4": ["127.0.0.1"], "ipv6": ["::1"], "local_proxy": "dnscrypt"}
+        worker = self._worker(data=data, started=DnsCommandResult(success=True, listen_ipv6=True))
+        worker._apply_dns = lambda adapters, ipv4, ipv6: DnsCommandResult(success=False, affected_count=0, total_count=1)
+
+        worker._run_apply()
+
+        self.assertIn(("stop_if_unused",), self.log)
+
+    def test_engine_that_adapters_use_is_not_asked_to_stop(self) -> None:
+        from dns.state import DnsCommandResult
+
+        data = {"ipv4": ["127.0.0.1"], "ipv6": ["::1"], "local_proxy": "dnscrypt"}
+        self._worker(data=data, started=DnsCommandResult(success=True, listen_ipv6=True))._run_apply()
+
+        self.assertNotIn(("stop_if_unused",), self.log)
+
     def test_silent_engine_leaves_adapters_untouched(self) -> None:
         from dns.state import DnsCommandResult
 

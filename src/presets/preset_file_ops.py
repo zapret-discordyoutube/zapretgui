@@ -145,6 +145,10 @@ def create_preset(backend, name: str, *, from_current: bool = True):
     rewritten = _rewrite_preset_headers(source_text, name)
     rewritten = backend.normalize_source_text(rewritten)
     created = backend.preset_file_store.create_preset(backend.engine, name, rewritten)
+    # Новый файл начинает без прошлого: закрепление, оценка, папка и привязка к
+    # ссылке остались бы от файла с тем же именем, удалённого вне программы.
+    backend._delete_folder_item_meta(created.file_name)
+    backend._delete_remote_binding_meta(created.file_name)
     backend.notify_presets_changed()
     return created
 

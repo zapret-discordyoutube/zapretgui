@@ -660,7 +660,9 @@ def query_doh(
             failure=FAILURE_MALFORMED,
             detail=str(exc) or type(exc).__name__,
         )
-    except (OSError, DnsWireError, _Cancelled) as exc:
+    except (OSError, DnsWireError, _Cancelled, UnicodeError) as exc:
+        # UnicodeError: путь DoH не в ASCII (свой сервер) — сетевой исход, а не
+        # исключение: иначе строка сервера пропадала бы из отчёта молча.
         return _failed(TRANSPORT_DOH, exc, cancel)
     finally:
         _close(wrapped, cancel)

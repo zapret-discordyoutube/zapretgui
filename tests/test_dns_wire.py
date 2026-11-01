@@ -513,6 +513,20 @@ class EncryptedTransportTests(unittest.TestCase):
         self.assertIn(f"Host: {TLS_NAME}:{server.port}", seen[0])
         self.assertIn("Content-Type: application/dns-message", seen[0])
 
+    def test_doh_path_that_is_not_ascii_is_a_failed_result_not_an_exception(self) -> None:
+        def handle(tls) -> None:
+            tls.recv(10)
+
+        server = self._server(handle)
+
+        with self._trust():
+            result = dns_wire.query_doh(
+                "127.0.0.1", "example.com", dns_wire.TYPE_A, tls_host=TLS_NAME, port=server.port, path="/дом"
+            )
+
+        self.assertFalse(result.answered)
+        self.assertEqual(result.transport, dns_wire.TRANSPORT_DOH)
+
     def test_doh_reads_chunked_answer(self) -> None:
         def handle(tls) -> None:
             _head, body = _read_http_request(tls)

@@ -76,6 +76,19 @@ class PortablePresetArchiveTests(unittest.TestCase):
             self.assertEqual(destination.read_text(encoding="utf-8"), PRESET_TEXT)
             self.assertFalse((root / "shared.zip").exists())
 
+    def test_export_does_not_overwrite_an_existing_zip_with_the_same_stem(self) -> None:
+        with TemporaryDirectory() as source_dir:
+            source_root = Path(source_dir)
+            write_profile_user_list_text(source_root / "lists", "mega.txt", "mega.nz\n")
+            earlier = source_root / "shared.zip"
+            earlier.write_bytes(b"earlier export")
+
+            exported = export_preset_with_lists(_Backend(source_root), "Portable.txt", source_root / "shared.txt")
+
+            self.assertTrue(exported.is_archive)
+            self.assertNotEqual(exported.path, earlier)
+            self.assertEqual(earlier.read_bytes(), b"earlier export")
+
     def test_custom_list_turns_export_into_zip_and_imports_with_preset(self) -> None:
         with TemporaryDirectory() as source_dir, TemporaryDirectory() as target_dir:
             source_root = Path(source_dir)

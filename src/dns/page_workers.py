@@ -289,6 +289,10 @@ class DnsApplyWorker(QThread):
                     log(f"DnsApplyWorker: {self._name} ставится без шифрования: {started.message}", "WARNING")
                     unencrypted = True
             command_result = self._apply_dns(self._adapters, ipv4, ipv6)
+            if used_proxy and not int(command_result.affected_count or 0):
+                # Ни один адаптер не получил 127.0.0.1: движок никому не нужен,
+                # пусть уберётся вместе с остальными ненужными.
+                used_proxy = False
             plan = dns_page_plans.build_provider_dns_apply_result_plan(
                 name=self._name,
                 adapter_count=len(self._adapters),

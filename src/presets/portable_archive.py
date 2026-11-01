@@ -97,6 +97,16 @@ def _unique_preset_name(backend, name: str, *, exclude_file_name: str | None = N
         return name
     return unique(backend.engine, name, exclude_file_name=exclude_file_name)
 
+def _unused_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for number in range(2, 1000):
+        candidate = path.with_name(f"{path.stem} ({number}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+    return path
+
+
 def export_preset_with_lists(backend, file_name: str, dest_path: Path) -> PresetExportResult:
     source_text = backend.read_source_text_by_file_name(file_name)
     lists_root = Path(backend.app_paths.user_root) / "lists"
@@ -109,7 +119,9 @@ def export_preset_with_lists(backend, file_name: str, dest_path: Path) -> Preset
 
     destination = Path(dest_path)
     if destination.suffix.lower() != ".zip":
-        destination = destination.with_suffix(".zip")
+        # Окно сохранения подтвердило имя с другим расширением, а не этот .zip:
+        # чужой архив с тем же именем молча затёрт быть не должен.
+        destination = _unused_path(destination.with_suffix(".zip"))
     destination.parent.mkdir(parents=True, exist_ok=True)
     manifest = {
         "format": ARCHIVE_FORMAT,
