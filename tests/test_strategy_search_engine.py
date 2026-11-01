@@ -716,7 +716,7 @@ class ReplyWindowTests(unittest.TestCase):
         report, events = run(env)
 
         self.assertEqual([item.strategy_id for item in report.working_strategies], ["wssize_window_only"])
-        self.assertIn("--lua-desync=wssize:wsize=1:scale=1", events.started_args[0])
+        self.assertIn("--lua-desync=wssize_ramp:wsize=1:scale=1", events.started_args[0])
         # Цель, постороннее имя, без имени и малое окно — и никакого перебора 24 «разрешённых» имён.
         self.assertEqual([name for _address, name in env.hellos], ["discord.com", "example.com", None, "window"])
         self.assertTrue(any("режут по ответу сервера" in line for line in events.logs))
@@ -747,7 +747,12 @@ class ReplyWindowTests(unittest.TestCase):
         )
         self.assertLess(window_at, new_at)
         self.assertLess(new_at, names_at)
-        self.assertEqual(lines[new_at - 2 : new_at], ["--lua-desync=wssize:wsize=1:scale=1", "--lua-desync=multisplit:id=b"])
+        self.assertEqual(
+            lines[new_at - 5 : new_at],
+            ["--out-range=a", "--payload=all", "--lua-desync=wssize_ramp:wsize=1:scale=1", "--out-range=-d8", "--lua-desync=multisplit:id=b"],
+        )
+        # Пустые подтверждения нужны малому окну: без них окно клиента не правится в каждом пакете.
+        self.assertIn("--wf-tcp-empty=1", lines)
         self.assertEqual(found.raw_data["window_addresses"], ["1.1.1.10"])
 
     def test_control_run_has_no_window(self) -> None:

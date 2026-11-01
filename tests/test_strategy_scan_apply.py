@@ -294,7 +294,8 @@ class StrategyScanApplyTests(unittest.TestCase):
         self.assertIn("vimeo.com", shared.match_signature)
         self.assertTrue(window.enabled and names.enabled)
         window_text = "\n".join(segment.text for segment in window.segments)
-        self.assertIn("--lua-desync=wssize:wsize=1:scale=1\n--lua-desync=fake:blob=tls_google", window_text)
+        self.assertIn("--lua-desync=wssize_ramp:wsize=1:scale=1\n--out-range=-d8\n--lua-desync=fake:blob=tls_google", window_text)
+        self.assertEqual(preset.preamble_lines.count("--wf-tcp-empty=1"), 1)
         self.assertNotIn("multisplit", feature.saved_text)
 
     def test_window_alone_writes_only_the_address_profile(self) -> None:

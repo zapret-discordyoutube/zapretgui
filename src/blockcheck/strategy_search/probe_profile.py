@@ -11,7 +11,7 @@ import ipaddress
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from profile.settings import SEARCH_WINDOW_PROFILE_PREFIX, WINWS2_WSSIZE_LINE
+from profile.settings import SEARCH_WINDOW_PROFILE_PREFIX
 
 PROTOCOL_TCP_HTTPS = "tcp_https"
 # Сайт без HTTPS: подбор переходит сюда сам, когда порт 443 не отвечает, а
@@ -28,10 +28,18 @@ PROTOCOL_UDP_GAMES = "udp_games"
 UDP_GAMES_PORT_FILTER = "443,50000-65535"
 # Малое окно приёма для адресов, где ТСПУ режет TLS по ответу сервера (``block_cause.CAUSE_REPLY_WINDOW``):
 # окно 1 с множителем 2¹ — сервер видит «принимаю 2 байта», и фильтр не узнаёт подпись TLS, ей нужно три.
-# С окном от 3 байт фильтр проходит через раз (bolvan, ntc.party, 29.10.2026). Множитель задаётся
-# при открытии соединения и потом не меняется: скорость падает до конца соединения, поэтому приём
-# пишется только в профиль по адресам — список доменов на первом пакете ещё не известен.
-WINDOW_STRATEGY_LINE = WINWS2_WSSIZE_LINE
+# С окном от 3 байт фильтр проходит через раз (bolvan, ntc.party, 29.10.2026). Множитель задаётся при
+# открытии соединения и потом не меняется, поэтому обычный wssize (``WINWS2_WSSIZE_LINE``) замедляет
+# соединение до конца в десятки раз. ``wssize_ramp`` (lua/custom_funcs.lua) держит окно малым только до
+# первых байт ответа, а дальше умножает каждое окно клиента обратно (не больше 65535 × 2 = 128 КБ).
+# Стенд 2026-11-01 (scripts/tspu_reply_window_stand.py, 8 МБ с speed.cloudflare.com): без окна — обрыв,
+# wssize 1:1 — 1,9 Мбит/с, wssize_ramp — 19 Мбит/с, напрямую — 81. Приём пишется только в профиль по
+# адресам: список доменов на первом пакете соединения ещё не известен.
+WINDOW_STRATEGY_LINE = "--lua-desync=wssize_ramp:wsize=1:scale=1"
+# wssize_ramp правит окно в каждом исходящем пакете, а пустые подтверждения WinDivert ловит только так.
+WINDOW_PREAMBLE_LINES = ("--wf-tcp-empty=1",)
+# Диапазоны самого малого окна: всё соединение и пакеты без данных.
+WINDOW_RANGES = ("--out-range=a", "--payload=all")
 # Имя профиля малого окна: по нему «Применить» находит и заменяет прежний такой профиль сайта,
 # даже если набор адресов с тех пор сменился (отбор трафика в подпись входит, имя — нет).
 WINDOW_PROFILE_NAME_PREFIX = SEARCH_WINDOW_PROFILE_PREFIX
@@ -81,7 +89,7 @@ def window_groups(addresses: Sequence[str]) -> tuple[str, ...]:
     """Адреса для профиля малого окна — только те, на которых фильтр доказан пробой, без соседей по сети.
 
     Соседние адреса той же сети бывают серверами других городов, которых фильтр не трогает, а малое
-    окно замедлило бы их в десятки раз. Соседние видеосерверы узла подбор проверяет сам и добавляет
+    окно ограничило бы их скорость зря. Соседние видеосерверы узла подбор проверяет сам и добавляет
     по одному (``engine._reply_window_addresses``).
     """
     found: list[str] = []
@@ -179,14 +187,18 @@ def build_probe_profile(
     full_flow = needs_full_flow(strategy)
     ranges = ("--in-range=a", "--out-range=a", "--payload=all") if full_flow else ("--out-range=-d8",)
     groups = window_groups(window_addresses)
-    by_address = (f"--name={window_profile_name(domain)}", "--filter-tcp=443", f"--ipset-ip={','.join(groups)}", *ranges)
+    preamble = ("--wf-tcp-out=443", "--wf-tcp-in=443") if full_flow else ("--wf-tcp-out=443",)
+    if groups:
+        preamble = (*preamble, *WINDOW_PREAMBLE_LINES)
+    by_address = (f"--name={window_profile_name(domain)}", "--filter-tcp=443", f"--ipset-ip={','.join(groups)}")
     if groups and strategy == (WINDOW_STRATEGY_LINE,):
         # Одно малое окно — это профиль по адресам и только он: профиль по именам с пустой стратегией
         # ничего бы не делал, а «Применить» перебил бы им рабочую стратегию сайта на остальных адресах.
-        return ProbeProfile(("--wf-tcp-out=443",), by_address, strategy)
-    window = (*by_address, WINDOW_STRATEGY_LINE, *strategy) if groups else ()
+        return ProbeProfile(preamble, (*by_address, *WINDOW_RANGES), strategy)
+    # Сначала малое окно на всё соединение, затем стратегия со своими обычными диапазонами.
+    window = (*by_address, *WINDOW_RANGES, WINDOW_STRATEGY_LINE, *ranges, *strategy) if groups else ()
     return ProbeProfile(
-        ("--wf-tcp-out=443", "--wf-tcp-in=443") if full_flow else ("--wf-tcp-out=443",),
+        preamble,
         ("--filter-tcp=443", f"--hostlist-domains={domain}", *ranges),
         strategy,
         window,

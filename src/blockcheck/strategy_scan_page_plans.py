@@ -364,7 +364,7 @@ def build_result_presentation(result, *, row_number: int) -> StrategyScanResultP
             # Малое окно замедляет эти адреса само: это свойство приёма, а не сервера.
             status_tooltip += (
                 ". С малым окном приёма (wssize) для " + ", ".join(map(str, raw["window_addresses"]))
-                + ": соединения с этими адресами в десятки раз медленнее"
+                + ": окно приёма там не больше 128 КБ — при пинге 20 мс это около 50 Мбит/с"
             )
         elif raw.get("transfer"):
             status_tooltip += ". Сервер отвечает медленно или с паузами — от стратегии это не зависит"

@@ -12,8 +12,8 @@
 Что делает стенд:
 
 - своя таблица nftables ``inet tspu_reply_stand`` на пересылке хоста, только трафик ``--client`` ↔
-  ``--server`` по TCP 443, через очередь ``--queue`` с ``bypass``: если программа упала, пакеты идут
-  как обычно;
+  ``--server`` по TCP 443 и только первые ``EARLY_PACKETS`` пакетов соединения, через очередь
+  ``--queue`` с ``bypass``: если программа упала, пакеты идут как обычно;
 - по пакетам клиента помнит его окно (множитель из SYN, окно из последнего пакета);
 - первый пакет ответа сервера с данными решает судьбу соединения: видно 3 байта и больше и это
   начало записи TLS — соединение глушится до конца, иначе — пропускается;
@@ -42,6 +42,11 @@ import sys
 import time
 
 TABLE = "tspu_reply_stand"
+# Через программу идут только первые пакеты соединения: решение принимается на первом пакете ответа
+# сервера, а дальше на полной скорости медленная программа на Python сама стала бы узким местом (и
+# переполняла очередь). Заглушённое соединение сервер повторяет с растущей паузой: за эти пакеты оно
+# успевает упереться в срок пробы.
+EARLY_PACKETS = 24
 NF_DROP, NF_ACCEPT = 0, 1
 NFQNL_COPY_PACKET = 2
 TLS_RECORD_START = (0x14, 0x15, 0x16, 0x17)
@@ -59,8 +64,8 @@ table inet {TABLE} {{
   set servers {{ type ipv4_addr; elements = {{ {elements} }} }}
   chain forward {{
     type filter hook forward priority -5; policy accept;
-    ip saddr {client} ip daddr @servers tcp dport 443 queue flags bypass to {queue}
-    ip daddr {client} ip saddr @servers tcp sport 443 queue flags bypass to {queue}
+    ip saddr {client} ip daddr @servers tcp dport 443 ct original packets 1-{EARLY_PACKETS} queue flags bypass to {queue}
+    ip daddr {client} ip saddr @servers tcp sport 443 ct reply packets 1-{EARLY_PACKETS} queue flags bypass to {queue}
   }}
 }}
 """
@@ -160,7 +165,8 @@ class PacketHeader(ctypes.Structure):
     _fields_ = [("packet_id", ctypes.c_uint32), ("hw_protocol", ctypes.c_uint16), ("hook", ctypes.c_uint8)]
 
 
-def run(queue: int, verdict_of, seconds: float) -> None:
+def run(queue: int, verdict_of, seconds: float, on_bound) -> None:
+    """Слушать очередь ``seconds`` секунд. ``on_bound`` — вызывается, когда очередь уже наша."""
     lib = ctypes.CDLL(ctypes.util.find_library("netfilter_queue") or "libnetfilter_queue.so.1", use_errno=True)
     lib.nfq_open.restype = ctypes.c_void_p
     lib.nfq_create_queue.restype = ctypes.c_void_p
@@ -201,6 +207,7 @@ def run(queue: int, verdict_of, seconds: float) -> None:
         lib.nfq_close(handle)
         raise OSError(f"queue {queue} is busy")
     lib.nfq_set_mode(queue_handle, NFQNL_COPY_PACKET, 0xFFFF)
+    on_bound()
     fd = lib.nfq_fd(handle)
     sock = socket.socket(fileno=fd)
     sock.settimeout(1.0)
@@ -211,6 +218,10 @@ def run(queue: int, verdict_of, seconds: float) -> None:
                 data = sock.recv(65536)
             except TimeoutError:
                 continue
+            except OSError as error:
+                if error.errno == 105:  # очередь переполнилась: пакеты с bypass уже прошли мимо
+                    continue
+                raise
             lib.nfq_handle_packet(handle, data, len(data))
     finally:
         sock.detach()
@@ -234,15 +245,22 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, stop)
     flt = Filter(args.client, blind=args.blind)
-    uninstall()
-    install(args.client, servers, args.queue)
-    print(f"stand up: {args.client} <-> {', '.join(servers)}, queue {args.queue}, blind={args.blind}", flush=True)
+    installed = []
+
+    def bound() -> None:
+        # Таблицу трогаем, только когда очередь наша: иначе работает другой стенд, и его таблицу не удалять.
+        uninstall()
+        install(args.client, servers, args.queue)
+        installed.append(True)
+        print(f"stand up: {args.client} <-> {', '.join(servers)}, queue {args.queue}, blind={args.blind}", flush=True)
+
     try:
-        run(args.queue, flt.judge, args.seconds)
+        run(args.queue, flt.judge, args.seconds, bound)
     except KeyboardInterrupt:
         pass
     finally:
-        uninstall()
+        if installed:
+            uninstall()
         print(f"stand down: {flt.stats}", flush=True)
     return 0
 

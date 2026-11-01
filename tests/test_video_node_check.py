@@ -252,7 +252,7 @@ class ReplyWindowNodeTests(unittest.TestCase):
         self.assertTrue(verdict.strategy_helps)
         self.assertIn("1 байт", verdict.text)
         self.assertIn("«Подобрать стратегию»", verdict.advice[0])
-        self.assertIn("в десятки раз медленнее", verdict.advice[0])
+        self.assertIn("не больше 128 КБ", verdict.advice[0])
         steps = {step.key: step for step in verdict.ladder}
         self.assertEqual((steps["window"].level, steps["window"].title), ("ok", "Шифрование с окном приёма в 1 байт"))
 
