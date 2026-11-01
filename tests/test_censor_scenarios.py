@@ -39,6 +39,8 @@ class Censor:
     allowed_only: set[str] | None = None
     # Сколько байт ответа проходит до заморозки. None — не замораживают.
     freeze_after: int | None = None
+    # Адреса, с которых режут любой TLS по ответу сервера — но только в пределах окна приёма клиента.
+    reply_cut_ips: set[str] = field(default_factory=set)
 
     def _name_blocked(self, name: str | None) -> str:
         """Как поступают с приветствием: "" — пропускают, иначе вид отказа."""
@@ -53,6 +55,8 @@ class Censor:
     def https(self, host: str, ip: str) -> ProbeResult:
         if ip in self.drop_ips:
             return ProbeResult(ip=ip, kind=KIND_CONNECT, stage=STAGE_CONNECT, connect_fail="timeout")
+        if ip in self.reply_cut_ips:
+            return ProbeResult(ip=ip, kind=KIND_TIMEOUT, stage=STAGE_TLS)
         blocked = self._name_blocked(host)
         if blocked == "reset":
             return ProbeResult(ip=ip, kind=KIND_RESET, stage=STAGE_TLS)
@@ -65,12 +69,20 @@ class Censor:
     def hello(self, ip: str, name: str | None, **_kwargs) -> HelloResult:
         if ip in self.drop_ips:
             return HelloResult(HELLO_CONNECT)
+        if ip in self.reply_cut_ips:
+            return HelloResult(HELLO_TIMEOUT)
         blocked = self._name_blocked(name)
         if blocked == "reset":
             return HelloResult(HELLO_RESET)
         if blocked == "silent":
             return HelloResult(HELLO_TIMEOUT)
         return HelloResult(HELLO_OK, ms=20.0)
+
+    def window_hello(self, ip: str, name: str | None, **_kwargs) -> HelloResult:
+        """Окно приёма в 1 байт: фильтр по ответу сервера не видит подписи TLS и пропускает."""
+        if ip in self.reply_cut_ips:
+            return HelloResult(HELLO_OK, ms=20.0)
+        return self.hello(ip, name)
 
     def http(self, _host: str, ip: str, **_kwargs) -> HttpFacts:
         return HttpFacts() if ip in self.drop_ips else HttpFacts(status=301, location=f"https://{HOST}/")
@@ -92,6 +104,7 @@ SCENARIOS = (
     Scenario("белый список имён", Censor(allowed_only={"vk.com", "ya.ru", "max.ru"}), "sni", "fail"),
     Scenario("адреса сайта глушат целиком", Censor(drop_ips=set(DISCORD_REAL)), "ip", "fail"),
     Scenario("заморозка после 20 КБ", Censor(freeze_after=20_000), "cut16", "fail"),
+    Scenario("TLS с адресов режут по ответу сервера", Censor(reply_cut_ips=set(DISCORD_REAL)), "tls_reply", "fail"),
 )
 
 
@@ -103,6 +116,7 @@ def run_site_check(censor: Censor) -> dict:
         # Уточнение причины — настоящим кодом поверх модели цензора.
         stack.enter_context(patch.object(block_cause, "collect", ORIGINAL_COLLECT))
         stack.enter_context(patch.object(block_cause, "tls_hello", side_effect=censor.hello))
+        stack.enter_context(patch.object(block_cause, "window_hello", side_effect=censor.window_hello))
         stack.enter_context(patch.object(block_cause, "http_probe", side_effect=censor.http))
         stack.enter_context(patch("diagnostics.net_access.ping_ok", return_value=None))
         return engine.check_site(HOST)

@@ -11,6 +11,9 @@
 1. до запуска winws2 к адресу цели — настоящее имя, ``example.com`` и без имени;
 2. постороннее имя или «без имени» проходит — фильтр режет только цель
    («чёрный» список), перебор не нужен: имена каталога и так годятся;
+2а. не проходит ничего, а с окном приёма в 1 байт ответ сервера приходит — это не
+   список имён: фильтр режет любой TLS с адреса по ответу сервера
+   (``block_cause.CAUSE_REPLY_WINDOW``). Имена тут не помогут, перебор не нужен;
 3. не проходит ничего — «белый» список: имена перебираются по одному, с
    шагом и паузами между пачками, до трёх найденных; найденное подтверждается
    повтором, а в конце ещё раз пробуется настоящее имя: если и оно вдруг
@@ -34,6 +37,7 @@ from blockcheck.strategy_search.ordering import Candidate
 __all__ = [
     "CANDIDATE_NAMES",
     "FILTER_BLACK",
+    "FILTER_REPLY_WINDOW",
     "FILTER_UNKNOWN",
     "FILTER_WHITE",
     "NEUTRAL_NAME",
@@ -90,10 +94,14 @@ VARIANTS_PER_NAME = 6
 FILTER_BLACK = "black"
 FILTER_WHITE = "white"
 FILTER_UNKNOWN = "unknown"
+# Любой TLS с адреса режут по ответу сервера, а с окном приёма в 1 байт ответ проходит.
+FILTER_REPLY_WINDOW = "reply_window"
 
 # Ответ пробы: True — шифрование началось (дорога открыта), False — соединение
 # оборвали или заглушили, None — не удалось соединиться вовсе.
 Hello = Callable[[str | None], bool | None]
+# Проба малого окна к тому же адресу: True — начало ответа сервера пришло.
+Window = Callable[[], bool | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,10 +123,11 @@ def discover(
     cancelled: Callable[[], bool],
     names: tuple[str, ...] = CANDIDATE_NAMES,
     pick: Callable[[float, float], float] = random.uniform,
+    window: Window | None = None,
 ) -> NameSearch:
-    """Какие имена пропускает фильтр к адресу цели. Сеть — только через ``hello``.
+    """Какие имена пропускает фильтр к адресу цели. Сеть — только через ``hello`` и ``window``.
 
-    ``pick(от, до)`` — длина паузы (в тестах подменяется)."""
+    ``pick(от, до)`` — длина паузы (в тестах подменяется); ``window`` — проба малого окна."""
     if hello(target_host):
         # Настоящее имя прошло без обхода: сравнивать не с чем.
         return NameSearch(FILTER_UNKNOWN)
@@ -127,6 +136,8 @@ def discover(
         return NameSearch(FILTER_UNKNOWN, frozen=True)
     if neutral or hello(None):
         return NameSearch(FILTER_BLACK)
+    if window is not None and window():
+        return NameSearch(FILTER_REPLY_WINDOW)
 
     found: list[str] = []
     tried = 0

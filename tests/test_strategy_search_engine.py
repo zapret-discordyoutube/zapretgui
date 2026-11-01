@@ -43,6 +43,9 @@ class FakeSession:
             (line.split("id=", 1)[1] for line in config_text.splitlines() if "id=" in line),
             "pass" if "--lua-desync=pass" in config_text else None,
         )
+        # Профиль малого окна по адресам: «+w» к стратегии, одно малое окно — «wssize».
+        if "--lua-desync=wssize" in config_text:
+            self.strategy = f"{self.strategy}+w" if self.strategy else "wssize"
 
     def start(self):
         if self.env.start_fails.get(self.strategy, 0) > 0:
@@ -85,6 +88,8 @@ class FakeEnv:
     # QUIC: режут ли по имени (до подбора) и ответ на пакет с именем при стратегии.
     quic_cut_by_name: bool = False
     quic: object = None
+    # Проба малого окна до запуска winws2: адрес -> True / False / None. По умолчанию не проходит.
+    window: object = None
 
     def __post_init__(self):
         self.running = None
@@ -191,6 +196,10 @@ class FakeEnv:
         if self.hello is not None:
             return self.hello(address, name)
         return name in (None, "example.com")
+
+    def probe_window(self, address):
+        self.hellos.append((address, "window"))
+        return self.window(address) if self.window is not None else False
 
     def probe_udp(self, specs):
         return [(spec, self.network(self.running, spec)) for spec in specs]
@@ -645,6 +654,104 @@ class AllowedNamesTests(unittest.TestCase):
 
         self.assertEqual([item.strategy_id for item in found], ["b@sni=vk.com"])
         self.assertIn("tls_mod=rnd,sni=vk.com,dupsid", found[0].args)
+
+
+class ReplyWindowTests(unittest.TestCase):
+    """TLS с адреса режут по ответу сервера: имена не помогают, помогает малое окно по адресам."""
+
+    def _env(self, network, **extra):
+        return FakeEnv(
+            network=network,
+            candidates=[cand("a"), cand("b", "multisplit")],
+            # Ни одно имя не проходит, а малое окно — проходит.
+            hello=lambda _address, _name: False,
+            window=lambda _address: True,
+            **extra,
+        )
+
+    def test_window_only_goes_first_and_names_are_not_hunted(self) -> None:
+        env = self._env(lambda running, _n: OK if running == "wssize" else RESET)
+        report, events = run(env)
+
+        self.assertEqual([item.strategy_id for item in report.working_strategies], ["wssize_window_only"])
+        self.assertIn("--lua-desync=wssize:wsize=1:scale=1", events.started_args[0])
+        # Цель, постороннее имя, без имени и малое окно — и никакого перебора 24 «разрешённых» имён.
+        self.assertEqual([name for _address, name in env.hellos], ["discord.com", "example.com", None, "window"])
+        self.assertTrue(any("режут по ответу сервера" in line for line in events.logs))
+
+    def test_window_alone_is_written_as_one_address_profile(self) -> None:
+        env = self._env(lambda running, _n: OK if running == "wssize" else RESET)
+        report, _events = run(env)
+
+        lines = report.working_strategies[0].apply_lines
+        self.assertIn("--ipset-ip=1.1.1.0/27", lines)
+        self.assertNotIn("--new", lines)
+        # Профиль по именам с пустой стратегией перебил бы рабочую стратегию сайта на других адресах.
+        self.assertFalse(any(line.startswith("--hostlist-domains=") for line in lines))
+
+    def test_every_strategy_gets_the_window_profile_above_its_own(self) -> None:
+        # Одного окна мало (имя режут тоже): нужна стратегия против имени вместе с малым окном.
+        env = self._env(lambda running, _n: OK if running == "b+w" else RESET)
+        report, _events = run(env)
+
+        found = report.working_strategies[0]
+        self.assertEqual(found.strategy_id, "b")
+        self.assertIn("малое окно", found.strategy_name)
+        lines = list(found.apply_lines)
+        window_at, new_at, names_at = (
+            lines.index("--ipset-ip=1.1.1.0/27"),
+            lines.index("--new"),
+            lines.index("--hostlist-domains=discord.com"),
+        )
+        self.assertLess(window_at, new_at)
+        self.assertLess(new_at, names_at)
+        self.assertEqual(lines[new_at - 2 : new_at], ["--lua-desync=wssize:wsize=1:scale=1", "--lua-desync=multisplit:id=b"])
+        self.assertEqual(found.raw_data["window_addresses"], ["1.1.1.10"])
+
+    def test_control_run_has_no_window(self) -> None:
+        """Контроль — winws2 без приёмов: малое окно само открывает цель и выдало бы «открывается от пустого запуска»."""
+        env = self._env(lambda running, _n: OK if running and running.endswith("+w") or running == "wssize" else RESET)
+        report, events = run(env)
+
+        control = env.sessions[0]
+        self.assertEqual(control.strategy, "pass")
+        self.assertNotIn("wssize", control.config_text)
+        self.assertEqual(events.questions, [])
+        self.assertFalse(report.baseline_accessible)
+
+    def test_no_window_answer_keeps_the_name_hunt(self) -> None:
+        env = FakeEnv(
+            network=blocked_unless("a"),
+            candidates=[cand("a")],
+            hello=lambda _address, _name: False,
+            window=lambda _address: False,
+        )
+        run(env)
+
+        self.assertGreater(len(env.hellos), 5)
+        self.assertFalse(any("wssize" in session.config_text for session in env.sessions))
+
+    def test_companion_cut_by_reply_gets_the_window_too(self) -> None:
+        """У YouTube страница режется по имени, а видеосервер — по ответу сервера: окно нужно ему."""
+
+        def hello(address, name):
+            if address == "9.9.9.9":
+                return False
+            return name in (None, "example.com")
+
+        env = CompanionEnv(
+            network=lambda running, _n: OK if running and running.startswith("b") else RESET,
+            video=lambda running: OK if running == "b+w" else RESET,
+            candidates=[cand("b", "multisplit")],
+            hello=hello,
+            window=lambda address: address == "9.9.9.9",
+        )
+        env.resolve = lambda host, port, *, udp: (["9.9.9.9"], "") if host == "video.example.com" else (["1.1.1.10"], "")
+        report, events = run(env, target="www.youtube.com", companions=(("googlevideo.com", "video.example.com"),))
+
+        self.assertEqual([item.strategy_id for item in report.working_strategies], ["b"])
+        self.assertIn("--ipset-ip=9.9.9.0/27", report.working_strategies[0].apply_lines)
+        self.assertTrue(any("video.example.com (9.9.9.9)" in line for line in events.logs))
 
 
 class StageEventTests(unittest.TestCase):

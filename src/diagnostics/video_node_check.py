@@ -14,7 +14,11 @@
 2. обычный HTTP на порту 80 — жив ли адрес, если 443 молчит;
 3. шифрование без имени, с посторонним и с разрешённым именем — жив ли адрес для TLS;
 4. то же имя другими буквами — ищет ли фильтр имя буква в букву;
-5. шифрование с настоящим именем узла.
+5. шифрование с настоящим именем узла;
+6. шифрование с окном приёма в 1 байт — когда не прошло ни одно имя. С октября 2026
+   ТСПУ режет любой TLS с части зарубежных узлов Google, узнавая его по первым байтам
+   ответа сервера, но читает ответ только в пределах окна приёма компьютера. Если с
+   окном в 1 байт ответ приходит, узел открывает приём ``wssize`` в профиле по адресу.
 
 Видеосерверы Google принимают любое имя (замеры из Москвы, 28 проб из 28): отказ на
 всех именах здесь значит закрытый адрес, а не привередливый сервер.
@@ -42,6 +46,7 @@ __all__ = [
     "NODE_NAME",
     "NODE_NO_ROUTE",
     "NODE_UNCLEAR",
+    "NODE_WINDOW",
     "VIA_NAMES",
     "LadderStep",
     "NodeFacts",
@@ -58,6 +63,8 @@ INFO = "info"
 NODE_NAME = "name"
 # Соединение есть, а шифрование не проходит ни с каким именем: закрыт адрес.
 NODE_ADDRESS = "address"
+# То же, но с окном приёма в 1 байт ответ сервера приходит: режут TLS по ответу, обходит ``wssize``.
+NODE_WINDOW = "window"
 # Соединение TCP не устанавливается: до адреса нет дороги.
 NODE_NO_ROUTE = "no_route"
 # Не открывается и снаружи: не работает сам узел.
@@ -209,6 +216,16 @@ def _ladder(facts: NodeFacts) -> tuple[LadderStep, ...]:
         if step is not None:
             steps.append(step)
     steps.append(_real_step(result, cause.real_again))
+    window = cause.small_window
+    if window is not None and window.kind != block_cause.HELLO_CANCELLED:
+        steps.append(
+            LadderStep(
+                "window",
+                "Шифрование с окном приёма в 1 байт",
+                OK if window.answered else FAIL,
+                "начало ответа сервера приходит (дважды подряд)" if window.answered else _HELLO_WORDS.get(window.kind, (UNKNOWN, "проверить не удалось"))[1],
+            )
+        )
     return tuple(steps)
 
 
@@ -267,7 +284,13 @@ def _advice(code: str, facts: NodeFacts, provider_cache: bool) -> tuple[str, ...
             "Узел не работает сам, и ни стратегия, ни настройки программы его не починят. Обычно YouTube "
             "переключается на другой узел сам — повторите проверку позже.",
         )
-    if code == NODE_ADDRESS:
+    if code == NODE_WINDOW:
+        lines.append(
+            "Нажмите «Подобрать стратегию»: подбор сам найдёт этот фильтр и проверит малое окно приёма (приём wssize) "
+            "в профиле только по адресам этого видеосервера. Видео через такой профиль идёт в десятки раз медленнее, "
+            "поэтому высокое качество может не грузиться."
+        )
+    elif code == NODE_ADDRESS:
         lines.append(
             "Стратегии Zapret прячут от фильтра имя сайта, а этот видеосервер не пускают и без имени, поэтому "
             "«Подбор стратегии» его не откроет. Перебирать стратегии для видео не нужно."
@@ -281,8 +304,11 @@ def _advice(code: str, facts: NodeFacts, provider_cache: bool) -> tuple[str, ...
     if working is not None:
         lines.append(
             f"Этот же видеосервер сейчас отдаёт данные через адрес Google {working.ip} ({working.name}). Строка "
-            f"«{working.ip} {facts.host}» в файле hosts вернёт видео, пока YouTube выдаёт вам именно этот узел."
+            f"«{working.ip} {facts.host}» в файле hosts вернёт видео, пока YouTube выдаёт вам именно этот узел"
+            + (" — и без потери скорости." if code == NODE_WINDOW else ".")
         )
+    if code == NODE_WINDOW:
+        return tuple(lines)
     whose = " (а этот узел — кэш Google в сети вашего провайдера)" if provider_cache else ""
     lines.append(
         f"YouTube выбирает видеосервер по вашему адресу в интернете{whose}, поэтому другой DNS его не меняет. "
@@ -305,7 +331,8 @@ def judge(facts: NodeFacts | None, *, outside: str = "") -> NodeVerdict | None:
     via = _via_rows(facts)
 
     def verdict(code: str, level: str, text: str, helps: bool) -> NodeVerdict:
-        advice = () if helps else _advice(code, facts, provider_cache)
+        # Стратегия, которая поможет «как обычно», в своём совете не нуждается; малое окно — нуждается.
+        advice = _advice(code, facts, provider_cache) if not helps or code == NODE_WINDOW else ()
         return NodeVerdict(code, level, text, ladder, owner, via, advice, helps)
 
     if outside == "down":
@@ -337,6 +364,17 @@ def judge(facts: NodeFacts | None, *, outside: str = "") -> NodeVerdict | None:
             WARN,
             "с именем видеосервера соединение рвётся, а с другим именем или без имени тот же адрес отвечает: "
             "режут именно имя — такую блокировку стратегия Zapret обходит",
+            True,
+        )
+    if real_cut and others and all(_cut(item) for item in others) and _answered(cause.small_window):
+        return verdict(
+            NODE_WINDOW,
+            FAIL,
+            "видеосервер не принимает шифрованные соединения ни с каким именем, но когда программа говорит ему, что "
+            "может принять всего 1 байт, начало его ответа приходит. Фильтр на пути режет любое шифрованное соединение "
+            "с этого адреса, узнавая его по первым байтам ответа, и читает ответ только в пределах окна приёма. Так с "
+            "октября 2026 года закрыта часть зарубежных узлов Google. Это обходит стратегия с малым окном (wssize) "
+            "в профиле по адресу узла, но видео через неё идёт в десятки раз медленнее",
             True,
         )
     if real_cut and others and all(_cut(item) for item in others):

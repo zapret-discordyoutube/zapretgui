@@ -28,6 +28,29 @@ class DiscoverTests(unittest.TestCase):
         self.assertEqual(search.kind, sd.FILTER_BLACK)
         self.assertEqual(asked, [TARGET, sd.NEUTRAL_NAME])
 
+    def test_window_answer_after_every_name_cut_stops_the_name_hunt(self) -> None:
+        asked: list = []
+        windows: list = []
+
+        def hello(name):
+            asked.append(name)
+            return False
+
+        search = sd.discover(hello, TARGET, sleep=lambda _s: None, cancelled=lambda: False, window=lambda: windows.append(1) or True)
+
+        self.assertEqual(search.kind, sd.FILTER_REPLY_WINDOW)
+        self.assertEqual(asked, [TARGET, sd.NEUTRAL_NAME, None])
+        self.assertEqual(windows, [1])
+
+    def test_window_is_not_asked_when_a_foreign_name_passes(self) -> None:
+        windows: list = []
+
+        search = sd.discover(
+            lambda name: name == sd.NEUTRAL_NAME, TARGET, sleep=lambda _s: None, cancelled=lambda: False, window=lambda: windows.append(1) or True
+        )
+
+        self.assertEqual((search.kind, windows), (sd.FILTER_BLACK, []))
+
     def test_whitelist_finds_up_to_three_names_confirmed_twice(self) -> None:
         allowed = {"ya.ru", "vk.com", "sberbank.ru", "ozon.ru"}
         search, asked, slept = _discover(lambda name, _n: name in allowed)

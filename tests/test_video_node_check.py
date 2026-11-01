@@ -242,6 +242,54 @@ class SummaryTests(unittest.TestCase):
         self.assertTrue(probe.strategy_futile)
 
 
+class ReplyWindowNodeTests(unittest.TestCase):
+    """rr5---sn-4g5ednsr.googlevideo.com (ноябрь 2026): TLS с узла режут по ответу сервера, малое окно проходит."""
+
+    def test_window_answer_turns_a_closed_address_into_a_window_fix(self) -> None:
+        verdict = vc.judge(_facts(_cause(small_window=ANSWER), owner=GOOGLE))
+
+        self.assertEqual(verdict.code, vc.NODE_WINDOW)
+        self.assertTrue(verdict.strategy_helps)
+        self.assertIn("1 байт", verdict.text)
+        self.assertIn("«Подобрать стратегию»", verdict.advice[0])
+        self.assertIn("в десятки раз медленнее", verdict.advice[0])
+        steps = {step.key: step for step in verdict.ladder}
+        self.assertEqual((steps["window"].level, steps["window"].title), ("ok", "Шифрование с окном приёма в 1 байт"))
+
+    def test_working_google_address_is_offered_as_the_fast_way(self) -> None:
+        via = (vc.ViaAddress("i.ytimg.com", "192.178.40.6", ANSWER, fetched=True, status=200, size=48_000),)
+
+        verdict = vc.judge(_facts(_cause(small_window=ANSWER), via=via))
+
+        self.assertIn(f"«192.178.40.6 {HOST}» в файле hosts", verdict.advice[1])
+        self.assertIn("без потери скорости", verdict.advice[1])
+
+    def test_window_silence_keeps_the_closed_address(self) -> None:
+        verdict = vc.judge(_facts(_cause(small_window=RESET)))
+
+        self.assertEqual(verdict.code, vc.NODE_ADDRESS)
+        self.assertFalse(verdict.strategy_helps)
+        self.assertEqual(verdict.ladder[-1].key, "window")
+        self.assertEqual(verdict.ladder[-1].level, "fail")
+
+    def test_summary_gives_the_window_advice_and_keeps_the_strategy_button(self) -> None:
+        from diagnostics import block_kind as bk
+
+        probe_cause = bc.judge(_cause(small_window=ANSWER))
+        node = vc.judge(_facts(_cause(small_window=ANSWER)))
+        kind = bk.site_kind("dpi", probe_cause.code)
+        targets = [
+            TargetOutcome("www.youtube.com", "сайт", ReachState.OK, DnsState.OK, main=True),
+            TargetOutcome(HOST, "видео", ReachState.DPI, DnsState.OK, kind=kind, cure=node.advice),
+        ]
+
+        verdict = summarize_service("YouTube", targets, zapret_running=True)
+
+        self.assertEqual(kind, bk.KIND_TLS_REPLY)
+        self.assertEqual(verdict.advice, node.advice)
+        self.assertEqual(verdict.kind, bk.KIND_TLS_REPLY)
+
+
 class ViewTests(unittest.TestCase):
     def test_card_and_text_show_owner_ladder_via_and_conclusion(self) -> None:
         via = (vc.ViaAddress("i.ytimg.com", "192.178.40.6", ANSWER, fetched=True, status=200, size=48_000),)

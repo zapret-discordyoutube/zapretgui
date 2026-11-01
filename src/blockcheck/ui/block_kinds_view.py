@@ -39,6 +39,7 @@ from diagnostics.block_kind import (
     KIND_STUB,
     KIND_SYSTEM,
     KIND_NO_CONNECT,
+    KIND_TLS_REPLY,
     KIND_UNCLEAR,
     KIND_UNSTABLE,
     KIND_VOICE,
@@ -64,6 +65,8 @@ TILE_STEP_MS = 80
 _COLORS: dict[str, tuple[str, str]] = {
     GROUP_OPEN: ("#5bb974", "#1a7f37"),
     KIND_IP: ("#e5645d", "#b3261e"),
+    # TLS по ответу сервера — между красным «по адресу» и оранжевым «по имени»: закрыт адрес, но обходится.
+    KIND_TLS_REPLY: ("#e07b52", "#a8401c"),
     KIND_SNI: ("#d99a4e", "#955800"),
     KIND_CUT: ("#a48be0", "#6a3fc8"),
     # «Через раз» — жёлто-зелёный: между зелёным «открываются» и оранжевым «по имени».
@@ -88,7 +91,7 @@ _UNKNOWN_TITLE = "Не удалось проверить"
 _OPEN_ABOUT = "Эти сайты открылись так же, как открылись бы в браузере."
 _UNKNOWN_ABOUT = "Проверка этих сайтов не дала ответа: не хватило времени или не удалось узнать адрес."
 # Порядок долей и плиток: сначала хорошее, затем виды по тяжести.
-_SITE_ORDER = (GROUP_OPEN, KIND_UNSTABLE, KIND_IP, KIND_SNI, KIND_CUT, KIND_FINGERPRINT, KIND_STUB, KIND_CERT, KIND_UNCLEAR, KIND_NO_CONNECT, KIND_DOWN, KIND_OTHER, GROUP_UNKNOWN)
+_SITE_ORDER = (GROUP_OPEN, KIND_UNSTABLE, KIND_IP, KIND_TLS_REPLY, KIND_SNI, KIND_CUT, KIND_FINGERPRINT, KIND_STUB, KIND_CERT, KIND_UNCLEAR, KIND_NO_CONNECT, KIND_DOWN, KIND_OTHER, GROUP_UNKNOWN)
 
 
 def _is_light(tokens=None) -> bool:

@@ -569,7 +569,7 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
                 and not probe.dns.ips
                 and not probe.hosts_ips
             ),
-            cure=probe.video_node.advice if probe.strategy_futile else (),
+            cure=probe.video_node.advice if probe.video_node is not None else (),
         )
         for probe in probes
     ]

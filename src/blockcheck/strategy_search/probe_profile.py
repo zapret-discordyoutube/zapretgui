@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -23,6 +24,15 @@ PROTOCOL_STUN_VOICE = "stun_voice"
 PROTOCOL_UDP_GAMES = "udp_games"
 
 UDP_GAMES_PORT_FILTER = "443,50000-65535"
+# Малое окно приёма для адресов, где ТСПУ режет TLS по ответу сервера (``block_cause.CAUSE_REPLY_WINDOW``):
+# окно 1 с множителем 2¹ — сервер видит «принимаю 2 байта», и фильтр не узнаёт подпись TLS, ей нужно три.
+# С окном от 3 байт фильтр проходит через раз (bolvan, ntc.party, 29.10.2026). Множитель задаётся
+# при открытии соединения и потом не меняется: скорость падает до конца соединения, поэтому приём
+# пишется только в профиль по адресам — список доменов на первом пакете ещё не известен.
+WINDOW_STRATEGY_LINE = "--lua-desync=wssize:wsize=1:scale=1"
+# Фильтр держит в списке группы серверов Google по 32 адреса: профиль малого окна берёт всю группу
+# адреса (IPv4 /27), чтобы покрыть соседние видеосерверы того же узла. IPv6 — только сам адрес.
+WINDOW_GROUP_PREFIX_V4 = 27
 VOICE_PORT_FILTER = "443-65535"
 
 
@@ -52,10 +62,32 @@ class ProbeProfile:
     filter_lines: tuple[str, ...]
     # Сама готовая стратегия (строки ``--lua-desync`` и её модификаторы).
     strategy_lines: tuple[str, ...]
+    # Профиль малого окна перед основным (фильтры и стратегия целиком). Пусто — его нет.
+    window_lines: tuple[str, ...] = ()
+
+    def profile_lines(self) -> list[str]:
+        """Профили без преамбулы: малое окно (если есть), ``--new``, основной."""
+        window = [*self.window_lines, "--new"] if self.window_lines else []
+        return [*window, *self.filter_lines, *self.strategy_lines]
 
     def apply_lines(self) -> list[str]:
-        """Строки для «Применить»: преамбула сливается с пресетом, остальное — профиль."""
-        return [*self.preamble_lines, *self.filter_lines, *self.strategy_lines]
+        """Строки для «Применить»: преамбула сливается с пресетом, остальное — профили."""
+        return [*self.preamble_lines, *self.profile_lines()]
+
+
+def window_groups(addresses: Sequence[str]) -> tuple[str, ...]:
+    """Группы адресов для профиля малого окна: IPv4 — сеть /27 адреса, IPv6 — сам адрес."""
+    groups: list[str] = []
+    for raw in addresses:
+        try:
+            address = ipaddress.ip_address(str(raw or "").strip())
+        except ValueError:
+            continue
+        if address.version == 4:
+            groups.append(str(ipaddress.ip_network(f"{address}/{WINDOW_GROUP_PREFIX_V4}", strict=False)))
+        else:
+            groups.append(str(address))
+    return tuple(dict.fromkeys(groups))
 
 
 def strategy_lines_from_args(strategy_args: str) -> tuple[str, ...]:
@@ -89,6 +121,7 @@ def build_probe_profile(
     games_ipset_paths: Sequence[str] = (),
     games_addresses: Sequence[str] = (),
     games_ports: Sequence[int] = (),
+    window_addresses: Sequence[str] = (),
 ) -> ProbeProfile:
     """Профиль одной стратегии для выбранного режима подбора.
 
@@ -96,7 +129,12 @@ def build_probe_profile(
       покрывает и поддомены). ``--out-range=-d8`` — стратегия работает на
       первых пакетах соединения, как в обычных пресетах. Стратегии, которые
       ведут всё соединение (``tlsrec``), получают входящие пакеты и всё
-      соединение — так, как требует сама функция.
+      соединение — так, как требует сама функция. ``window_addresses`` —
+      адреса, где TLS режут по ответу сервера: перед основным профилем идёт
+      профиль по их группам (``--ipset-ip``) с малым окном и той же стратегией.
+      Профиль по адресам выбирается уже на первом пакете соединения, когда
+      имя сайта ещё не известно, и стоит выше профиля по именам, чтобы
+      соединение не ушло из него, когда имя станет известно.
     - Голос: STUN и Discord IP discovery на любых UDP-портах.
     - Игры: UDP игровых портов и портов проверок на адресах из игровых
       ipset и на адресах, которыми подбор проверял стратегию.
@@ -129,16 +167,23 @@ def build_probe_profile(
             ("--filter-tcp=80", f"--hostlist-domains={domain}", "--out-range=-d8"),
             strategy,
         )
-    if needs_full_flow(strategy):
-        return ProbeProfile(
-            ("--wf-tcp-out=443", "--wf-tcp-in=443"),
-            ("--filter-tcp=443", f"--hostlist-domains={domain}", "--in-range=a", "--out-range=a", "--payload=all"),
-            strategy,
-        )
+    full_flow = needs_full_flow(strategy)
+    ranges = ("--in-range=a", "--out-range=a", "--payload=all") if full_flow else ("--out-range=-d8",)
+    groups = window_groups(window_addresses)
+    if groups and strategy == (WINDOW_STRATEGY_LINE,):
+        # Одно малое окно — это профиль по адресам и только он: профиль по именам с пустой стратегией
+        # ничего бы не делал, а «Применить» перебил бы им рабочую стратегию сайта на остальных адресах.
+        return ProbeProfile(("--wf-tcp-out=443",), ("--filter-tcp=443", f"--ipset-ip={','.join(groups)}", *ranges), strategy)
+    window = (
+        ("--filter-tcp=443", f"--ipset-ip={','.join(groups)}", *ranges, WINDOW_STRATEGY_LINE, *strategy)
+        if groups
+        else ()
+    )
     return ProbeProfile(
-        ("--wf-tcp-out=443",),
-        ("--filter-tcp=443", f"--hostlist-domains={domain}", "--out-range=-d8"),
+        ("--wf-tcp-out=443", "--wf-tcp-in=443") if full_flow else ("--wf-tcp-out=443",),
+        ("--filter-tcp=443", f"--hostlist-domains={domain}", *ranges),
         strategy,
+        window,
     )
 
 
@@ -153,6 +198,5 @@ def build_probe_config_text(profile: ProbeProfile, blob_lines: Sequence[str]) ->
     lines: list[str] = [*WINWS2_LUA_INIT_LINES]
     lines.extend(line for line in blob_lines if line)
     lines.extend(profile.preamble_lines)
-    lines.extend(profile.filter_lines)
-    lines.extend(profile.strategy_lines)
+    lines.extend(profile.profile_lines())
     return "\n".join(lines) + "\n"

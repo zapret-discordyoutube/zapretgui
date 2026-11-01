@@ -553,6 +553,7 @@ class AnyNameServerTests(unittest.TestCase):
         with (
             ThreadPoolExecutor(8) as pool,
             patch.object(bc, "tls_hello", lambda *_a, **_k: RESET),
+            patch.object(bc, "window_hello", lambda *_a, **_k: RESET),
             patch.object(bc, "http_probe", lambda *_a, **_k: bc.HttpFacts()),
             patch.object(bc, "STAGGER_S", 0.0),
         ):
@@ -560,4 +561,153 @@ class AnyNameServerTests(unittest.TestCase):
 
         self.assertTrue(facts.any_name)
         self.assertEqual((facts.recased_name, facts.recased), ("rr1---sn-x.googlevideo.COM", RESET))
+        self.assertEqual(facts.small_window, RESET)
         self.assertEqual(bc.judge(facts).code, bc.CAUSE_BY_ADDRESS)
+
+
+class ReplyWindowTests(unittest.TestCase):
+    """TLS с адреса режут по ответу сервера, а с окном приёма в 1 байт ответ проходит (ТСПУ, октябрь 2026)."""
+
+    CUT = {"neutral": RESET, "nameless": RESET, "allowed": SILENCE, "recased": RESET, "real_again": RESET}
+
+    def test_window_answer_after_every_name_cut_is_a_confident_reply_filter(self) -> None:
+        for any_name in (False, True):
+            with self.subTest(any_name=any_name):
+                cause = bc.judge(_facts(small_window=ANSWER, any_name=any_name, **self.CUT))
+
+                self.assertEqual((cause.code, cause.confident), (bc.CAUSE_REPLY_WINDOW, True))
+                self.assertIn("1 байт", cause.text)
+                self.assertEqual(bk.site_kind("dpi", cause.code), bk.KIND_TLS_REPLY)
+
+    def test_window_refusal_also_proves_the_road(self) -> None:
+        self.assertEqual(bc.judge(_facts(small_window=REFUSAL, **self.CUT)).code, bc.CAUSE_REPLY_WINDOW)
+
+    def test_window_silence_keeps_the_old_verdicts(self) -> None:
+        self.assertEqual(bc.judge(_facts(small_window=SILENCE, any_name=True, **self.CUT)).code, bc.CAUSE_BY_ADDRESS)
+        self.assertEqual(bc.judge(_facts(small_window=RESET, **self.CUT)).code, bc.CAUSE_NO_NAME_WORKS)
+
+    def test_name_passing_wins_over_the_window(self) -> None:
+        cause = bc.judge(_facts(small_window=ANSWER, **{**self.CUT, "neutral": ANSWER}))
+
+        self.assertEqual(cause.code, bc.CAUSE_BY_NAME)
+
+    def _collect(self, hello, window):
+        from unittest.mock import patch
+
+        calls = []
+
+        def windowed(ip, name, **_kwargs):
+            calls.append((ip, name))
+            return window(len(calls))
+
+        with (
+            ThreadPoolExecutor(8) as pool,
+            patch.object(bc, "tls_hello", hello),
+            patch.object(bc, "window_hello", windowed),
+            patch.object(bc, "http_probe", lambda *_a, **_k: bc.HttpFacts()),
+            patch.object(bc, "STAGGER_S", 0.0),
+        ):
+            facts = bc.collect("rr5---sn-4g5ednsr.googlevideo.com", _broken(), submit=pool.submit, cancel=SocketCancel(), any_name=True)
+        return facts, calls
+
+    def test_window_is_probed_twice_with_a_foreign_name_when_no_name_passes(self) -> None:
+        facts, calls = self._collect(lambda *_a, **_k: RESET, lambda _n: ANSWER)
+
+        self.assertEqual(calls, [("203.0.113.5", bc.NEUTRAL_NAME)] * 2)
+        self.assertEqual(facts.small_window, ANSWER)
+        self.assertEqual(bc.judge(facts).code, bc.CAUSE_REPLY_WINDOW)
+
+    def test_one_lucky_window_answer_is_not_enough(self) -> None:
+        facts, calls = self._collect(lambda *_a, **_k: RESET, lambda number: ANSWER if number == 1 else SILENCE)
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(facts.small_window, SILENCE)
+        self.assertEqual(bc.judge(facts).code, bc.CAUSE_BY_ADDRESS)
+
+    def test_window_is_not_probed_when_some_name_passes(self) -> None:
+        facts, calls = self._collect(lambda _ip, name, **_k: ANSWER if name == bc.NEUTRAL_NAME else RESET, lambda _n: ANSWER)
+
+        self.assertEqual(calls, [])
+        self.assertIsNone(facts.small_window)
+
+
+class WindowHelloTests(unittest.TestCase):
+    """Проба малого окна по-настоящему: сокет, первые байты ответа и как они читаются."""
+
+    def _window(self, handle) -> bc.HelloResult:
+        listener = _listener()
+        self.addCleanup(listener.close)
+        port = _serve(listener, handle)
+        return bc.window_hello("127.0.0.1", bc.NEUTRAL_NAME, port=port, timeout=2.0)
+
+    def test_start_of_a_handshake_record_is_an_answer(self) -> None:
+        got: list[bytes] = []
+
+        def reply(connection) -> None:
+            got.append(connection.recv(4096))
+            connection.sendall(b"\x16\x03\x03\x00\x7a\x02")
+
+        result = self._window(reply)
+
+        self.assertEqual(result.kind, bc.HELLO_OK)
+        # Ушло настоящее приветствие TLS с посторонним именем.
+        self.assertEqual(got[0][:1], b"\x16")
+        self.assertIn(bc.NEUTRAL_NAME.encode(), got[0])
+
+    def test_start_of_an_alert_is_an_answer_too(self) -> None:
+        def reply(connection) -> None:
+            connection.recv(4096)
+            connection.sendall(b"\x15\x03\x03\x00\x02")
+
+        self.assertEqual(self._window(reply).kind, bc.HELLO_ALERT)
+
+    def test_reply_bytes_arriving_one_by_one_are_gathered(self) -> None:
+        import time
+
+        def reply(connection) -> None:
+            connection.recv(4096)
+            for byte in (b"\x16", b"\x03"):
+                connection.sendall(byte)
+                time.sleep(0.05)
+
+        self.assertEqual(self._window(reply).kind, bc.HELLO_OK)
+
+    def test_not_tls_is_garbage_and_silence_or_close_are_failures(self) -> None:
+        def http(connection) -> None:
+            connection.recv(4096)
+            connection.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+
+        def silent(connection) -> None:
+            connection.recv(4096)
+            connection.recv(1)
+
+        self.assertEqual(self._window(http).kind, bc.HELLO_GARBAGE)
+        self.assertEqual(self._window(lambda connection: connection.recv(4096)).kind, bc.HELLO_RESET)
+        self.assertEqual(self._window(silent).kind, bc.HELLO_TIMEOUT)
+        self.assertEqual(bc.window_hello("127.0.0.1", None, port=_closed_port(), timeout=1.0).kind, bc.HELLO_CONNECT)
+
+    def test_receive_buffer_is_set_before_connecting(self) -> None:
+        """Окно и его множитель объявляются в первом пакете: буфер после соединения окна уже не уменьшит."""
+        from unittest.mock import patch
+
+        order: list[str] = []
+        real_socket = socket.socket
+
+        class Recording(real_socket):
+            def setsockopt(self, level, option, value):
+                if option == socket.SO_RCVBUF:
+                    order.append(f"rcvbuf={value}")
+                return super().setsockopt(level, option, value)
+
+            def connect(self, address):
+                order.append("connect")
+                return super().connect(address)
+
+        def reply(connection) -> None:
+            connection.recv(4096)
+            connection.sendall(b"\x16\x03")
+
+        with patch.object(bc.socket, "socket", Recording):
+            self._window(reply)
+
+        self.assertEqual(order[:2], [f"rcvbuf={bc.SMALL_WINDOW_BYTES}", "connect"])

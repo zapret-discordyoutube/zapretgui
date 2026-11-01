@@ -29,6 +29,7 @@ from diagnostics.block_kind import (
     KIND_DOWN,
     KIND_IP,
     KIND_NO_CONNECT,
+    KIND_TLS_REPLY,
     KIND_UNSTABLE,
     kind_info,
     site_kind,
@@ -324,7 +325,7 @@ _ADVICE_STRATEGY_OR_ADDRESS = (
     "поможет DNS-профиль в «Редакторе hosts», другой DNS или VPN."
 )
 # Советы «почини через Zapret»: движок убирает их у гео-сайтов, которым Zapret не помогает.
-ADVICE_VIA_ZAPRET = (_ADVICE_STRATEGY, _ADVICE_START, _ADVICE_STRATEGY_OR_ADDRESS)
+ADVICE_VIA_ZAPRET = (_ADVICE_STRATEGY, _ADVICE_START, _ADVICE_STRATEGY_OR_ADDRESS, kind_info(KIND_TLS_REPLY).cure)
 
 
 def advice_geo_site(service: str) -> str:
@@ -420,6 +421,9 @@ def _advice_for(
         # Вид блокировки важнее: закрытому адресу «запустите Zapret» обещал бы лишнее.
         if kind == KIND_IP:
             return (_ADVICE_STRATEGY_OR_ADDRESS,)
+        if kind == KIND_TLS_REPLY:
+            # Обходится, но не любой стратегией и не даром: совет говорит, какой и чем платить.
+            return (kind_info(KIND_TLS_REPLY).cure,)
         # «Не удалось узнать, запущен ли Zapret» — не «не запущен»: запускать не советуем.
         if zapret_running is False:
             return (_ADVICE_START,)

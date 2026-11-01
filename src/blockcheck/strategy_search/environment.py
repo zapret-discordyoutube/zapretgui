@@ -299,6 +299,18 @@ class RealEnvironment:
             return None
         return bool(result.answered)
 
+    def probe_window(self, address: str) -> bool | None:
+        """Постороннее имя с окном приёма в 1 байт: True — начало ответа сервера пришло дважды подряд.
+
+        None — нет соединения или «Стоп». Та же проба, что у BlockCheck (``block_cause``).
+        """
+        from diagnostics.block_cause import HELLO_CANCELLED, HELLO_CONNECT, small_window_twice
+
+        result = small_window_twice(address, self._cancel, timeout=HELLO_DISCOVERY_TIMEOUT_S)
+        if result.kind in (HELLO_CONNECT, HELLO_CANCELLED):
+            return None
+        return bool(result.answered)
+
     def probe_udp(self, specs):
         return probes.probe_udp_pool(specs)
 

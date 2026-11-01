@@ -14,6 +14,11 @@
 2. **Обычный HTTP, порт 80.** Часть провайдеров вместо сайта показывает
    страницу о блокировке или отдаёт код 451.
 3. **Пинг** — когда адрес не принимает соединение вовсе.
+4. **Окно приёма в 1 байт** — когда шифрование не проходит ни с каким именем.
+   Часть фильтров (ТСПУ, октябрь 2026) режет любой TLS с адреса, узнавая его по
+   первым трём байтам ответа сервера, но читает ответ только в пределах окна
+   приёма, которое объявил компьютер. Если с окном в 1 байт начало ответа
+   приходит, закрыт не адрес, а TLS с него — и это обходит приём ``wssize``.
 
 Сбор (``collect``) отделён от вывода (``judge``): вывод — чистая функция над
 собранными фактами.
@@ -45,6 +50,7 @@ __all__ = [
     "CAUSE_ADDRESS_SILENT",
     "CAUSE_BY_ADDRESS",
     "CAUSE_BY_NAME",
+    "CAUSE_REPLY_WINDOW",
     "CAUSE_STUB_PAGE",
     "HELLO_ALERT",
     "HELLO_CANCELLED",
@@ -66,7 +72,9 @@ __all__ = [
     "judge",
     "needs_refining",
     "stub_reason",
+    "small_window_twice",
     "tls_hello",
+    "window_hello",
 ]
 
 # Постороннее имя: существует, ни в одном списке блокировок его нет.
@@ -97,9 +105,20 @@ CAUSE_BY_ADDRESS = "by_address"
 # Ни одно имя не прошло, но часть проб сброшена: адрес это или сам сервер — не ясно.
 CAUSE_NO_NAME_WORKS = "no_name_works"
 CAUSE_ADDRESS_CLOSED = "address_closed"
+# Шифрование не проходит ни с каким именем, а с окном приёма в 1 байт ответ сервера приходит:
+# фильтр режет TLS с адреса по ответу сервера и читает этот ответ только в пределах окна.
+CAUSE_REPLY_WINDOW = "reply_window"
 CAUSE_ADDRESS_SILENT = "address_silent"
 
 HELLO_TIMEOUT_S = 4.0
+# Окно приёма пробы «малого окна». ``SO_RCVBUF`` до соединения Windows ставит в первый пакет как
+# есть и без множителя (замерено на win10: SYN «win 1, wscale 0»), и сервер отдаёт ответ по байту.
+SMALL_WINDOW_BYTES = 1
+# Сколько байт ответа ждать: тип записи TLS (0x16 — рукопожатие, 0x15 — отказ) и старший байт
+# версии (0x03). Подпись TLS фильтр узнаёт по трём байтам; двух ему мало, а нам хватает.
+_WINDOW_READ = 2
+_RECORD_HANDSHAKE = 0x16
+_RECORD_ALERT = 0x15
 HTTP_TIMEOUT_S = 4.0
 _HTTP_READ_LIMIT = 4096
 _STATUS_UNAVAILABLE_FOR_LEGAL_REASONS = 451
@@ -171,6 +190,9 @@ class CauseFacts:
     # Сервер заведомо принимает любое имя (видеосервер Google): тогда отказ на всех именах —
     # это не его привередливость, а закрытый адрес.
     any_name: bool = False
+    # Постороннее имя с окном приёма в 1 байт (``window_hello``), когда не прошло ни одно имя.
+    # «Ответил» записывается, только если начало ответа пришло дважды подряд. None — не проверяли.
+    small_window: HelloResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +295,77 @@ def tls_hello(
             if item is not None:
                 token.release(item)
                 close_quietly(item)
+
+
+def _client_hello_bytes(name: str | None) -> bytes:
+    """Первый пакет шифрованного соединения — тот же, что шлёт ``tls_hello``, но байтами."""
+    incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+    tls = _hello_context().wrap_bio(incoming, outgoing, server_hostname=name)
+    try:
+        tls.do_handshake()
+    except ssl.SSLWantReadError:
+        pass
+    return outgoing.read()
+
+
+def window_hello(
+    ip: str,
+    name: str | None,
+    *,
+    port: int = 443,
+    timeout: float = HELLO_TIMEOUT_S,
+    cancel: SocketCancel | None = None,
+) -> HelloResult:
+    """Приветствие с окном приёма в ``SMALL_WINDOW_BYTES``: дошло ли начало ответа сервера.
+
+    Окно — сколько байт компьютер готов принять, пока не подтвердит полученное; сервер не
+    шлёт больше. Шифрование до конца здесь не доводится (по байту оно шло бы минутами):
+    ``HELLO_OK`` значит «пришло начало записи рукопожатия», ``HELLO_ALERT`` — «начало отказа».
+    """
+    token = cancel or SocketCancel()
+    hello = _client_hello_bytes(name)
+    sock: socket.socket | None = None
+    connected = False
+    data = bytearray()
+    started = 0.0
+    try:
+        sock = socket.socket(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM)
+        if not token.track(sock):
+            return HelloResult(HELLO_CANCELLED)
+        # До соединения: окно и его множитель объявляются в первом пакете и потом не меняются.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SMALL_WINDOW_BYTES)
+        sock.settimeout(timeout)
+        sock.connect((ip, int(port)))
+        connected = True
+        started = time.perf_counter()
+        sock.sendall(hello)
+        while len(data) < _WINDOW_READ:
+            chunk = sock.recv(_WINDOW_READ - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+    except (socket.timeout, TimeoutError):
+        if token.cancelled:
+            return HelloResult(HELLO_CANCELLED)
+        if not data:
+            return HelloResult(HELLO_TIMEOUT if connected else HELLO_CONNECT)
+    except OSError as error:
+        if token.cancelled:
+            return HelloResult(HELLO_CANCELLED)
+        if not data:
+            return HelloResult(HELLO_RESET if connected else HELLO_CONNECT, str(error))
+    finally:
+        if sock is not None:
+            token.release(sock)
+            close_quietly(sock)
+    if token.cancelled:
+        return HelloResult(HELLO_CANCELLED)
+    if not data:
+        return HelloResult(HELLO_RESET, "соединение закрыто на приветствии")
+    if len(data) < _WINDOW_READ or data[1] != 0x03 or data[0] not in (_RECORD_HANDSHAKE, _RECORD_ALERT):
+        return HelloResult(HELLO_GARBAGE, data.hex())
+    kind = HELLO_OK if data[0] == _RECORD_HANDSHAKE else HELLO_ALERT
+    return HelloResult(kind, "начало ответа сервера пришло", ms=(time.perf_counter() - started) * 1000.0)
 
 
 def http_probe(
@@ -417,6 +510,10 @@ def collect(
     )
     answers = [(name, future.result()) for name, future in allowed]
     allowed_name, allowed_result = next((item for item in answers if item[1].answered), answers[-1])
+    hellos = (neutral.result(), nameless.result(), allowed_result, real_again.result(), *([recased.result()] if recased is not None else []))
+    small_window = None
+    if result.kind in (KIND_RESET, KIND_TIMEOUT) and not any(item.answered for item in hellos):
+        small_window = small_window_twice(ip, cancel)
     return CauseFacts(
         host=host,
         result=result,
@@ -429,7 +526,22 @@ def collect(
         recased=recased.result() if recased is not None else None,
         recased_name=recased_name,
         any_name=any_name,
+        small_window=small_window,
     )
+
+
+def small_window_twice(ip: str, cancel: SocketCancel, *, timeout: float = HELLO_TIMEOUT_S) -> HelloResult:
+    """Постороннее имя с окном в 1 байт; ответ засчитывается, только если пришёл и при повторе.
+
+    Имя постороннее: проверяется адрес, а не имя сайта, которое фильтр может резать отдельно.
+    Один ответ против нескольких обрывов мог бы оказаться случайностью фильтра «через раз».
+    Проба общая для BlockCheck и «Подбора стратегии» (``strategy_search.environment``).
+    """
+    first = window_hello(ip, NEUTRAL_NAME, cancel=cancel, timeout=timeout)
+    if not first.answered:
+        return first
+    again = later(STAGGER_S, cancel, window_hello, ip, NEUTRAL_NAME, cancel=cancel, timeout=timeout)
+    return first if again.answered else again
 
 
 def _how(result: ProbeResult) -> str:
@@ -518,6 +630,17 @@ def judge(facts: CauseFacts) -> Cause | None:
         *([recased] if recased is not None and recased.kind != HELLO_CANCELLED else []),
     ]
     checked = "ни с каким именем, даже с разрешённым" if allowed is not None and not allowed.answered else "ни с каким именем"
+    window = facts.small_window
+    if window is not None and window.answered and all(item.kind in (HELLO_RESET, HELLO_TIMEOUT) for item in probes):
+        # Прямое сравнение на одном адресе: обычное окно — ответа нет, окно в 1 байт — есть.
+        return Cause(
+            CAUSE_REPLY_WINDOW,
+            f"соединение с адресом устанавливается, а шифрование не проходит {checked}; но когда программа "
+            "говорит серверу, что может принять всего 1 байт, начало его ответа приходит (дважды подряд). "
+            "Фильтр на пути режет любое шифрованное соединение с этого адреса, узнавая его по первым байтам "
+            "ответа сервера, и читает этот ответ только в пределах окна приёма",
+            confident=True,
+        )
     if all(item.kind == HELLO_TIMEOUT for item in probes):
         # Тишина на любое имя — так молчит фильтр. Сервер, который сам не принимает
         # чужие имена, отвечает отказом или сбросом, а не молчанием.
