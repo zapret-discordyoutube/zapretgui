@@ -493,7 +493,7 @@ def judge_ech(facts: EchFacts | None) -> tuple[str, str]:
 
 
 ADVICE_ECH = (
-    "Если сайты за Cloudflare не открываются: в Chrome — chrome://flags → Encrypted ClientHello → Disabled; "
+    "Если сайты за Cloudflare не открываются: в Chrome — chrome://flags, в Edge — edge://flags → Encrypted ClientHello → Disabled; "
     "в Firefox — about:config → network.dns.echconfig.enabled = false."
 )
 

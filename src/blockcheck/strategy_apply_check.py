@@ -9,6 +9,14 @@
 
 Открылся — сайт открывает ещё и настоящий браузер без окна (Edge или Chrome,
 ``blockcheck.browser_check``): своим DNS и своим стеком, как его откроет человек.
+
+Браузер не открыл, а сайт за Cloudflare — проверяется ECH через тот же пресет
+(``diagnostics.filter_habits.check_ech``). Браузер, получив ключ ECH от своего
+шифрованного DNS, прячет имя сайта и показывает фильтру общее имя
+``cloudflare-ech.com``: профиль сайта по списку доменов такое соединение не
+узнаёт, а фильтр ECH режет. Проба программы здоровается с открытым именем и
+этого не видит. Так было на win10 с www.castingcall.club: Edge после обычного
+приветствия повторил его с ECH.
 """
 
 from __future__ import annotations
@@ -37,6 +45,13 @@ CHECK_SKIPPED = "skipped"
 CHECK_BROWSER_FAILED = "browser_failed"
 # Проба сайт открыла, а браузер завершился, ничего не сказав: проверить в браузере не вышло.
 CHECK_BROWSER_UNKNOWN = "browser_unknown"
+# Браузер не открыл сайт за Cloudflare, и через пресет режется ECH — то, чем браузер прячет имя сайта.
+CHECK_BROWSER_ECH = "browser_ech"
+
+# Сколько ждать ответа на одно приветствие проверки ECH; режущий фильтр молчит, и это время уходит целиком.
+ECH_TIMEOUT_S = 3.0
+# Адреса Cloudflare: тот же список, что у профилей Cloudflare в пресетах.
+CLOUDFLARE_IPSET = "cloudflare-ipset.txt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +125,7 @@ def wait_until_running(is_running: Callable[[], bool], *, restarting: bool, slee
     return False
 
 
-def run_apply_check(host: str, *, is_running, restarting: bool, cancel, open_browser=None, companions=()) -> ApplyCheck:
+def run_apply_check(host: str, *, is_running, restarting: bool, cancel, open_browser=None, ech_check=None, companions=()) -> ApplyCheck:
     """Дождаться Zapret и проверить сайт; при провале — ещё раз чуть позже; открылся — и в браузере.
 
     Второй заход нужен, если работающий Zapret перечитал пресет позже, чем мы
@@ -125,7 +140,57 @@ def run_apply_check(host: str, *, is_running, restarting: bool, cancel, open_bro
         check = check_site(host, cancel=cancel, companions=companions)
     if check.code != CHECK_OK:
         return check
-    return _confirm_in_browser(host, check, cancel=cancel, open_browser=open_browser)
+    return _confirm_in_browser(host, check, cancel=cancel, open_browser=open_browser, ech_check=ech_check)
+
+
+def cloudflare_address(addresses, *, ipset_path: str | None = None) -> str:
+    """Первый IPv4 сайта из сетей Cloudflare (список ``lists/cloudflare-ipset.txt``); пусто — сайт не за Cloudflare."""
+    import ipaddress
+    import os
+
+    if ipset_path is None:
+        from lists.core.paths import get_lists_dir
+
+        ipset_path = os.path.join(get_lists_dir(), CLOUDFLARE_IPSET)
+    candidates = []
+    for address in addresses:
+        try:
+            parsed = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if parsed.version == 4:
+            candidates.append(parsed)
+    if not candidates:
+        return ""
+    try:
+        with open(ipset_path, encoding="utf-8", errors="replace") as lines:
+            networks = [
+                network
+                for network in (ipaddress.ip_network(line.strip(), strict=False) for line in lines if line.strip() and not line.startswith("#"))
+                if network.version == 4
+            ]
+    except (OSError, ValueError):
+        return ""
+    return next((str(address) for address in candidates if any(address in network for network in networks)), "")
+
+
+def ech_cut_through_preset(host: str, *, cancel) -> bool:
+    """Режется ли ECH к адресу сайта за Cloudflare через работающий пресет. Не за Cloudflare или нет вывода — нет."""
+    from blockcheck.strategy_search import probes
+    from diagnostics import browser_hello, filter_habits
+
+    addresses, error = probes.resolve_target_addresses(host, 443)
+    stubs = set(probes.stub_addresses(addresses))
+    ip = "" if error else cloudflare_address([address for address in addresses if address not in stubs])
+    if not ip:
+        return False
+
+    def send(address: str, parts: tuple[bytes, ...], pause: float, *, flight: bool = False) -> str:
+        return browser_hello.send_parts(address, parts, pause=pause, timeout=ECH_TIMEOUT_S, cancel=cancel, flight=flight).kind
+
+    code, text = filter_habits.judge_ech(filter_habits.check_ech(ip, send=send))
+    log(f"Проверка ECH для {host} ({ip}) через пресет: {code}{f', {text}' if text else ''}", "INFO")
+    return code == filter_habits.ECH_BLOCKED
 
 
 def _browser_visits(host: str, *, cancel, open_browser=None):
@@ -148,7 +213,7 @@ def _browser_visits(host: str, *, cancel, open_browser=None):
     return visits
 
 
-def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=None) -> ApplyCheck:
+def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=None, ech_check=None) -> ApplyCheck:
     """Проба открыла сайт — подтверждает настоящий браузер. Нет браузера — остаётся итог пробы.
 
     Браузер, который завершился, ничего не сказав о сайте, проверку не прошёл и не провалил: так молчит
@@ -171,8 +236,15 @@ def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=No
         return ApplyCheck(CHECK_OK, f"{check.text}; {note}" if check.text else note)
     if visit.state == browser_check.BROWSER_NO_ANSWER:
         silent = list(dict.fromkeys(item.browser for item in visits))
-        return ApplyCheck(CHECK_BROWSER_UNKNOWN, f"{', '.join(silent)}: {visit.text} ({visit.details})")
-    return ApplyCheck(CHECK_BROWSER_FAILED, f"{visit.browser}: {visit.text}")
+        found = ApplyCheck(CHECK_BROWSER_UNKNOWN, f"{', '.join(silent)}: {visit.text} ({visit.details})")
+    else:
+        found = ApplyCheck(CHECK_BROWSER_FAILED, f"{visit.browser}: {visit.text}")
+    # Причина, которую можно доказать: браузер прячет имя сайта (ECH), а это через пресет режется.
+    if (ech_check or ech_cut_through_preset)(host, cancel=cancel):
+        return ApplyCheck(CHECK_BROWSER_ECH, found.text)
+    if cancel.cancelled:
+        return ApplyCheck(CHECK_SKIPPED, "проверку остановили")
+    return found
 
 
 class StrategyApplyCheckWorker(QThread):
@@ -225,6 +297,16 @@ def apply_check_message(host: str, code: str, text: str) -> tuple[str, str, str]
             f"{host}: проба программы через ваш пресет сайт открыла, а браузер без окна — нет ({text}). "
             "Браузер мог получить от DNS другой адрес сайта или пойти через свой прокси. Откройте сайт в "
             "браузере сами; если не открывается — запустите подбор ещё раз.",
+        )
+    if code == CHECK_BROWSER_ECH:
+        from diagnostics.filter_habits import ADVICE_ECH
+
+        return (
+            "warning",
+            "Браузер прячет имя сайта, а это режется",
+            f"{host}: проба программы через ваш пресет сайт открыла, а браузер — нет ({text}). Сайт за Cloudflare: "
+            "браузер прячет его имя (ECH) и показывает фильтру общее имя cloudflare-ech.com, а такие соединения "
+            f"режутся даже через ваш пресет. {ADVICE_ECH}",
         )
     if code == CHECK_BROWSER_UNKNOWN:
         return (

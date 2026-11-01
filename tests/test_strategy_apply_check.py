@@ -48,7 +48,7 @@ class WaitTests(unittest.TestCase):
 
 
 class CheckSiteTests(unittest.TestCase):
-    def _run(self, outcomes_by_call, *, running=True, visit=None):
+    def _run(self, outcomes_by_call, *, running=True, visit=None, ech=False):
         from blockcheck import browser_check
 
         calls = iter(outcomes_by_call)
@@ -61,7 +61,12 @@ class CheckSiteTests(unittest.TestCase):
             cancel = SocketCancel()
             cancel.sleep = lambda seconds: True
             return check.run_apply_check(
-                "discord.com", is_running=lambda: True, restarting=False, cancel=cancel, open_browser=lambda host, **_k: visit
+                "discord.com",
+                is_running=lambda: True,
+                restarting=False,
+                cancel=cancel,
+                open_browser=lambda host, **_k: visit,
+                ech_check=lambda host, **_k: ech,
             )
 
     def test_site_open_through_preset_is_ok(self) -> None:
@@ -130,7 +135,26 @@ class CheckSiteTests(unittest.TestCase):
         ):
             cancel = SocketCancel()
             cancel.sleep = lambda seconds: True
-            return check.run_apply_check("discord.com", is_running=lambda: True, restarting=False, cancel=cancel, open_browser=open_browser)
+            return check.run_apply_check(
+                "discord.com", is_running=lambda: True, restarting=False, cancel=cancel, open_browser=open_browser, ech_check=lambda host, **_k: False
+            )
+
+    def test_browser_failure_on_a_site_whose_ech_is_cut_names_ech(self) -> None:
+        # www.castingcall.club на win10: обычное приветствие проба провела, а Edge повторил его с ECH.
+        from blockcheck import browser_check
+
+        timed_out = browser_check.BrowserVisit(browser_check.BROWSER_TIMEOUT, "", "страница не загрузилась за 20 с", "msedge.exe")
+        result = self._run([[OK, OK]], visit=timed_out, ech=True)
+        self.assertEqual(result.code, check.CHECK_BROWSER_ECH)
+        kind, _title, body = check.apply_check_message("www.castingcall.club", result.code, result.text)
+        self.assertEqual(kind, "warning")
+        self.assertIn("cloudflare-ech.com", body)
+        self.assertIn("edge://flags", body)
+        # ECH не режется — прежний итог: браузер не открыл, причина не доказана.
+        self.assertEqual(self._run([[OK, OK]], visit=timed_out).code, check.CHECK_BROWSER_FAILED)
+        # Браузер открыл — ECH не проверяется вовсе.
+        opened = browser_check.BrowserVisit(browser_check.BROWSER_OK, browser="msedge.exe")
+        self.assertEqual(self._run([[OK, OK]], visit=opened, ech=True).code, check.CHECK_OK)
 
     def test_zapret_not_started_is_skipped(self) -> None:
         self.assertEqual(self._run([], running=False).code, check.CHECK_SKIPPED)
@@ -190,3 +214,49 @@ class MessageTests(unittest.TestCase):
         self.assertIsNone(check.apply_check_message("discord.com", check.CHECK_SKIPPED, "Zapret не запустился"))
         kind, title, _body = check.apply_check_message("discord.com", check.CHECK_BROWSER_FAILED, "msedge.exe: сброшено")
         self.assertEqual((kind, title), ("warning", "В браузере сайт не открылся"))
+
+
+class EchCauseTests(unittest.TestCase):
+    """ECH проверяется только у сайта за Cloudflare и только через пресет."""
+
+    def test_cloudflare_address_comes_from_the_shipped_ipset(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as ipset:
+            ipset.write("# Cloudflare\n104.16.0.0/13\n172.64.0.0/13\n2606:4700::/32\n")
+        self.assertEqual(check.cloudflare_address(["2606:4700::1", "104.21.32.151"], ipset_path=ipset.name), "104.21.32.151")
+        self.assertEqual(check.cloudflare_address(["8.8.8.8"], ipset_path=ipset.name), "")
+        # Нет списка — не за Cloudflare: про ECH не говорим.
+        self.assertEqual(check.cloudflare_address(["104.21.32.151"], ipset_path=ipset.name + ".missing"), "")
+
+    def _ech(self, answers: dict, *, address="104.21.32.151"):
+        from types import SimpleNamespace
+
+        from diagnostics import browser_hello, filter_habits
+
+        # Приветствие с ECH длиннее такого же без него: так фальшивый фильтр их различает.
+        plain_size = len(browser_hello.build_hello(filter_habits.ECH_OUTER, post_quantum=False, ech=False))
+
+        def send(ip, parts, *, pause, timeout, cancel, flight):
+            hello = parts[0]
+            if filter_habits.ECH_OUTER.encode() not in hello:
+                return SimpleNamespace(kind=answers["other"])
+            return SimpleNamespace(kind=answers["ech" if len(hello) > plain_size else "plain"])
+
+        with (
+            patch("blockcheck.strategy_search.probes.resolve_target_addresses", return_value=([address], "")),
+            patch.object(check, "cloudflare_address", side_effect=lambda addresses: address if address.startswith("104.") else ""),
+            patch("diagnostics.browser_hello.send_parts", side_effect=send),
+        ):
+            return check.ech_cut_through_preset("www.castingcall.club", cancel=SocketCancel())
+
+    def test_ech_cut_while_both_controls_pass_is_the_cause(self) -> None:
+        from diagnostics.block_cause import HELLO_OK, HELLO_TIMEOUT
+
+        self.assertTrue(self._ech({"ech": HELLO_TIMEOUT, "plain": HELLO_OK, "other": HELLO_OK}))
+        self.assertFalse(self._ech({"ech": HELLO_OK, "plain": HELLO_OK, "other": HELLO_OK}))
+        # Контроль тоже режется — вывода нет.
+        self.assertFalse(self._ech({"ech": HELLO_TIMEOUT, "plain": HELLO_TIMEOUT, "other": HELLO_OK}))
+        # Сайт не за Cloudflare — ECH не проверяется.
+        self.assertFalse(self._ech({"ech": HELLO_TIMEOUT, "plain": HELLO_OK, "other": HELLO_OK}, address="8.8.8.8"))
+
