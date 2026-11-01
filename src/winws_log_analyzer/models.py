@@ -97,4 +97,7 @@ class WinwsLogParseResult:
     # "packet: id=..." строки неизвестного формата (например, Linux nfqws —
     # намеренно не поддерживается, GUI только для Windows).
     unrecognized_packet_lines: int = 0
+    # Серверы с окном меньше приветствия: winws2 не собрал его и не узнал имя сайта (адрес → (окно, нужно)).
+    # Профиль по доменам на них не срабатывает — нужен профиль по адресу (ipset).
+    small_server_windows: dict[str, tuple[int, int]] = field(default_factory=dict)
     cancelled: bool = False

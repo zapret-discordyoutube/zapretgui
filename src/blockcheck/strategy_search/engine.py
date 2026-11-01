@@ -200,6 +200,7 @@ class SearchEnvironment(Protocol):
     def quic_blocked_by_name(self, host: str, address: str) -> bool: ...
     def probe_hello(self, address: str, name: str | None) -> bool | None: ...
     def probe_window(self, address: str) -> bool | None: ...
+    def server_window(self, address: str) -> int | None: ...
     def video_siblings(self, host: str) -> list[str]: ...
     def reply_window_among(self, addresses: Sequence[str]) -> list[str]: ...
     def probe_udp(self, specs: Sequence[UdpProbeSpec]) -> list[tuple[UdpProbeSpec, ProbeOutcome]]: ...
@@ -229,6 +230,8 @@ class _Target:
     volume_block: bool = False
     # Адреса цели и остальных имён, где TLS режут по ответу сервера: им нужен профиль малого окна.
     window_addresses: tuple[str, ...] = ()
+    # Окно сервера меньше приветствия браузера: профиль выбирается по адресам цели, а не по имени.
+    match_by_address: bool = False
 
 
 @dataclass
@@ -823,6 +826,7 @@ class StrategySearch:
         self._events.phase("Какие имена пропускает фильтр")
         self._stage(STEP_NAMES, "running", "Пробуем чужие имена к тому же адресу")
         address = self._target.addresses[0]
+        self._check_server_window(address)
         started = self._env.monotonic()
         search = sni_discovery.discover(
             lambda name: self._env.probe_hello(address, name),
@@ -873,6 +877,32 @@ class StrategySearch:
         if extra:
             self._events.log(f"  Сначала проверим {len(extra)} стратегий с этими именами в подставном пакете")
         return extra
+
+    def _check_server_window(self, address: str) -> None:
+        """Окно сервера меньше приветствия браузера — профиль по адресам, а не по имени.
+
+        Браузер отправит такое приветствие частями, winws2 не соберёт его и не узнает имя сайта:
+        профиль по списку доменов не сработает ни с одной стратегией (dns.nextdns.io, октябрь 2026).
+        У сервиса из нескольких имён профиль по адресам цели не покрыл бы остальные имена — там как было.
+        """
+        from diagnostics.browser_hello import build_hello
+
+        window = self._env.server_window(address)
+        hello = len(build_hello(self._target.host))
+        if not window or window >= hello:
+            return
+        if self._target.companions:
+            self._events.log(
+                f"  Сервер {address} принимает до ответа только {window} байт, а приветствие браузера — {hello}: "
+                "по имени winws2 его может не узнать. У сервиса несколько имён, профиль остаётся по именам"
+            )
+            return
+        self._target.match_by_address = True
+        self._events.log(
+            f"  Сервер {address} принимает до своего ответа только {window} байт, а приветствие браузера — {hello} "
+            "байт: браузер отправит его частями, и winws2 не узнает имя сайта. Профиль подбора — по адресам цели, "
+            "а не по имени"
+        )
 
     def _reply_window_addresses(self, target_found: bool) -> tuple[str, ...]:
         """Адреса, где TLS режут по ответу сервера: у цели (первый уже проверен) и у остальных имён сервиса.
@@ -983,6 +1013,7 @@ class StrategySearch:
             games_addresses=self._target.games_addresses,
             games_ports=self._target.games_ports,
             window_addresses=self._target.window_addresses if window and self._protocol == PROTOCOL_TCP_HTTPS else (),
+            match_addresses=self._target.addresses if self._target.match_by_address and self._protocol == PROTOCOL_TCP_HTTPS else (),
         )
 
     def _match_domains(self) -> str:

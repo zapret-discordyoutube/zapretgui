@@ -276,3 +276,21 @@ def test_progress_and_cancel(tmp_path):
     cancelled = parse_winws_log_file(str(path), cancel_cb=lambda: True)
     assert cancelled.cancelled
     assert cancelled.packets_total < 3000
+
+
+def test_server_window_smaller_than_the_hello_is_reported():
+    """dns.nextdns.io, 30.10.2026: окно сервера 1448 байт — winws2 бросает собирать приветствие и не узнаёт имя."""
+    log = "\n".join(
+        (
+            "packet: id=1 len=1500 outbound IPv6=0 IPChecksum=1 TCPChecksum=1 UDPChecksum=1 IfIdx=8.0",
+            "IP4: 10.0.0.2 => 45.142.246.128 proto=tcp ttl=128 sport=50000 dport=443 flags=AP",
+            "reasm cancelled because server window size 1448 is smaller than expected reasm size 1789",
+            "packet: id=1 reinject unmodified",
+            "",
+        )
+    )
+
+    result = parse_winws_log_stream(io.StringIO(log))
+
+    assert result.small_server_windows == {"45.142.246.128": (1448, 1789)}
+    assert result.unrecognized_packet_lines == 0

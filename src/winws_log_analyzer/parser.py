@@ -75,6 +75,8 @@ _RE_HOSTNAME_LINE = re.compile(r"^hostname: (\S+)")
 _RE_LUA_APPLIED = re.compile(r"^\* lua '([^']+)' : desync\s*$")
 _RE_DELAYED = re.compile(r"^(DELAY desync|REPLAYING delayed packet|SENDING delayed packet)")
 _RE_REPLAY = re.compile(r"^REPLAYING delayed packet")
+# nfq2/desync.c: сервер дал окно меньше приветствия, и winws2 бросил собирать его — имени сайта он не узнает.
+_RE_REASM_SMALL_WINDOW = re.compile(r"^reasm cancelled because server window size (\d+) is smaller than expected reasm size (\d+)")
 # Преамбула
 _RE_PREAMBLE_PROFILE = re.compile(r"^profile (\d+) \(([^)]*)\) lua (\w+)\(")
 _RE_PREAMBLE_LOADED = re.compile(r"^Loaded (\d+) (hosts|ip/subnets) from (.+)$")
@@ -143,6 +145,11 @@ class WinwsLogParser:
     def _feed_block_line(self, line: str) -> None:
         pkt = self._current
         assert pkt is not None
+        m = _RE_REASM_SMALL_WINDOW.match(line)
+        if m is not None:
+            server = pkt.dst_ip if pkt.direction == "out" else pkt.src_ip
+            self._result.small_server_windows[server or "?"] = (int(m.group(1)), int(m.group(2)))
+            return
         if _RE_DELAYED.match(line):
             pkt.delayed = True
             if _RE_REPLAY.match(line):

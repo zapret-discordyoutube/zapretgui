@@ -139,6 +139,7 @@ def build_probe_profile(
     games_addresses: Sequence[str] = (),
     games_ports: Sequence[int] = (),
     window_addresses: Sequence[str] = (),
+    match_addresses: Sequence[str] = (),
 ) -> ProbeProfile:
     """Профиль одной стратегии для выбранного режима подбора.
 
@@ -148,10 +149,13 @@ def build_probe_profile(
       ведут всё соединение (``tlsrec``), получают входящие пакеты и всё
       соединение — так, как требует сама функция. ``window_addresses`` —
       адреса, где TLS режут по ответу сервера: перед основным профилем идёт
-      профиль по их группам (``--ipset-ip``) с малым окном и той же стратегией.
+      профиль по ним (``--ipset-ip``) с малым окном и той же стратегией.
       Профиль по адресам выбирается уже на первом пакете соединения, когда
       имя сайта ещё не известно, и стоит выше профиля по именам, чтобы
-      соединение не ушло из него, когда имя станет известно.
+      соединение не ушло из него, когда имя станет известно. ``match_addresses`` —
+      основной профиль выбирается по этим адресам, а не по именам: сервер с
+      окном меньше приветствия браузера получает его частями, и winws2 имени
+      не узнаёт.
     - Голос: STUN и Discord IP discovery на любых UDP-портах.
     - Игры: UDP игровых портов и портов проверок на адресах из игровых
       ipset и на адресах, которыми подбор проверял стратегию.
@@ -197,9 +201,11 @@ def build_probe_profile(
         return ProbeProfile(preamble, (*by_address, *WINDOW_RANGES), strategy)
     # Сначала малое окно на всё соединение, затем стратегия со своими обычными диапазонами.
     window = (*by_address, *WINDOW_RANGES, WINDOW_STRATEGY_LINE, *ranges, *strategy) if groups else ()
+    addresses = window_groups(match_addresses)
+    selector = f"--ipset-ip={','.join(addresses)}" if addresses else f"--hostlist-domains={domain}"
     return ProbeProfile(
         preamble,
-        ("--filter-tcp=443", f"--hostlist-domains={domain}", *ranges),
+        ("--filter-tcp=443", selector, *ranges),
         strategy,
         window,
     )

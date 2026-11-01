@@ -315,6 +315,12 @@ class RealEnvironment:
             return None
         return reply_window_proven(small, control)
 
+    def server_window(self, address: str) -> int | None:
+        """Окно приёма сервера сразу после соединения (``utils.tcp_info``). None — не узнать."""
+        from utils.tcp_info import server_window
+
+        return server_window(address, timeout=HELLO_DISCOVERY_TIMEOUT_S)
+
     def video_siblings(self, host: str) -> list[str]:
         """Адреса соседних видеосерверов того же узла (rr1…rr20 того же sn-…): YouTube раздаёт видео со всех них."""
         from blockcheck.strategy_search.probes import sibling_video_hosts

@@ -93,6 +93,8 @@ class FakeEnv:
     # Соседние видеосерверы узла: хост -> адреса; и какие из адресов режут по ответу сервера.
     siblings: object = None
     sibling_windows: tuple = ()
+    # Окно приёма сервера (байт) по адресу; по умолчанию не известно.
+    window_of: object = None
 
     def __post_init__(self):
         self.running = None
@@ -203,6 +205,9 @@ class FakeEnv:
     def probe_window(self, address):
         self.hellos.append((address, "window"))
         return self.window(address) if self.window is not None else False
+
+    def server_window(self, address):
+        return self.window_of.get(address) if self.window_of else None
 
     def video_siblings(self, host):
         return list((self.siblings or {}).get(host, ()))
@@ -822,6 +827,37 @@ class ReplyWindowTests(unittest.TestCase):
         self.assertEqual([item.strategy_id for item in report.working_strategies], ["b"])
         self.assertIn("--ipset-ip=9.9.9.9", report.working_strategies[0].apply_lines)
         self.assertTrue(any("video.example.com (9.9.9.9)" in line for line in events.logs))
+
+
+class SmallServerWindowTests(unittest.TestCase):
+    """Сервер с окном меньше приветствия браузера (dns.nextdns.io, 1460 байт): профиль по имени не сработает."""
+
+    def test_profile_matches_the_target_by_address_and_says_why(self) -> None:
+        env = FakeEnv(network=blocked_unless("good"), candidates=[cand("good")], window_of={"1.1.1.10": 1460})
+        report, events = run(env, target="dns.nextdns.io")
+
+        lines = report.working_strategies[0].apply_lines
+        self.assertTrue(any(line.startswith("--ipset-ip=1.1.1.10") for line in lines))
+        self.assertFalse(any(line.startswith("--hostlist-domains=") for line in lines))
+        self.assertTrue(any("1460 байт" in line and "по адресам цели" in line for line in events.logs))
+
+    def test_ordinary_window_keeps_the_profile_by_name(self) -> None:
+        env = FakeEnv(network=blocked_unless("good"), candidates=[cand("good")], window_of={"1.1.1.10": 65535})
+        report, _events = run(env)
+
+        self.assertIn("--hostlist-domains=discord.com", report.working_strategies[0].apply_lines)
+
+    def test_service_of_several_names_keeps_the_names(self) -> None:
+        env = CompanionEnv(
+            network=lambda running, _n: OK if running == "both" else RESET,
+            video=lambda running: OK if running == "both" else RESET,
+            candidates=[cand("both", "multisplit")],
+            window_of={"1.1.1.10": 1460},
+        )
+        report, events = run(env, target="www.youtube.com", companions=(("googlevideo.com", "video.example.com"),))
+
+        self.assertIn("--hostlist-domains=youtube.com,googlevideo.com", report.working_strategies[0].apply_lines)
+        self.assertTrue(any("профиль остаётся по именам" in line for line in events.logs))
 
 
 class StageEventTests(unittest.TestCase):

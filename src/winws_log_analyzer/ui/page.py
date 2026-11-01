@@ -271,6 +271,14 @@ class WinwsLogAnalyzerPage(BasePage):
             parts.append(f"Нераспознанных блоков: {result.unparsed_blocks}")
         if result.unrecognized_packet_lines:
             parts.append(f"Нераспознанных packet-строк: {result.unrecognized_packet_lines}")
+        if result.small_server_windows:
+            servers = ", ".join(
+                f"{address} (окно {window} < {needed} байт)" for address, (window, needed) in result.small_server_windows.items()
+            )
+            parts.append(
+                f"Приветствие не влезает в окно сервера: {servers} — имя сайта winws2 здесь не узнаёт, "
+                "профиль по доменам не сработает, нужен профиль по адресу (ipset)"
+            )
         if result.packets_total == 0:
             parts = ["В файле не найдено пакетных блоков — это debug-лог winws2?"]
         self._ui.summary_label.setText(" · ".join(parts))
