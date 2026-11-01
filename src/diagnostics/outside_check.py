@@ -11,6 +11,10 @@
   адрес закрыли в России), и проверка должна идти за ним без новой версии.
 - Сервер отвечает и за себя (``self_ok``): если у него самого нет внешней
   сети, вывода нет.
+- Страница, оборвавшаяся у пользователя раньше окна «16 КБ» (``cut_window.CUT_EARLY``),
+  спрашивается целиком (``pages``): сервер грузит тот же путь и говорит, пришла ли
+  она до конца. Рвётся и там — сайт ломается сам, не ТСПУ; приходит — рвётся
+  только из России.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from __future__ import annotations
 import http.client
 import json
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from diagnostics.tls_probe import client_context
@@ -74,36 +78,64 @@ def _post(ip: str, body: bytes, cancel: SocketCancel) -> bytes | None:
         close_quietly(raw)
 
 
-def _parse(data: bytes | None) -> _Answer | None:
+def _parse(data: bytes | None, pages: Mapping[str, str] | None = None) -> _Answer | None:
     try:
         document = json.loads(data or b"")
-        results = {
-            str(item["host"]): OUTSIDE_UP if item.get("up") else OUTSIDE_DOWN
-            for item in document.get("results") or ()
-            if isinstance(item, dict) and item.get("host") and item.get("dns") != "fail"
-        }
+        results: dict[str, str] = {}
+        for item in document.get("results") or ():
+            if not isinstance(item, dict) or not item.get("host") or item.get("dns") == "fail":
+                continue
+            state = _state(item, str(item["host"]) in (pages or {}))
+            if state:
+                results[str(item["host"])] = state
         return _Answer(results=results, self_ok=bool(document.get("self_ok")))
     except (ValueError, TypeError, KeyError, AttributeError):
         return None
 
 
+def _state(item: dict, page_asked: bool) -> str:
+    """Вывод по одному сайту; пусто — вывода нет."""
+    if not item.get("up"):
+        return OUTSIDE_DOWN
+    if not page_asked:
+        return OUTSIDE_UP
+    if "page" not in item:
+        # Прежний сервер страниц не грузит: «жив» про оборванную страницу ничего не говорит.
+        return ""
+    # Спрашивали страницу целиком: «жив» — только если она пришла до конца.
+    page = item.get("page")
+    if page == "complete":
+        return OUTSIDE_UP
+    if page == "cut":
+        return OUTSIDE_DOWN
+    # Рукопожатие прошло, а ответа HTTP нет: о странице ничего не известно.
+    return ""
+
+
 def ask(
     hosts: list[str],
     *,
+    pages: Mapping[str, str] | None = None,
     server_ips: Callable[[], tuple[str, ...]],
     cancel: SocketCancel,
 ) -> dict[str, str]:
     """{сайт: OUTSIDE_UP | OUTSIDE_DOWN}; сайта нет в ответе — о нём ничего не известно.
 
+    ``pages`` — {сайт: путь} для страниц, которые надо загрузить целиком: для них
+    «up» значит «страница пришла до конца», «down» — «рвётся и там».
     ``server_ips`` — адреса сервера (у эталонного DoH). Пустой словарь — спросить
     не удалось или сервер сам без сети.
     """
     hosts = list(dict.fromkeys(host for host in hosts if host))[:MAX_HOSTS]
     if not hosts or cancel.cancelled:
         return {}
-    body = json.dumps({"v": 1, "hosts": hosts}).encode("utf-8")
+    request: dict = {"v": 1, "hosts": hosts}
+    wanted = {host: path for host, path in (pages or {}).items() if host in hosts and path}
+    if wanted:
+        request["pages"] = wanted
+    body = json.dumps(request).encode("utf-8")
     for ip in server_ips()[:2]:
-        answer = _parse(_post(ip, body, cancel))
+        answer = _parse(_post(ip, body, cancel), wanted)
         if answer is not None:
             return answer.results if answer.self_ok else {}
         if cancel.cancelled:

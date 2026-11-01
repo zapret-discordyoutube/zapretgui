@@ -31,7 +31,7 @@ from urllib.parse import urlsplit
 
 from diagnostics.tls_probe import ProbeResult
 from diagnostics.upload_probe import UPLOAD_BULK_STALLS, UPLOAD_OK, UPLOAD_PACKET_LIMIT, UploadVerdict
-from diagnostics.limits import FREEZE_MAX_BYTES, FREEZE_MIN_BYTES
+from diagnostics import cut_window
 from diagnostics.verdict import Level
 
 __all__ = [
@@ -148,18 +148,22 @@ def classify_download(result: ProbeResult | None) -> tuple[FreezeState, str]:
         # Причины здесь не называются: мёртвый или переехавший сервер из списка
         # отвечал бы «чужой сертификат» — и это выглядело бы как перехват трафика.
         return FreezeState.UNKNOWN, f"не удалось проверить: {_UNREACHED.get(result.kind, 'сервер не ответил как ожидалось')}"
-    size = int(result.body_size)
+    # Счёт фильтра: рукопожатие, заголовки и тело (``cut_window``), а не одно тело.
+    size = cut_window.result_bytes(result)
     kb = size // 1024
-    if result.body_cut and FREEZE_MIN_BYTES <= size <= FREEZE_MAX_BYTES:
-        return FreezeState.FREEZE, f"загрузка оборвалась на {kb} КБ"
-    if size >= FREEZE_MAX_BYTES:
-        return FreezeState.OK, f"получено {kb} КБ без обрыва"
+    cut = cut_window.result_cut(result)
+    if cut == cut_window.CUT_WINDOW:
+        return FreezeState.FREEZE, f"загрузка оборвалась на ~{kb} КБ"
+    if cut == cut_window.CUT_LATE or (not result.body_cut and cut_window.passed_window(size)):
+        return FreezeState.OK, f"получено ~{kb} КБ без обрыва"
     if result.body_cut:
-        return FreezeState.UNKNOWN, f"загрузка оборвалась на {kb} КБ — вне окна 12–36 КБ, на этот обрыв не похоже"
+        return FreezeState.UNKNOWN, (
+            f"загрузка оборвалась на ~{kb} КБ — раньше окна {cut_window.WINDOW_TEXT}, на этот обрыв не похоже"
+        )
     status = int(result.status or 0)
     if status >= 300:
         return FreezeState.UNKNOWN, f"сервер не отдал файл (код {status})"
-    return FreezeState.UNKNOWN, f"файл слишком маленький ({kb} КБ) — не показательно"
+    return FreezeState.UNKNOWN, f"файл слишком маленький ({int(result.body_size) // 1024} КБ) — не показательно"
 
 
 def _split_url(url: str) -> tuple[str, str]:

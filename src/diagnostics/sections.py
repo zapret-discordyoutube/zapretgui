@@ -19,6 +19,7 @@ from dataclasses import replace
 from diagnostics import (
     block_cause,
     block_kind,
+    cut_window,
     filter_habits,
     filter_place,
     ipv6_check,
@@ -938,8 +939,15 @@ def ask_outside(run: Run, services: dict[str, Service], done_probes: list) -> No
     ]
     if not failed or run.dns_cancelled() or run.deadline - time.monotonic() < OUTSIDE_NEEDS_S:
         return
+    # Страница оборвалась раньше окна «16 КБ»: сервер грузит её целиком по тому же пути.
+    pages = {
+        probe.host: probe.target.path or "/"
+        for probe in failed
+        if cut_window.result_cut(probe.reach) == cut_window.CUT_EARLY
+    }
     answers = outside_check.ask(
         [probe.host for probe in failed],
+        pages=pages,
         server_ips=lambda: net_access.doh_lookup(run, outside_check.SERVER_HOST)[1],
         cancel=run.probe_cancel,
     )

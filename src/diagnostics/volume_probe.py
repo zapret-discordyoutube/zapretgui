@@ -9,8 +9,9 @@
 
 Фильтр считает данные **по соединению**, а не по запросу. Поэтому здесь по
 одному соединению подряд уходит много запросов, пока от сервера не наберётся
-больше 24 КБ. Набралось — обрыва нет. Соединение замерло в окне 16 КБ —
-похоже на обрыв.
+``TARGET_BYTES`` (больше окна обрыва). Набралось — обрыва нет. Соединение
+замерло в окне «16 КБ» (по счёту фильтра, ``diagnostics.cut_window``) — похоже
+на обрыв.
 
 Чтобы не принять за обрыв сервер, который сам перестаёт отвечать на частые
 одинаковые запросы, замирание проверяется второй раз другим видом запроса
@@ -25,13 +26,11 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from diagnostics.limits import FREEZE_MAX_BYTES, FREEZE_MIN_BYTES
+from diagnostics import cut_window
 from diagnostics.transfer_probe import RequestSample
 from utils.socket_cancel import SocketCancel
 
 __all__ = [
-    "CUT_MAX_BYTES",
-    "CUT_MIN_BYTES",
     "TARGET_BYTES",
     "VOLUME_CUT",
     "VOLUME_OK",
@@ -47,16 +46,12 @@ __all__ = [
     "VolumeVerdict",
     "collect",
     "download",
+    "filter_bytes",
     "judge",
 ]
 
 # Сколько набрать, чтобы уверенно сказать «обрыва нет».
 TARGET_BYTES = 48 * 1024
-# Окно, в котором замирание считается обрывом, — общее окно ``limits.FREEZE_*``,
-# только нижняя граница сдвинута: фильтр считает и служебные данные шифрования
-# (сертификат сервера — несколько килобайт), а здесь считается лишь полезный ответ.
-CUT_MIN_BYTES = FREEZE_MIN_BYTES - 4_000
-CUT_MAX_BYTES = FREEZE_MAX_BYTES
 MAX_REQUESTS = 60
 TIMEOUT_S = 5.0
 # Столько ждём следующих данных: дольше — соединение замерло.
@@ -85,13 +80,15 @@ VOLUME_UNKNOWN = "unknown"
 @dataclass(frozen=True, slots=True)
 class VolumeRun:
     kind: str
-    # Сколько байт ответа получено по соединению.
+    # Сколько байт ответа (заголовки и тело на проводе) получено по соединению.
     received: int = 0
     # Сколько запросов успели отправить.
     requests: int = 0
     # Замер каждого запроса (время до первого байта, скорость тела): по ним
     # ``diagnostics.transfer_probe`` судит о качестве передачи без новых запросов.
     samples: tuple[RequestSample, ...] = ()
+    # Служебные байты TLS от сервера по тому же соединению (рукопожатие); 0 — не измерены.
+    handshake: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,13 +130,14 @@ def download(
     token = cancel or SocketCancel()
     started = time.monotonic()
     received = 0
+    handshake = 0
     requests = 0
     samples: list[RequestSample] = []
 
     def _run(kind: str) -> VolumeRun:
         if token.cancelled and kind != RUN_PASSED:
             kind = RUN_CANCELLED
-        return VolumeRun(kind, received, requests, tuple(samples))
+        return VolumeRun(kind, received, requests, tuple(samples), handshake)
 
     if token.cancelled:
         return VolumeRun(RUN_CANCELLED)
@@ -150,6 +148,7 @@ def download(
             exchange = connection.request(path, method=method, enough=lambda body: before + len(body) >= target)
             requests += 1
             received += exchange.received
+            handshake += exchange.progress.tls_in
             samples.append(
                 RequestSample(
                     received=exchange.received,
@@ -165,6 +164,7 @@ def download(
             if exchange.reconnected:
                 # Прежнее соединение закрыли между запросами: счёт по нему кончился, этот запрос — уже не по нему.
                 received -= exchange.received
+                handshake -= exchange.progress.tls_in
                 requests -= 1
                 samples.pop()
                 return _run(RUN_CLOSED)
@@ -176,15 +176,20 @@ def download(
                 if exchange.stalled:
                     return _run(RUN_STALLED)
                 return _run(RUN_RESET if exchange.reset else RUN_CLOSED)
-            if requests >= ESTIMATE_AFTER and received / requests * MAX_REQUESTS <= CUT_MAX_BYTES:
+            if requests >= ESTIMATE_AFTER and not cut_window.passed_window(cut_window.filter_bytes(received / requests * MAX_REQUESTS)):
                 return _run(RUN_CLOSED)
         return _run(RUN_CLOSED)
     finally:
         connection.close()
 
 
+def filter_bytes(run: VolumeRun) -> int:
+    """Счёт фильтра по соединению: к ответам прибавляется рукопожатие TLS (``cut_window``)."""
+    return cut_window.filter_bytes(run.received, handshake=run.handshake)
+
+
 def _froze_in_window(run: VolumeRun) -> bool:
-    return run.kind in (RUN_STALLED, RUN_RESET) and CUT_MIN_BYTES <= run.received <= CUT_MAX_BYTES
+    return run.kind in (RUN_STALLED, RUN_RESET) and cut_window.cut_place(filter_bytes(run)) == cut_window.CUT_WINDOW
 
 
 def collect(host: str, ip: str, path: str, *, cancel: SocketCancel) -> VolumeFacts:
@@ -204,29 +209,30 @@ def judge(facts: VolumeFacts) -> VolumeVerdict:
     if RUN_CANCELLED in (first.kind, second.kind if second else ""):
         return VolumeVerdict(VOLUME_UNKNOWN, "проверку объёма прервали")
     # Нужный объём мог не набраться, но окно обрыва пройдено без замирания — обрыва нет.
-    if first.kind == RUN_PASSED or (first.kind == RUN_CLOSED and first.received > CUT_MAX_BYTES):
+    if first.kind == RUN_PASSED or (first.kind == RUN_CLOSED and cut_window.passed_window(filter_bytes(first))):
         return VolumeVerdict(VOLUME_OK, f"по одному соединению получено {first.received // 1024} КБ без обрыва")
     if _froze_in_window(first):
-        kb = first.received // 1024
+        # Место обрыва — по счёту фильтра, как и окно: «~16 КБ», а не одни ответы.
+        kb = filter_bytes(first) // 1024
         if second is not None and _froze_in_window(second):
             return VolumeVerdict(
                 VOLUME_CUT,
-                f"соединение замирает после {kb} КБ — дважды подряд, на {kb} и {second.received // 1024} КБ",
+                f"соединение замирает после ~{kb} КБ — дважды подряд, на ~{kb} и ~{filter_bytes(second) // 1024} КБ",
                 cut_kb=kb,
             )
         if second is not None and second.kind == RUN_PASSED:
             return VolumeVerdict(
-                VOLUME_UNKNOWN, f"один раз соединение замерло на {kb} КБ, при повторе прошло — случайный сбой"
+                VOLUME_UNKNOWN, f"один раз соединение замерло на ~{kb} КБ, при повторе прошло — случайный сбой"
             )
         return VolumeVerdict(
-            VOLUME_UNKNOWN, f"соединение замерло на {kb} КБ, но повтор этого не подтвердил — вывода нет"
+            VOLUME_UNKNOWN, f"соединение замерло на ~{kb} КБ, но повтор этого не подтвердил — вывода нет"
         )
     if first.kind == RUN_FAILED:
         return VolumeVerdict(VOLUME_UNKNOWN, "не удалось соединиться повторно — объём не проверен")
     if first.kind in (RUN_STALLED, RUN_RESET):
         return VolumeVerdict(
             VOLUME_UNKNOWN,
-            f"соединение прервалось на {first.received // 1024} КБ — это не похоже на обрыв после 16 КБ",
+            f"соединение прервалось на ~{filter_bytes(first) // 1024} КБ — это не похоже на обрыв после 16 КБ",
         )
     return VolumeVerdict(
         VOLUME_UNKNOWN,

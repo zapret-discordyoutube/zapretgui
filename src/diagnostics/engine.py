@@ -46,6 +46,7 @@ from diagnostics import (
     block_cause,
     block_view,
     cert_owner,
+    cut_window,
     net_access,
     protocol_probe,
     quic_probe,
@@ -64,7 +65,6 @@ from diagnostics import problems as problem_rules
 from diagnostics.levels import level_rank
 from diagnostics.limits import (
     DNS_ATTEMPTS,
-    FREEZE_MAX_BYTES,
     RECHECK_AT_ONCE,
     RECHECK_LIGHT_AT_ONCE,
     RECHECK_NEEDS_S,
@@ -367,7 +367,7 @@ def _check_volume(run: _Run, probe: _Probe) -> None:
     result = probe.reach
     if probe.reach_state != ReachState.OK or result is None or not result.ip or run.dns_cancelled():
         return
-    if result.body_size >= FREEZE_MAX_BYTES and not result.body_cut:
+    if cut_window.whole_past_window(result):
         # Главная страница сама больше окна обрыва и пришла целиком.
         return
     facts = volume_probe.collect(probe.host, result.ip, probe.target.path, cancel=run.probe_cancel)

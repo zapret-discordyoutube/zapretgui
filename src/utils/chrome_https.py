@@ -94,6 +94,7 @@ _E_PARTIAL_FILE = 18
 # Виды отладочных событий libcurl (curl_infotype), по которым виден этап соединения.
 _DEBUG_TEXT = 0
 _DEBUG_HEADER_OUT = 2
+_DEBUG_SSL_DATA_IN = 5
 _DEBUG_SSL_DATA_OUT = 6
 
 
@@ -110,6 +111,11 @@ class _Progress:
     body: bytearray | None = None
     # Сколько байт заголовков ответа пришло: у HEAD, кроме них, ничего нет.
     header_size: int = 0
+    # Байты тела на проводе: ``body`` при распаковке сжатого тела больше их.
+    wire_body: int = 0
+    # Служебные байты TLS от сервера: рукопожатие с сертификатом (3–5 КБ на win10, 2026-11-01)
+    # и заголовки записей. Фильтр считает и их — ``diagnostics.cut_window``.
+    tls_in: int = 0
     # Заголовок Date окончательного ответа: по нему проверка сверяет часы компьютера.
     server_date: str = ""
     # Чтение прервали мы сами: набрали сколько нужно (``stopped_by_us``) или нажали «Стоп».
@@ -128,7 +134,9 @@ class _Progress:
     ended_at: float = 0.0
 
     def on_debug(self, kind: int, data: bytes) -> None:
-        if kind == _DEBUG_SSL_DATA_OUT:
+        if kind == _DEBUG_SSL_DATA_IN:
+            self.tls_in += len(data)
+        elif kind == _DEBUG_SSL_DATA_OUT:
             self.tls_started = True
         elif kind == _DEBUG_HEADER_OUT:
             self.secured = True
@@ -183,8 +191,8 @@ class Exchange:
 
     @property
     def received(self) -> int:
-        """Байты ответа: заголовки и тело."""
-        return self.progress.header_size + len(self.progress.body)
+        """Байты ответа на проводе: заголовки и тело (сжатое — как пришло)."""
+        return self.progress.header_size + self.progress.wire_body
 
     @property
     def ttfb_ms(self) -> float:
@@ -316,6 +324,7 @@ class ChromeConnection:
             if not progress.first_body_at:
                 progress.first_body_at = now
             progress.last_body_at = now
+            progress.wire_body += len(chunk)
             if unpack:
                 try:
                     progress.body.extend(unpack[0].decompress(chunk))
@@ -418,6 +427,8 @@ def chrome_get(
             stage=exchange.stage,
             status=progress.status,
             body_size=len(progress.body),
+            received_size=exchange.received,
+            handshake_size=progress.tls_in,
             tls_version=progress.tls_version,
             elapsed_ms=(time.perf_counter() - started) * 1000,
             detail=detail,

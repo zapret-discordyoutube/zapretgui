@@ -61,6 +61,12 @@ class ProbeResult:
     body_size: int = 0
     # Ответ начал приходить, но оборвался (таймаут или сброс посреди тела).
     body_cut: bool = False
+    # Байты ответа на проводе: заголовки и тело как пришло (сжатое не распаковано).
+    # 0 — не измерено (тогда счёт идёт по ``body_size``). По ним и по ``handshake_size``
+    # ``diagnostics.cut_window`` считает байты так, как их считает фильтр.
+    received_size: int = 0
+    # Байты рукопожатия TLS от сервера (сертификат и прочее); 0 — не измерено.
+    handshake_size: int = 0
     cert_problem: str = ""
     tls_version: str = ""
     elapsed_ms: float = 0.0

@@ -245,7 +245,8 @@ def probe_http(host: str, address: str, *, cancel=None) -> ProbeOutcome:
         connected=connected,
         elapsed_ms=elapsed,
         body_cut=body_cut,
-        body_size=len(body),
+        # Весь ответ: без шифрования фильтр считает заголовки вместе с телом.
+        body_size=len(data),
     )
 
 

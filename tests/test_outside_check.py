@@ -45,6 +45,35 @@ class AskTests(unittest.TestCase):
                 self.assertEqual(self._ask(["discord.com"], answer)[0], {})
         self.assertEqual(self._ask(["discord.com"], _answer(), ips=())[0], {})
 
+    def test_cut_page_is_loaded_whole_from_outside(self) -> None:
+        # Страница оборвалась у человека раньше окна «16 КБ»: сервер грузит её целиком.
+        answer = _answer(
+            {"host": "whole.example", "dns": "ok", "up": True, "body": 65_536, "page": "complete"},
+            {"host": "broken.example", "dns": "ok", "up": True, "body": 3_000, "page": "cut"},
+            {"host": "nohttp.example", "dns": "ok", "up": True, "body": 0, "page": ""},
+            {"host": "alive.example", "dns": "ok", "up": True},
+        )
+        pages = {"whole.example": "/", "broken.example": "/app", "nohttp.example": "/"}
+        with patch.object(oc, "_post", return_value=answer) as post:
+            found = oc.ask(
+                ["whole.example", "broken.example", "nohttp.example", "alive.example"],
+                pages=pages,
+                server_ips=lambda: ("83.217.211.149",),
+                cancel=SocketCancel(),
+            )
+
+        self.assertEqual(json.loads(post.call_args.args[1])["pages"], pages)
+        self.assertEqual(
+            found,
+            {"whole.example": oc.OUTSIDE_UP, "broken.example": oc.OUTSIDE_DOWN, "alive.example": oc.OUTSIDE_UP},
+        )
+
+    def test_old_server_without_pages_gives_no_conclusion_about_a_cut_page(self) -> None:
+        answer = _answer({"host": "cut.example", "dns": "ok", "up": True})
+        with patch.object(oc, "_post", return_value=answer):
+            found = oc.ask(["cut.example"], pages={"cut.example": "/"}, server_ips=lambda: ("1.2.3.4",), cancel=SocketCancel())
+        self.assertEqual(found, {})
+
     def test_no_more_than_eight_sites_go_to_the_server(self) -> None:
         hosts = [f"site{index}.example" for index in range(12)]
         _found, post = self._ask(hosts, _answer())

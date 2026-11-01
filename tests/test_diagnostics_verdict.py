@@ -25,6 +25,7 @@ from diagnostics.verdict import (
     Level,
     ReachState,
     TargetOutcome,
+    describe_reach,
     judge_dns,
     judge_reach,
     summarize_service,
@@ -138,10 +139,14 @@ class ReachTests(unittest.TestCase):
         self.assertEqual(judge_reach(ProbeResult(ip="1.1.1.1", kind=KIND_CONNECT)), ReachState.IP_BLOCK)
         self.assertEqual(judge_reach(ProbeResult(ip="1.1.1.1", kind=KIND_CERT)), ReachState.CERT)
 
-    def test_body_cut_at_16kb_is_freeze_but_short_page_is_ok(self) -> None:
+    def test_body_cut_at_16kb_is_freeze_and_earlier_cut_is_not_opened(self) -> None:
         self.assertEqual(judge_reach(_ok(body_cut=True, body_size=16_500)), ReachState.FREEZE)
-        self.assertEqual(judge_reach(_ok(body_cut=True, body_size=3_000)), ReachState.OK)
+        # Страница оборвалась раньше окна: сайт не открылся (решение 2026-11-01), а чей это
+        # обрыв — покажут уточняющие пробы и сверка из-за рубежа.
+        self.assertEqual(judge_reach(_ok(body_cut=True, body_size=3_000)), ReachState.DPI)
+        self.assertIn("раньше обычного обрыва ТСПУ", describe_reach(_ok(body_cut=True, body_size=3_000)))
         self.assertEqual(judge_reach(_ok(body_size=16_500)), ReachState.OK)
+        self.assertEqual(judge_reach(_ok(body_size=3_000)), ReachState.OK)
 
 
 class ServiceSummaryTests(unittest.TestCase):
@@ -250,6 +255,7 @@ class _Net:
         # Что ответил сервер за рубежом и о каких сайтах его спрашивали.
         self.outside: dict[str, str] = {}
         self.outside_asked: list[str] = []
+        self.outside_pages: dict[str, str] = {}
         # Что «нашла» проверка подсетей; сколько раз её звали.
         self.subnets = None
         self.subnet_checks = 0
@@ -312,8 +318,9 @@ class _Net:
             return self.cause_facts(host, result)
         return engine.block_cause.CauseFacts(host=host, result=result)
 
-    def _outside(self, hosts, **_kwargs):
+    def _outside(self, hosts, pages=None, **_kwargs):
         self.outside_asked.extend(hosts)
+        self.outside_pages.update(pages or {})
         return {host: self.outside[host] for host in hosts if host in self.outside}
 
     def _subnets(self, _run, _emit):
@@ -1527,6 +1534,23 @@ class EngineScenarioTests(unittest.TestCase):
         problem = next(item for item in result["problems"] if "Discord" in item["text"])
         self.assertNotIn(problem["action"], ("strategy", "start_zapret"))
 
+    def test_page_cut_early_breaking_abroad_too_is_the_site_itself(self) -> None:
+        """Страница рвётся раньше окна «16 КБ» и у сервера за рубежом — это не ТСПУ, сайт ломается сам."""
+
+        def _https(host, ip):
+            if host == "discord.com":
+                return ProbeResult(ip=ip, kind=KIND_OK, status=200, body_size=1_000, body_cut=True, received_size=1_300, handshake_size=3_600)
+            return _ok(ip)
+
+        net = _Net(https=_https)
+        net.outside = {"discord.com": "down"}
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None, ask_outside=True)
+
+        discord = next(item for item in result["services"] if item["key"] == "discord")
+        self.assertEqual(discord["kind"], "down")
+        # Сервер грузит ту же страницу целиком, а не только спрашивает «жив ли».
+        self.assertEqual(net.outside_pages.get("discord.com"), "/")
+
     def test_server_abroad_is_not_asked_without_the_checkbox(self) -> None:
         # Соединение с сервером проекта выдаёт программу провайдеру: без галочки его нет.
         net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET) if host == "discord.com" else _ok(ip))
@@ -2181,7 +2205,7 @@ class BlockKindInReportTests(unittest.TestCase):
         main = next(item for item in discord["targets"] if item["main"])
         self.assertEqual((main["state"], main["ok"], main["kind"], main["volume"]), ("freeze", False, "cut16", "cut"))
         self.assertEqual(main["kind_title"], "Обрыв после 16 КБ")
-        self.assertIn("соединение замирает после 14 КБ", main["short"])
+        self.assertIn("соединение замирает после ~18 КБ", main["short"])
         self.assertEqual((discord["level"], discord["kind"]), ("fail", "cut16"))
         self.assertTrue(discord["headline"].startswith("Discord грузится не до конца: загрузка обрывается после 16 КБ"))
         problem = next(item for item in result["problems"] if item["target"] == "discord.com")

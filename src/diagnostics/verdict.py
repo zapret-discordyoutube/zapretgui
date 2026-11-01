@@ -44,7 +44,7 @@ from diagnostics.tls_probe import (
     KIND_TLS,
     ProbeResult,
 )
-from diagnostics.limits import FREEZE_MAX_BYTES, FREEZE_MIN_BYTES
+from diagnostics import cut_window
 from utils.address_kinds import AddressKind, address_kind, is_stub_address
 from utils.windows_dns_query import DNS_STATUS_NAME_ERROR, DNS_STATUS_NO_RECORDS
 
@@ -228,8 +228,13 @@ def judge_reach(result: ProbeResult | None) -> ReachState:
     if result is None:
         return ReachState.NO_ADDRESS
     if result.kind == KIND_OK:
-        if result.body_cut and FREEZE_MIN_BYTES <= result.body_size <= FREEZE_MAX_BYTES:
+        cut = cut_window.result_cut(result)
+        if cut == cut_window.CUT_WINDOW:
             return ReachState.FREEZE
+        if cut == cut_window.CUT_EARLY:
+            # Страница не догрузилась: сайт не открылся, а на чьей стороне обрыв —
+            # покажут уточняющие пробы и сверка из-за рубежа.
+            return ReachState.DPI
         return ReachState.OK
     if result.kind == KIND_CERT:
         return ReachState.CERT
@@ -247,8 +252,13 @@ def describe_reach(result: ProbeResult | None, *, timeout: float = 0.0) -> str:
         return "не удалось узнать адрес сервера"
     if state == ReachState.FREEZE:
         return (
-            f"ответ оборвался на {result.body_size // 1024} КБ — так ТСПУ режет соединения "
+            f"ответ оборвался на ~{cut_window.result_bytes(result) // 1024} КБ — так ТСПУ режет соединения "
             "с зарубежными серверами"
+        )
+    if result.kind == KIND_OK and result.body_cut:
+        return (
+            f"ответ оборвался на ~{cut_window.result_bytes(result) // 1024} КБ — раньше обычного обрыва ТСПУ "
+            f"({cut_window.WINDOW_TEXT}); сломан ли сайт сам, показывает сверка с сервером в Нидерландах"
         )
     if state == ReachState.CERT:
         return f"чужой сертификат ({result.cert_problem or 'не прошёл проверку'}) — трафик перехватывает антивирус, прокси или провайдер"

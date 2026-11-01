@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from diagnostics import cut_window
 from diagnostics import volume_probe as vp
 from utils.socket_cancel import SocketCancel
 
@@ -34,8 +35,9 @@ class JudgeTests(unittest.TestCase):
         verdict = vp.judge(vp.VolumeFacts(_run(vp.RUN_STALLED, 14_500, 20), _run(vp.RUN_STALLED, 13_800, 41)))
 
         self.assertEqual(verdict.code, vp.VOLUME_CUT)
-        self.assertEqual(verdict.cut_kb, 14)
-        self.assertIn("дважды подряд, на 14 и 13 КБ", verdict.text)
+        # Место обрыва — по счёту фильтра: ответы плюс рукопожатие TLS (``cut_window``), как «~16 КБ» у ТСПУ.
+        self.assertEqual(verdict.cut_kb, 18)
+        self.assertIn("дважды подряд, на ~18 и ~17 КБ", verdict.text)
 
     def test_reset_in_the_window_counts_like_a_stall(self) -> None:
         verdict = vp.judge(vp.VolumeFacts(_run(vp.RUN_RESET, 16_000), _run(vp.RUN_STALLED, 15_000)))
@@ -227,7 +229,7 @@ class DownloadTests(unittest.TestCase):
         result = self._download(self._serve(handle), stall=0.4)
 
         self.assertEqual(result.kind, vp.RUN_STALLED)
-        self.assertTrue(vp.CUT_MIN_BYTES <= result.received <= vp.CUT_MAX_BYTES, result.received)
+        self.assertEqual(cut_window.cut_place(vp.filter_bytes(result)), cut_window.CUT_WINDOW, result.received)
         self.assertEqual(vp.judge(vp.VolumeFacts(result, result)).code, vp.VOLUME_CUT)
 
     def test_server_closing_after_answer_is_not_a_stall(self) -> None:
