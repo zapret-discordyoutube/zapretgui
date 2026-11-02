@@ -71,6 +71,21 @@ class ProfileHelpButtonsTests(unittest.TestCase):
         opened.assert_called_once_with(PROFILE_TEXT_HELP.links[2].url)
         box.deleteLater()
 
+    def test_long_help_fits_a_760px_window_and_scrolls(self) -> None:
+        # Снимок с win10 (21.1.7.227, окно 1280x760): текст «Текст профиля»
+        # уезжал под кнопки статей и OK, конец было не прочитать.
+        from profile.profile_help_texts import PROFILE_TEXT_HELP
+        from profile.ui.profile_help_dialog import build_help_box
+
+        host = QWidget()
+        host.resize(1280, 760)
+        box = build_help_box(PROFILE_TEXT_HELP, host)
+        box.widget.adjustSize()
+        self.assertLessEqual(box.widget.sizeHint().height(), 760)
+        self.assertLessEqual(box.text_area.maximumHeight(), 760 - 330)
+        self.assertEqual(box.text_area.widget().text(), PROFILE_TEXT_HELP.text)
+        box.deleteLater()
+
     def test_tabs_have_help_buttons(self) -> None:
         from profile.ui.profile_list_file_tab import USER_TOOLTIP_IPSET, ProfileListFileTab
         from profile.ui.profile_raw_text_tab import ProfileRawTextTab
