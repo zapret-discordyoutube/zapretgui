@@ -39,6 +39,7 @@ __all__ = [
     "BROWSER_OK",
     "BROWSER_TIMEOUT",
     "BrowserVisit",
+    "browser_title",
     "find_browser",
     "find_browsers",
     "open_in_browser",
@@ -54,10 +55,10 @@ BROWSER_NO_ANSWER = "no_answer"
 # Сколько ждать загрузки страницы и сколько сверху — на запуск и выход браузера.
 PAGE_TIMEOUT_S = 20.0
 START_EXTRA_S = 15.0
+# Сколько ждать, пока браузер, напечатавший итог, выйдет сам и допишет журнал сети.
+VERDICT_EXIT_S = 3.0
 
 _NET_ERROR = re.compile(r"Page load failed: net::(ERR_[A-Z0-9_]+)")
-# Ошибка сети в другой строке журнала браузера (не «Page load failed»).
-_ANY_NET_ERROR = re.compile(r"net::(ERR_[A-Z0-9_]+)")
 # Сколько знаков последней строки вывода сохранять для журнала.
 DETAIL_CHARS = 200
 _TIMED_OUT = "Page load timed out"
@@ -98,6 +99,13 @@ class BrowserVisit:
     elapsed_ms: float = 0.0
     # Для журнала: код выхода и последняя строка вывода, когда браузер не ответил.
     details: str = ""
+    # Факты из журнала сети браузера (``browser_netlog.NetFacts``), если его просили писать.
+    net: object = None
+
+    @property
+    def title(self) -> str:
+        """Имя браузера для человека: Edge, Chrome."""
+        return browser_title(self.browser)
 
     @property
     def ok(self) -> bool:
@@ -122,7 +130,16 @@ def find_browser() -> str:
     return browsers[0] if browsers else ""
 
 
-def browser_command(browser: str, url: str, profile_dir: str, *, quic: bool) -> list[str]:
+def error_text(code: str) -> str:
+    """Ошибка браузера (ERR_…) словами; незнакомая — как есть."""
+    return _ERROR_TEXT.get(code, code)
+
+
+def browser_title(name: str) -> str:
+    return {"msedge.exe": "Edge", "chrome.exe": "Chrome"}.get(str(name or "").lower(), str(name or "браузер"))
+
+
+def browser_command(browser: str, url: str, profile_dir: str, *, quic: bool, extra: tuple[str, ...] = (), net_log: str = "") -> list[str]:
     command = [
         browser,
         "--headless=new",
@@ -141,7 +158,10 @@ def browser_command(browser: str, url: str, profile_dir: str, *, quic: bool) -> 
     ]
     if not quic:
         command.append("--disable-quic")
-    command += ["--dump-dom", url]
+    if net_log:
+        # Журнал сети: к какому адресу шёл браузер, прятал ли имя (ECH), через какой DNS и прокси (``browser_netlog``).
+        command.append(f"--log-net-log={net_log}")
+    command += [*extra, "--dump-dom", url]
     return command
 
 
@@ -172,10 +192,6 @@ def judge_output(output: str, browser: str, exit_code: int | None = None) -> Bro
         return BrowserVisit(BROWSER_TIMEOUT, "", f"страница не загрузилась за {PAGE_TIMEOUT_S:g} с", name)
     if "<html" in output.lower():
         return BrowserVisit(BROWSER_OK, browser=name)
-    match = _ANY_NET_ERROR.search(output)
-    if match:
-        code = match.group(1)
-        return BrowserVisit(BROWSER_FAILED, code, _ERROR_TEXT.get(code, code), name, details=_last_line(output))
     details = no_answer_details(output, exit_code)
     return BrowserVisit(BROWSER_NO_ANSWER, "", "браузер завершился, ничего не сказав о сайте", name, details=details)
 
@@ -225,11 +241,15 @@ def open_in_browser(
     popen=_hidden_popen,
     browser: str | None = None,
     clock: Callable[[], float] = time.monotonic,
+    extra: tuple[str, ...] = (),
+    net_log: bool = False,
 ) -> BrowserVisit:
     """Открыть ``https://host/path`` в настоящем браузере без окна и сказать, что вышло.
 
     Вывод браузера пишется в файл, а не в трубу: страница бывает большой, и полная
     труба остановила бы браузер. «Стоп» (``cancelled``) гасит браузер сразу.
+    ``extra`` — ключи, которыми это открытие отличается от обычного (``browser_diagnosis``);
+    ``net_log`` — записать журнал сети и вернуть факты из него в ``BrowserVisit.net``.
     """
     browser = find_browser() if browser is None else browser
     if not browser:
@@ -237,29 +257,37 @@ def open_in_browser(
     name = ntpath.basename(browser)
     profile_dir = tempfile.mkdtemp(prefix="zapret-browser-check-")
     output_path = os.path.join(profile_dir, "output.txt")
+    net_path = os.path.join(profile_dir, "net.json") if net_log else ""
     job = None
     process = None
+    visit = None
     started = clock()
     try:
         with open(output_path, "wb") as output:
-            process = popen(browser_command(browser, f"https://{host}{path or '/'}", profile_dir, quic=quic), output)
+            command = browser_command(browser, f"https://{host}{path or '/'}", profile_dir, quic=quic, extra=tuple(extra), net_log=net_path)
+            process = popen(command, output)
             job = _kill_on_close_job(process)
             deadline = clock() + PAGE_TIMEOUT_S + START_EXTRA_S
             while process.poll() is None:
                 if cancelled():
-                    return BrowserVisit(BROWSER_TIMEOUT, "", "проверку остановили", name)
-                # Edge, напечатав «Page load failed», сам не выходит: итог берётся, как только он напечатан.
+                    visit = BrowserVisit(BROWSER_TIMEOUT, "", "проверку остановили", name)
+                    break
+                # Edge, напечатав «Page load failed», бывает, не выходит: итог берётся, как только он напечатан,
+                # а браузеру даётся пара секунд выйти самому — иначе журнал сети останется без последних записей.
                 if _has_verdict(_read_output(output_path)):
+                    _wait_exit(process, VERDICT_EXIT_S)
                     break
                 if clock() >= deadline:
+                    # Браузер не сказал ничего — ни страницы, ни ошибки: о сайте это ничего не говорит.
                     last = _last_line(_read_output(output_path))
-                    details = f"последняя строка: {last}" if last else "вывод пуст"
-                    return BrowserVisit(BROWSER_TIMEOUT, "", "браузер не ответил вовремя", name, details=details)
+                    details = f"не завершился за {PAGE_TIMEOUT_S + START_EXTRA_S:g} с; " + (f"последняя строка: {last}" if last else "вывод пуст")
+                    visit = BrowserVisit(BROWSER_NO_ANSWER, "", "браузер не ответил", name, details=details)
+                    break
                 time.sleep(0.2)
-        visit = judge_output(_read_output(output_path), browser, process.poll())
-        return replace(visit, elapsed_ms=(clock() - started) * 1000)
+        if visit is None:
+            visit = replace(judge_output(_read_output(output_path), browser, process.poll()), elapsed_ms=(clock() - started) * 1000)
     except OSError as error:
-        return BrowserVisit(BROWSER_MISSING, text=f"браузер не запустился: {error}")
+        visit = BrowserVisit(BROWSER_MISSING, text=f"браузер не запустился: {error}")
     finally:
         if process is not None and process.poll() is None:
             process.kill()
@@ -271,4 +299,17 @@ def open_in_browser(
                 winapi.close_handle(job)
             except Exception:
                 pass
+    try:
+        if net_path and visit.state != BROWSER_MISSING:
+            from blockcheck import browser_netlog
+
+            visit = replace(visit, net=browser_netlog.read_netlog(net_path, host))
+        return visit
+    finally:
         shutil.rmtree(profile_dir, ignore_errors=True)
+
+
+def _wait_exit(process, seconds: float) -> None:
+    deadline = time.monotonic() + seconds
+    while process.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.1)

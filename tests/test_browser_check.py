@@ -72,9 +72,11 @@ class BrowserCheckTests(unittest.TestCase):
         self.assertIn("код выхода 1", visit.details)
         self.assertIn("Headless mode is disabled", visit.details)
 
-    def test_network_error_in_another_log_line_is_still_named(self) -> None:
-        visit, _command, _process = self._visit("[1:2:ERROR:ssl_client_socket_impl.cc:9] handshake failed; net::ERR_CONNECTION_CLOSED\n")
-        self.assertEqual((visit.state, visit.error), (browser_check.BROWSER_FAILED, "ERR_CONNECTION_CLOSED"))
+    def test_stray_network_error_of_another_request_is_not_blamed_on_the_site(self) -> None:
+        # Ошибку служебного запроса браузера (не «Page load failed») нельзя выдавать за ошибку сайта.
+        visit, _command, _process = self._visit("[1:2:ERROR:url_loader.cc:9] edge.microsoft.com: net::ERR_NAME_NOT_RESOLVED\n")
+        self.assertEqual(visit.state, browser_check.BROWSER_NO_ANSWER)
+        self.assertEqual(visit.error, "")
 
     def test_error_is_taken_while_the_browser_is_still_running(self) -> None:
         # Edge 156: напечатал «Page load failed» и не выходит. Итог — сразу, а браузер гасится.
@@ -87,9 +89,22 @@ class BrowserCheckTests(unittest.TestCase):
     def test_browser_that_never_finishes_keeps_its_last_words(self) -> None:
         ticks = iter(range(0, 1000, 10))
         visit, _command, process = self._visit("[1:2:INFO:x.cc:1] still loading\n", finishes=False, clock=lambda: float(next(ticks)))
-        self.assertEqual(visit.state, browser_check.BROWSER_TIMEOUT)
+        # Ни страницы, ни ошибки к сроку — браузер не ответил; о сайте это ничего не говорит.
+        self.assertEqual(visit.state, browser_check.BROWSER_NO_ANSWER)
         self.assertIn("still loading", visit.details)
         self.assertTrue(process.killed)
+
+    def test_extra_switches_and_net_log_go_before_the_address(self) -> None:
+        visit, command, _process = self._visit("<html></html>", extra=("--no-proxy-server",), net_log=True)
+        self.assertTrue(visit.ok)
+        self.assertEqual(command[-3:], ["--no-proxy-server", "--dump-dom", "https://discord.com/"])
+        self.assertTrue(any(part.startswith("--log-net-log=") for part in command))
+        # Журнал не записан (браузер подменён) — фактов нет, но они есть как пустые.
+        self.assertEqual(visit.net.connections, ())
+
+    def test_browser_names_for_people(self) -> None:
+        self.assertEqual(browser_check.browser_title("msedge.exe"), "Edge")
+        self.assertEqual(browser_check.browser_title("chrome.exe"), "Chrome")
 
     def test_stop_kills_the_browser(self) -> None:
         visit, _command, process = self._visit("", finishes=False, cancelled=lambda: True)

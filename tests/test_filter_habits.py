@@ -409,7 +409,9 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(rows["Целиком, одним пакетом"][0], "fail")
         self.assertIn("с именем сайта: сброс ×2 · с безобидным именем: прошло — фильтр его режет", rows["Целиком, одним пакетом"][1])
         self.assertEqual(rows["Разрез пакета посреди имени"][0], "ok")
-        self.assertIn("chrome://flags", card.sections[-1].lines[-1].text)
+        # Флага ECH в chrome://flags больше нет: совет — правило EncryptedClientHelloEnabled (проверено на Edge 156).
+        self.assertIn("EncryptedClientHelloEnabled", card.sections[-1].lines[-1].text)
+        self.assertNotIn("chrome://flags", card.sections[-1].lines[-1].text)
 
     def test_card_status_tells_when_there_is_no_verdict(self) -> None:
         report = self._report(_Filter(server_takes=lambda parts: False))

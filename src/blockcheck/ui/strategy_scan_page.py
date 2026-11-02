@@ -1315,15 +1315,15 @@ class StrategyScanPage(BasePage):
         self._on_log(f"Проверяю {host} через ваш пресет, когда Zapret запустится...")
         worker.start()
 
-    def _on_apply_check_finished(self, host: str, code: str, text: str) -> None:
+    def _on_apply_check_finished(self, host: str, check) -> None:
         worker = self.sender()
         if worker is not self._apply_check_worker or self._cleanup_in_progress:
             return  # итог старой проверки: после неё уже было новое «Применить»
         self._apply_check_worker = None
         from blockcheck.strategy_apply_check import apply_check_message
 
-        self._on_log(f"Проверка через пресет: {host} — {code}{f' ({text})' if text else ''}")
-        message = apply_check_message(host, code, text)
+        self._on_log(f"Проверка через пресет: {host} — {check.code}{f' ({check.text})' if check.text else ''}")
+        message = apply_check_message(host, check)
         if message is None:
             return
         kind, title, body = message
