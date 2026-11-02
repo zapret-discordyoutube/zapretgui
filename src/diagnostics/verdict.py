@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+from config import zapret_dns
+
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -258,7 +260,7 @@ def describe_reach(result: ProbeResult | None, *, timeout: float = 0.0) -> str:
     if result.kind == KIND_OK and result.body_cut:
         return (
             f"ответ оборвался на ~{cut_window.result_bytes(result) // 1024} КБ — раньше обычного обрыва ТСПУ "
-            f"({cut_window.WINDOW_TEXT}); сломан ли сайт сам, показывает сверка с сервером в Нидерландах"
+            f"({cut_window.WINDOW_TEXT}); сломан ли сайт сам, показывает сверка с сервером {zapret_dns.COUNTRY_RU_IN}"
         )
     if state == ReachState.CERT:
         return f"чужой сертификат ({result.cert_problem or 'не прошёл проверку'}) — трафик перехватывает антивирус, прокси или провайдер"

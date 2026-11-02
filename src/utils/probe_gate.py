@@ -40,6 +40,8 @@ from enum import StrEnum
 
 __all__ = [
     "HOSTS_ADDRESSES",
+    "ZAPRET_DNS_ADDRESS",
+    "ZAPRET_DNS_CHECK_IN",
     "BackgroundKind",
     "BackgroundPermit",
     "Why",
@@ -71,6 +73,14 @@ class BackgroundKind:
 # Адреса включённых сервисов hosts (hosts.address_engine): программа живёт в трее
 # сутками, а адрес может перестать отвечать в любой день.
 HOSTS_ADDRESSES = BackgroundKind("hosts_addresses", 6 * 3600.0)
+
+# Адрес своего сервера Zapret DNS по его имени (dns.zapret_dns_server.refresh): сервер
+# переезжает редко, поэтому — раз в сутки.
+ZAPRET_DNS_ADDRESS = BackgroundKind("zapret_dns_address", 24 * 3600.0)
+
+# Отметка у посредника Zapret DNS, пока включён профиль hosts «Zapret DNS»
+# (dns.zapret_dns_server.check_in): сервер помнит адрес 6 часов — отмечаемся втрое чаще.
+ZAPRET_DNS_CHECK_IN = BackgroundKind("zapret_dns_check_in", 2 * 3600.0)
 
 
 def may_search(why: Why) -> bool:

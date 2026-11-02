@@ -1510,6 +1510,17 @@ def update_custom_dns_servers(mutator) -> list[dict[str, Any]]:
     return copy.deepcopy(updated["dns"]["custom_servers"])
 
 
+def get_zapret_dns_server() -> dict[str, Any]:
+    """Узнанный адрес своего сервера Zapret DNS (dns.zapret_dns_server); пусто — не узнавали."""
+    value = _read_path_value(("dns", "zapret_dns_server"), {})
+    return copy.deepcopy(value) if isinstance(value, dict) else {}
+
+
+def set_zapret_dns_server(*, ipv4: list[str], former_ipv4: list[str], checked_at: float) -> None:
+    value = {"ipv4": list(ipv4), "former_ipv4": list(former_ipv4), "checked_at": float(checked_at)}
+    _update_settings(lambda data: data["dns"].__setitem__("zapret_dns_server", value))
+
+
 def get_isp_dns_info_shown() -> bool:
     return _get_bool(("warnings", "isp_dns_info_shown"), False)
 

@@ -21,6 +21,10 @@ class DnsFeature:
     create_custom_server_worker: Callable
     create_domain_lookup_worker: Callable
     create_server_check_worker: Callable
+    # Свой сервер Zapret DNS (dns.zapret_dns_server): адрес при запуске, вопрос по имени, отметка.
+    adopt_zapret_dns_server: Callable = lambda: ()
+    refresh_zapret_dns_server: Callable = lambda: None
+    check_in_zapret_dns: Callable = lambda: None
     # Текст прошлой проверки домена по пути из записи истории; пусто — файла нет.
     load_past_domain_lookup: Callable = lambda _log_file: ""
     load_past_domain_lookup_report: Callable = lambda _log_file: None
@@ -182,6 +186,9 @@ def build_dns_feature() -> DnsFeature:
     return DnsFeature(
         migrate_outdated_dns_addresses=lambda *args, **kwargs: _public().migrate_outdated_dns_addresses(*args, **kwargs),
         repair_local_dns_proxy=lambda *args, **kwargs: _public().repair_local_proxy(*args, **kwargs),
+        adopt_zapret_dns_server=lambda: _public().adopt_zapret_dns_server(),
+        refresh_zapret_dns_server=lambda: _public().refresh_zapret_dns_server(),
+        check_in_zapret_dns=lambda: _public().check_in_zapret_dns(),
         warm_page_data_cache=lambda *args, **kwargs: _public().warm_state(*args, **kwargs),
         consume_warmed_page_data=lambda *args, **kwargs: _public().consume_warmed_state(*args, **kwargs),
         create_dns_check_worker=_create_dns_check_worker,

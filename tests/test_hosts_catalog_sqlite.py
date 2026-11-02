@@ -17,6 +17,8 @@ SRC_ROOT = PUBLIC_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from config import zapret_dns  # noqa: E402
+
 
 class HostsCatalogSqliteTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -81,7 +83,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.21.1")
+        self.assertEqual(catalog.catalog_version, "2026.11.01.1")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -131,7 +133,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 954)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6032)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6090)  # +58: Zapret DNS у Gemini AI и Fitbit (2026.11.01.1)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -237,7 +239,12 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles(added), added)
 
     def test_zapret_dns_profile_leads_through_the_project_server(self) -> None:
-        """Свой сервер проекта: профиль стоит первым и ведёт главные имена через 83.217.211.149."""
+        """Свой сервер проекта: профиль стоит первым и ведёт главные имена через метку адреса сервера.
+
+        Каталог не хранит адрес Zapret DNS: в строках профиля стоит метка, а программа
+        подставляет нынешний адрес (config.zapret_dns, dns.zapret_dns_server).
+        """
+        marker = zapret_dns.CATALOG_ADDRESS_MARKER
         connection = sqlite3.connect(PRIVATE_DATABASE)
         try:
             first = dict(
@@ -256,7 +263,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(order[0], "zapret_dns")
         self.assertGreaterEqual(services, 80)
         for hostname in ("chatgpt.com", "claude.ai", "open.spotify.com", "www.notion.so"):
-            self.assertEqual(first[hostname], "83.217.211.149", hostname)
+            self.assertEqual(first[hostname], marker, hostname)
         # Имена, которые сервер ведёт сам, не должны уходить на чужие посредники: адреса Comss,
         # AstraCat и GeoHide из России закрыты, и из-за них профиль не записывался (21.1.7.117).
         foreign = {"103.137.248.145", "89.150.59.128", "217.60.179.6", "35.228.34.253", "159.194.200.33"}
@@ -272,9 +279,24 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             connection.close()
         self.assertEqual(stale, 0)
         for hostname in ("dam.strava.com", "api.claude.ai", "login.x.ai"):
-            self.assertEqual(first[hostname], "83.217.211.149", hostname)
+            self.assertEqual(first[hostname], marker, hostname)
         # Раздача Spotify идёт напрямую: у неё нет гео-ограничения.
-        self.assertNotEqual(first["image-cdn-fa.spotifycdn.com"], "83.217.211.149")
+        self.assertNotEqual(first["image-cdn-fa.spotifycdn.com"], marker)
+        # Ни одного адреса своего сервера в каталоге: ни нынешнего, ни прежних.
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            literal = connection.execute(
+                "SELECT COUNT(*) FROM dns_answers WHERE ip_address IN (%s)"
+                % ",".join("?" * len(zapret_dns.IPV4 + zapret_dns.FORMER_IPV4)),
+                zapret_dns.IPV4 + zapret_dns.FORMER_IPV4,
+            ).fetchone()[0]
+            elsewhere = connection.execute(
+                "SELECT COUNT(*) FROM dns_answers WHERE ip_address = ? AND profile_id != ?",
+                (marker, zapret_dns.CATALOG_PROFILE_ID),
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual((literal, elsewhere), (0, 0))
         for service in ("ChatGPT & Sora (OpenAI)", "Claude", "Spotify", "Twitch", "Web Archive", "Weather.com"):
             self.assertEqual(self.proxy_domains.get_service_available_dns_profiles(service)[0], "zapret_dns", service)
         # Canva и Intel через сервер не открываются (проверено 2026-10-09): профиля у них нет.
@@ -284,21 +306,25 @@ class HostsCatalogSqliteTests(unittest.TestCase):
     def test_google_services_skip_relays_that_google_counts_as_russia(self) -> None:
         """Gemini для вошедших в аккаунт закрыт, если Google видит адрес посредника российским.
 
-        Замер 2026-10-15 (YouTube через посредника отвечает "GL"): наш сервер 83.217.211.149
+        Замер 2026-10-15 (YouTube через посредника отвечает "GL"): прежний сервер 83.217.211.149
         и Comss 157.22.177.90 — RU, GeoHide — US, Comss 132.243.112.221 и 157.22.178.170 — NL,
-        AstraCat 217.60.179.6 — DE. Сеть хостера нашего сервера Google считает российской
-        целиком (свежий IPv6 тоже RU), а Cloudflare WARP передаёт ту же страну.
+        AstraCat 217.60.179.6 — DE. Сервер переехал в США (2026-11-01, "GL":"US", проба
+        Gemini «open»), и профиль Zapret DNS вернулся к Gemini AI и Fitbit: все их имена из
+        списка сервера идут через него (проверено TLS с проверкой сертификата), o.pki.goog —
+        напрямую.
         """
-        for service in ("Gemini AI", "Fitbit"):
-            self.assertNotIn("zapret_dns", self.proxy_domains.get_service_available_dns_profiles(service), service)
-        self.assertEqual(self.proxy_domains.get_service_available_dns_profiles("Gemini AI"), ["comss_dns", "geohide"])
-        self.assertEqual(self.proxy_domains.get_service_available_dns_profiles("Fitbit"), ["astracat", "geohide"])
+        self.assertEqual(
+            self.proxy_domains.get_service_available_dns_profiles("Gemini AI"), ["zapret_dns", "comss_dns", "geohide"]
+        )
+        self.assertEqual(
+            self.proxy_domains.get_service_available_dns_profiles("Fitbit"), ["zapret_dns", "astracat", "geohide"]
+        )
         connection = sqlite3.connect(PRIVATE_DATABASE)
         try:
             russian = connection.execute(
                 "SELECT COUNT(*) FROM dns_answers a JOIN domains d USING(domain_id)"
                 " WHERE d.service_id IN ('dns.gemini_ai', 'dns.fitbit')"
-                " AND a.ip_address IN ('83.217.211.149', '157.22.177.90')"
+                " AND a.ip_address IN ('83.217.211.149', '157.22.177.90')"  # прежний сервер и Comss — RU у Google
             ).fetchone()[0]
             gemini = [
                 row[0]
@@ -878,12 +904,13 @@ class HostsCatalogSqliteTests(unittest.TestCase):
     def test_selection_of_a_removed_profile_moves_to_the_first_available(self) -> None:
         """Профиль убрали у сервиса — сервис не выключается молча, а берёт первый доступный.
 
-        Случай 2026-10-15: у Gemini AI убрали Zapret DNS (Google считает наш сервер
-        российским); у кого он был выбран, Gemini должен остаться в hosts.
+        Случай 2026-10-15: у Gemini AI убирали Zapret DNS (Google считал прежний сервер
+        российским); у кого он был выбран, Gemini должен был остаться в hosts. Здесь —
+        Comss DNS у Fitbit: профиль в каталоге есть, а у этого сервиса его нет.
         """
         stored = {
             "dns.chatgpt_and_sora_openai": "malw_dns",  # профиль убран из каталога целиком
-            "dns.gemini_ai": "zapret_dns",  # профиль есть, но у этого сервиса больше нет
+            "dns.fitbit": "comss_dns",  # профиль есть, но у этого сервиса его нет
             "dns.claude": "comss_dns",
         }
         available = self.proxy_domains.get_service_available_dns_profiles
@@ -892,7 +919,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                 self.proxy_domains.load_user_hosts_selection(),
                 {
                     "ChatGPT & Sora (OpenAI)": available("ChatGPT & Sora (OpenAI)")[0],
-                    "Gemini AI": "comss_dns",
+                    "Fitbit": available("Fitbit")[0],
                     "Claude": "comss_dns",
                 },
             )

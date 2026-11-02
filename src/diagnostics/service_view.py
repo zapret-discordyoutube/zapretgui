@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from config import zapret_dns
+
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -264,7 +266,7 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
         rows.append(ViewRow(shown_level(transfer.get("level")), "Скорость ответа", str(transfer["text"])))
     outside = _OUTSIDE_WORDS.get(str(item.get("outside") or ""))
     if outside:
-        rows.append(ViewRow(outside[0], "С сервера Zapret DNS в Нидерландах", outside[1]))
+        rows.append(ViewRow(outside[0], f"С сервера Zapret DNS {zapret_dns.COUNTRY_RU_IN}", outside[1]))
     if item.get("dns_reason"):
         rows.append(ViewRow(_DNS_LEVELS.get(str(item.get("dns_state")), INFO), "DNS", str(item["dns_reason"])))
     if item.get("dns_detail"):

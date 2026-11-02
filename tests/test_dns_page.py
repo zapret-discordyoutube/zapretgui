@@ -18,7 +18,9 @@ from dns.adapters import DnsAdapter
 from dns.dns_providers import DNS_PROVIDERS
 from dns.latency import DnsLatencyReport
 from dns.state import CustomServerResult, DnsState, LineCheck
-from config.urls import ZAPRET_DNS_SITE_URL
+from config import zapret_dns
+
+ZAPRET_DNS_SITE_URL = zapret_dns.SITE_URL
 from dns.ui.page import AUTO_CHOICE, PROMO_PROVIDER
 from dns.ui.provider_grid import PROMO_TILE_KEY
 
@@ -665,7 +667,7 @@ class DnsPageTests(unittest.TestCase):
         # Значок и цвет — те же, что у плитки самого сервера в группе «Для ИИ».
         server = DNS_PROVIDERS[PROMO_PROVIDER[0]][PROMO_PROVIDER[1]]
         self.assertEqual((tile.icon_name, tile.color), (server["icon"], server["color"]))
-        self.assertEqual(tile.address, "dns.zapret.moe")
+        self.assertEqual(tile.address, zapret_dns.HOST)
         self.assertIn("Для ИИ", tile.tooltip)
         self.assertTrue(tile.icons)
         # Стоит в строке «Автоматически» и занимает всё, что в ней оставалось.
@@ -699,7 +701,7 @@ class DnsPageTests(unittest.TestCase):
         self.assertIsNone(page._pending_choice)
         # Задачу создаёт узкая зависимость страницы: ей передаётся сама ссылка.
         worker = page._site_lane._create_worker(7, ZAPRET_DNS_SITE_URL)
-        self.create_open_url_worker.assert_called_once_with(7, url="https://dns.zapret.moe/", parent=page)
+        self.create_open_url_worker.assert_called_once_with(7, url=zapret_dns.SITE_URL, parent=page)
         self.assertIs(worker, self.create_open_url_worker.return_value)
 
     def test_failed_site_opening_shows_the_address_to_open_by_hand(self) -> None:
@@ -714,7 +716,7 @@ class DnsPageTests(unittest.TestCase):
         self.assertEqual(self.info_bar.warning.call_count, 2)
         for call in self.info_bar.warning.call_args_list:
             self.assertEqual(call.kwargs["title"], "Не удалось открыть сайт")
-            self.assertIn("https://dns.zapret.moe/", call.kwargs["content"])
+            self.assertIn(zapret_dns.SITE_URL, call.kwargs["content"])
 
     # ── замер скорости ──────────────────────────────────────
 

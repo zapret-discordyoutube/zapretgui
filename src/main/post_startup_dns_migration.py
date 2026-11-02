@@ -20,6 +20,12 @@ def install_dns_address_migration(
     def _run_dns_address_migration() -> None:
         if not is_startup_host_alive(startup_host):
             return
+        # Адрес своего Zapret DNS, узнанный по имени в прошлые запуски, — раньше замены:
+        # иначе замена перевела бы адаптеры на встроенный адрес, а не на нынешний.
+        try:
+            dns_feature.adopt_zapret_dns_server()
+        except Exception as exc:
+            log(f"Адрес Zapret DNS из настроек не поставлен: {exc}", "WARNING")
         try:
             changed_count = len(list(dns_feature.migrate_outdated_dns_addresses() or []))
         except Exception as exc:

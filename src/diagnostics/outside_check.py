@@ -2,7 +2,7 @@
 
 Сайт, который не отвечает ни по адресу, ни по имени, может быть не заблокирован,
 а просто выключен. Изнутри сети это не отличить. Поэтому проверка спрашивает
-свой сервер проекта Zapret DNS в Нидерландах (служба ``zapret-dns-outside``):
+свой сервер проекта Zapret DNS за рубежом (``config.zapret_dns``; служба ``zapret-dns-outside``):
 он сам открывает сайт по HTTPS и отвечает, жив ли тот.
 
 - Спрашиваются только встроенные сайты BlockCheck: свои домены пользователя на
@@ -26,11 +26,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from diagnostics.tls_probe import client_context
+from config import zapret_dns
 from utils.socket_cancel import SocketCancel, close_quietly
 
 __all__ = ["MAX_HOSTS", "OUTSIDE_DOWN", "OUTSIDE_UP", "SERVER_HOST", "ask"]
 
-SERVER_HOST = "dns.zapret.moe"
+SERVER_HOST = zapret_dns.HOST
 PATH = "/api/outside/v1/check"
 MAX_HOSTS = 8
 TIMEOUT_S = 30.0

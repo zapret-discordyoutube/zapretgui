@@ -3,8 +3,8 @@
 Пользователь когда-то выбрал провайдера (например, Xbox DNS), и Windows
 запомнила его адреса в ручных настройках адаптера. Когда провайдер меняет
 адреса, старые перестают работать. При запуске программа находит на
-адаптерах только адреса из OUTDATED_DNS_ADDRESS_REPLACEMENTS и меняет их на
-новые. Автоматически полученные (DHCP) и любые другие адреса не трогаются.
+адаптерах только адреса из OUTDATED_DNS_ADDRESS_REPLACEMENTS и прежние адреса
+своего Zapret DNS (dns.zapret_dns_server) и меняет их на новые. Автоматически полученные (DHCP) и любые другие адреса не трогаются.
 
 Если провайдер закрылся, замена ведёт на другой сервер того же назначения.
 Сервер только с шифрованием (обычный DNS у него закрыт) годится в замену лишь
@@ -31,12 +31,16 @@ def _canonical_ip(value: str) -> str:
 def plan_dns_server_migration(
     servers: list[str],
     replacements: Mapping[str, str],
+    removals: tuple[str, ...] = (),
 ) -> list[str] | None:
     """Возвращает новый список DNS или None, если менять нечего.
 
     Порядок и чужие адреса сохраняются, старые адреса заменяются на месте,
-    повторы после замены убираются.
+    адреса из removals (прежний сервер, которому нет замены) убираются,
+    повторы после замены убираются. Пустой итог — адаптер вернётся к
+    автоматическим DNS.
     """
+    removed = {_canonical_ip(item) for item in removals if str(item or "").strip()}
     canonical_replacements = {
         _canonical_ip(old): str(new).strip()
         for old, new in dict(replacements or {}).items()
@@ -47,6 +51,9 @@ def plan_dns_server_migration(
     result: list[str] = []
     seen: set[str] = set()
     for server in current:
+        if _canonical_ip(server) in removed:
+            replaced_any = True
+            continue
         replacement = canonical_replacements.get(_canonical_ip(server))
         if replacement is not None:
             replaced_any = True
@@ -76,7 +83,19 @@ def usable_replacements(replacements: Mapping[str, str], *, doh_supported: bool)
     return usable
 
 
-def migrate_outdated_dns_addresses(replacements: Mapping[str, str] | None = None) -> list[str]:
+def outdated_address_plan() -> tuple[dict[str, str], tuple[str, ...]]:
+    """Все замены и удаления сейчас: чужие провайдеры и прежние адреса своего Zapret DNS."""
+    from dns import zapret_dns_server
+    from dns.dns_providers import OUTDATED_DNS_ADDRESS_REPLACEMENTS
+
+    replacements = {**OUTDATED_DNS_ADDRESS_REPLACEMENTS, **zapret_dns_server.address_replacements()}
+    return replacements, zapret_dns_server.dropped_ipv6()
+
+
+def migrate_outdated_dns_addresses(
+    replacements: Mapping[str, str] | None = None,
+    removals: tuple[str, ...] | None = None,
+) -> list[str]:
     """Меняет старые адреса провайдеров на адаптерах страницы DNS.
 
     Трогает только адреса, прописанные вручную; автоматические (DHCP) не
@@ -85,20 +104,20 @@ def migrate_outdated_dns_addresses(replacements: Mapping[str, str] | None = None
     from dns import runtime, winapi
 
     if replacements is None:
-        from dns.dns_providers import OUTDATED_DNS_ADDRESS_REPLACEMENTS
-
-        replacements = OUTDATED_DNS_ADDRESS_REPLACEMENTS
+        replacements, planned_removals = outdated_address_plan()
+        removals = planned_removals if removals is None else removals
+    removals = tuple(removals or ())
 
     templates = runtime.write_doh_templates()
     replacements = usable_replacements(replacements, doh_supported=templates is not None)
     changes: list[str] = []
     for adapter in runtime.adapters_with_static_dns():
         for ipv6, current in ((False, adapter.static_ipv4), (True, adapter.static_ipv6)):
-            new_servers = plan_dns_server_migration(list(current), replacements)
+            new_servers = plan_dns_server_migration(list(current), replacements, removals)
             if new_servers is None:
                 continue
             family = "IPv6" if ipv6 else "IPv4"
-            summary = f"{adapter.name} ({family}): {', '.join(current)} -> {', '.join(new_servers)}"
+            summary = f"{adapter.name} ({family}): {', '.join(current)} -> {', '.join(new_servers) or 'автоматически'}"
             try:
                 winapi.write_dns(adapter.guid, new_servers, ipv6=ipv6, doh_templates=templates)
             except winapi.DnsWinApiError as exc:
@@ -111,4 +130,9 @@ def migrate_outdated_dns_addresses(replacements: Mapping[str, str] | None = None
     return changes
 
 
-__all__ = ["migrate_outdated_dns_addresses", "plan_dns_server_migration", "usable_replacements"]
+__all__ = [
+    "migrate_outdated_dns_addresses",
+    "outdated_address_plan",
+    "plan_dns_server_migration",
+    "usable_replacements",
+]

@@ -416,6 +416,33 @@ def normalize_dns(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     return {
         "custom_servers": normalize_custom_dns_servers(raw.get("custom_servers")),
+        "zapret_dns_server": _normalize_zapret_dns_server(raw.get("zapret_dns_server")),
+    }
+
+
+def _global_ipv4_list(value: object, limit: int) -> list[str]:
+    result: list[str] = []
+    for item in value if isinstance(value, list) else []:
+        try:
+            address = ip_address(str(item).strip())
+        except ValueError:
+            continue
+        if address.version == 4 and address.is_global and address.compressed not in result:
+            result.append(address.compressed)
+    return result[:limit]
+
+
+def _normalize_zapret_dns_server(data: object) -> dict[str, Any]:
+    """Узнанный адрес Zapret DNS: только глобальные IPv4, время — неотрицательное число."""
+    raw = as_dict(data)
+    try:
+        checked_at = max(float(raw.get("checked_at") or 0.0), 0.0)
+    except (TypeError, ValueError):
+        checked_at = 0.0
+    return {
+        "ipv4": _global_ipv4_list(raw.get("ipv4"), 2),
+        "former_ipv4": _global_ipv4_list(raw.get("former_ipv4"), 8),
+        "checked_at": checked_at,
     }
 
 

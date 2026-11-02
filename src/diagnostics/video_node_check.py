@@ -33,6 +33,8 @@
 
 from __future__ import annotations
 
+from config import zapret_dns
+
 from dataclasses import dataclass
 
 from diagnostics import block_cause
@@ -348,7 +350,10 @@ def judge(facts: NodeFacts | None, *, outside: str = "") -> NodeVerdict | None:
 
     if outside == "down":
         return verdict(
-            NODE_DOWN, FAIL, "видеосервер не открывается и с сервера Zapret DNS в Нидерландах: не работает сам узел, а не ваша линия", False
+            NODE_DOWN,
+            FAIL,
+            f"видеосервер не открывается и с сервера Zapret DNS {zapret_dns.COUNTRY_RU_IN}: не работает сам узел, а не ваша линия",
+            False,
         )
     http_alive = cause is not None and cause.http is not None and cause.http.status is not None
     if result.kind == KIND_CONNECT:

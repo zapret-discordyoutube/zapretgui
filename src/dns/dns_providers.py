@@ -57,11 +57,16 @@ from __future__ import annotations
 
 import ipaddress
 
+from config import zapret_dns
+
 STATUS_BLOCKED = "blocked"
 STATUS_AT_RISK = "at_risk"
 STATUSES = (STATUS_BLOCKED, STATUS_AT_RISK)
 
 LOCAL_PROXY_GROUP = "Шифрованные"
+
+ZAPRET_DNS_GROUP = "Для ИИ"
+ZAPRET_DNS_PROVIDER_NAME = "Zapret DNS"
 
 DNS_PROVIDERS = {
     LOCAL_PROXY_GROUP: {
@@ -379,22 +384,22 @@ DNS_PROVIDERS = {
             "encrypted_only": True,
         },
     },
-    "Для ИИ": {
-        # Свой сервер проекта в Нидерландах (с 2026-10-09; первый адрес
-        # 144.31.82.230 в тот же день закрыли в России по IP — см. замены ниже). Имена сервисов с
-        # гео-ограничением (ChatGPT, Claude, Gemini, Spotify и другие из каталога
-        # hosts) отдаёт со своим адресом и сам пересылает соединение на настоящий
-        # сайт; остальные имена — настоящий ответ, без фильтров. Список имён —
-        # /etc/zapret-dns/zones.txt на сервере. Шифрованный DNS — по имени
-        # dns.zapret.moe: DoH на общем порту 443, DoT на 853 (проверено 2026-10-09).
-        "Zapret DNS": {
-            "ipv4": ["83.217.211.149"],
-            "ipv6": ["2a03:afc0:9::235d"],
+    ZAPRET_DNS_GROUP: {
+        # Свой сервер проекта (config.zapret_dns: имя, адреса, страна — только там). Имена
+        # сервисов с гео-ограничением (ChatGPT, Claude, Gemini, Spotify и другие из каталога
+        # hosts) отдаёт со своим адресом и сам пересылает соединение на настоящий сайт;
+        # остальные имена — настоящий ответ, без фильтров. Список имён —
+        # /etc/zapret-dns/zones.txt на сервере. Шифрованный DNS — по имени: DoH на общем
+        # порту 443, DoT на 853. Адреса здесь — встроенные; нынешний, узнанный по имени,
+        # ставит в эту запись dns.zapret_dns_server.adopt.
+        ZAPRET_DNS_PROVIDER_NAME: {
+            "ipv4": list(zapret_dns.IPV4),
+            "ipv6": list(zapret_dns.IPV6),
             "desc": "Нейросети и Spotify",
             "icon": "fa5s.rocket",
             "color": "#60CDFF",
-            "doh": "https://dns.zapret.moe/dns-query",
-            "dot": "dns.zapret.moe",
+            "doh": zapret_dns.DOH_URL,
+            "dot": zapret_dns.DOT_HOST,
             "dnssec": True,
         },
         # Кроме подмены адресов сайтов ИИ, рекламные имена отдаёт пустым адресом
@@ -496,6 +501,11 @@ DNS_PROVIDERS = {
         },
     }
 }
+
+
+def zapret_dns_provider() -> dict:
+    """Запись плитки «Zapret DNS» в каталоге провайдеров (адреса в ней меняет dns.zapret_dns_server)."""
+    return DNS_PROVIDERS[ZAPRET_DNS_GROUP][ZAPRET_DNS_PROVIDER_NAME]
 
 
 def iter_providers():
@@ -662,7 +672,7 @@ OUTDATED_DNS_ADDRESS_REPLACEMENTS = {
     "80.78.247.254": "186.246.49.127",
     "2a00:ab00:1233:26::50": "2a0d:8480:0:67c::14",
     "2a00:ab00:1233:26::51": "2a0a:2b41:0:500d::53",
-    # Первый адрес Zapret DNS закрыли в России по IP (2026-10-09): сервер переехал.
-    "144.31.82.230": "83.217.211.149",
-    "2a01:ecc0:500:8e::2": "2a03:afc0:9::235d",
+    # Прежние адреса своего Zapret DNS здесь не пишутся: они в config.zapret_dns, а
+    # пары «прежний → нынешний» строит dns.zapret_dns_server.address_replacements —
+    # нынешний адрес может быть узнан по имени уже после выпуска.
 }

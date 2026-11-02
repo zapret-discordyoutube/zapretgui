@@ -667,7 +667,7 @@ def run_blockcheck(
     таким сайтам советуется hosts или DNS, а не подбор стратегии.
     ``check_dns_servers`` — проверка DNS-серверов для полной проверки: получает
     ``should_stop`` и возвращает ``{"level", "findings": [{"level", "text"}], "text"}``.
-    ``ask_outside`` — галочка «Сверить с сервером в Нидерландах» (``sections.ask_outside``).
+    ``ask_outside`` — галочка «Сверить с сервером за рубежом» (``sections.ask_outside``; страна — config.zapret_dns).
     """
     from diagnostics.freeze_check import EVERY_AT_ONCE, check_freeze, summarize_freeze
     from diagnostics.voice_check import check_voice, summarize_voice

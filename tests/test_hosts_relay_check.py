@@ -40,10 +40,12 @@ class HostsRelayCheckTests(unittest.TestCase):
             connects.assert_not_called()
 
     def test_catalog_names_only_real_relays(self) -> None:
+        from dns import zapret_dns_server
         from hosts import proxy_domains
 
         relays = proxy_domains.get_relay_addresses()
-        for address in ("83.217.211.149", "91.132.224.167", "103.137.248.145", "80.74.30.162", "217.60.179.6", "159.194.200.33"):
+        # Свой Zapret DNS — нынешний адрес на месте метки каталога (config.zapret_dns).
+        for address in (zapret_dns_server.active_ipv4()[0], "91.132.224.167", "103.137.248.145", "80.74.30.162", "217.60.179.6", "159.194.200.33"):
             self.assertIn(address, relays)
         # Обычные адреса сайтов из профилей Comss и GeoHide: на них ссылались отказы у пользователя.
         for address in ("108.156.22.111", "65.9.46.4", "65.9.46.49", "40.180.22.93", "52.50.163.132", "52.208.113.195", "35.228.34.253"):

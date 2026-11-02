@@ -46,6 +46,12 @@ def install_dns_address_migration(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_zapret_dns_server_watch(*args, **kwargs):
+    from main.post_startup_zapret_dns import install_zapret_dns_server_watch as install
+
+    return install(*args, **kwargs)
+
+
 def install_hosts_applied_selection_refresh(*args, **kwargs):
     from main.post_startup_hosts_refresh import install_hosts_applied_selection_refresh as install
 
@@ -251,6 +257,12 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
     install_dns_page_data_warmup(
         startup_host,
         dns_feature=deps.dns_feature,
+        log_startup_metric=deps.log_startup_metric,
+    )
+    install_zapret_dns_server_watch(
+        startup_host,
+        dns_feature=deps.dns_feature,
+        hosts_feature=deps.hosts_feature,
         log_startup_metric=deps.log_startup_metric,
     )
     install_hosts_applied_selection_refresh(

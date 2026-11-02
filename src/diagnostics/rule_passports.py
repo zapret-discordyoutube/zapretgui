@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from config import zapret_dns
+
 from dataclasses import dataclass
 
 from diagnostics import block_kind as bk
@@ -123,11 +125,11 @@ PASSPORTS: dict[str, Passport] = {
         claim="Сайт не работает сам: он не открывается и с нашего сервера за рубежом, так что это не блокировка.",
         evidence=(
             "У пользователя до сайта нет дороги (по адресу или по имени) и после перепроверки, а сервер Zapret DNS "
-            "в Нидерландах тоже не получил от него ответа по HTTPS (outside_check). Страница, оборвавшаяся у "
+            f"{zapret_dns.COUNTRY_RU_IN} тоже не получил от него ответа по HTTPS (outside_check). Страница, оборвавшаяся у "
             "пользователя раньше окна «16 КБ», грузится там целиком по тому же пути — и тоже обрывается."
         ),
         false_alarms=(
-            "Сайт закрыт для Нидерландов или для дата-центров; сбой у самого сервера Zapret DNS; сайт отвечает "
+            f"Сайт закрыт {zapret_dns.COUNTRY_RU_FOR} или для дата-центров; сбой у самого сервера Zapret DNS; сайт отвечает "
             "только на свой путь, а не на «HEAD /»; сайт отдаёт серверу без браузера другую страницу."
         ),
         control=(

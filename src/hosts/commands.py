@@ -163,9 +163,13 @@ def _short(service_name: str) -> str:
 
 def refresh_applied_selection(hosts_manager=None) -> HostsCommandResult:
     """При запуске переписывает уже применённый блок hosts, если каталог сменил адреса."""
-    from hosts.proxy_domains import has_saved_user_hosts_selection
+    from hosts.proxy_domains import get_all_services, has_saved_user_hosts_selection
     from log.log import log
 
+    if not get_all_services():
+        # Каталог не загрузился (база отклонена, нет файла): выбор прочитался бы пустым,
+        # и блок переписался бы пустым — молча стёрлись бы все записи человека. Ждём каталога.
+        return HostsCommandResult(success=False, message="каталог hosts не загрузился — блок не трогается")
     manager = hosts_manager or create_hosts_manager(
         status_callback=lambda message: log(f"Hosts при запуске: {message}", "DEBUG")
     )
@@ -252,8 +256,25 @@ def recheck_applied(names) -> HostsCommandResult:
 
     report = check_addresses(None, why=Why.USER, recheck=set(names or ()))
     changed = bool(report.changed) and bool(refresh_applied_selection().changed)
+    _check_in_zapret_dns(names)
     note = describe_address_check(report) if changed or report.silent else ""
     return HostsCommandResult(success=True, message=note, changed=changed)
+
+
+def _check_in_zapret_dns(names) -> None:
+    """Человек только что включил профиль «Zapret DNS»: сразу отметиться у посредника сервера."""
+    from config import zapret_dns
+    from log.log import log
+
+    selection = load_user_selection()
+    if not any(selection.get(name) == zapret_dns.CATALOG_PROFILE_ID for name in names or ()):
+        return
+    try:
+        from dns.zapret_dns_server import check_in
+
+        check_in()
+    except Exception as exc:
+        log(f"Zapret DNS: отметка для посредника не отправлена: {exc}", "WARNING")
 
 
 def load_hosts_text() -> HostsFileText:

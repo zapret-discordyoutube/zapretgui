@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from config import zapret_dns
+
 from blockcheck.strategy_search.probe_profile import PROTOCOL_STUN_VOICE, PROTOCOL_TCP_HTTPS
 import logging
 import time
@@ -437,21 +439,25 @@ class BlockcheckPage(BasePage):
         self._scope_combo.currentIndexChanged.connect(self._update_scope_combo_accessibility)
         # Кнопки «Проверить», «С обходом и без», «Остановить» встают перед списком ниже (insertWidget 0–2).
         row.addWidget(self._scope_combo)
-        # Сервер проекта открывает закрытый сайт из Нидерландов: так видно, заблокирован он
+        # Сервер проекта открывает закрытый сайт из-за рубежа (config.zapret_dns): так видно, заблокирован он
         # или не работает сам. Само соединение с сервером выдаёт программу провайдеру,
         # поэтому без галочки запрос туда не уходит (utils.probe_gate, решение 2026-10-16).
         self._outside_box = CheckBox(
-            tr_catalog("page.blockcheck.ask_outside", default="Сверить с сервером в Нидерландах")
+            tr_catalog("page.blockcheck.ask_outside", default=f"Сверить с сервером {zapret_dns.COUNTRY_RU_IN}")
         )
         outside_description = tr_catalog(
             "page.blockcheck.ask_outside.description",
             default=(
-                "Закрытые сайты проверит и сервер Zapret DNS в Нидерландах: так видно, "
+                f"Закрытые сайты проверит и сервер Zapret DNS {zapret_dns.COUNTRY_RU_IN}: так видно, "
                 "блокировка это или сайт не работает сам. Провайдер увидит соединение с сервером проекта."
             ),
         )
         set_tooltip(self._outside_box, outside_description)
-        set_control_accessibility(self._outside_box, name="Сверить с сервером в Нидерландах", description=outside_description)
+        set_control_accessibility(
+            self._outside_box,
+            name=tr_catalog("page.blockcheck.ask_outside", default=f"Сверить с сервером {zapret_dns.COUNTRY_RU_IN}"),
+            description=outside_description,
+        )
         self._options_row = QWidget()
         options = QHBoxLayout(self._options_row)
         options.setContentsMargins(0, 0, 0, 0)

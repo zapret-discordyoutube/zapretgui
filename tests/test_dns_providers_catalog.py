@@ -4,6 +4,7 @@ import copy
 import unittest
 from unittest.mock import patch
 
+from config import zapret_dns
 from dns import dns_providers
 from dns.dns_providers import (
     DNS_PROVIDERS,
@@ -137,9 +138,12 @@ class DnsProvidersCatalogTests(unittest.TestCase):
                 # Адрес IPv4 меняется на IPv4, IPv6 — на IPv6: они лежат в разных списках адаптера.
                 self.assertEqual(":" in old, ":" in new)
         self.assertNotIn("87.228.47.200", doh_templates())
-        # Прежний адрес Zapret DNS закрыт в России по IP: он ведёт на новый адрес того же сервера.
-        self.assertEqual(dns_providers.OUTDATED_DNS_ADDRESS_REPLACEMENTS["144.31.82.230"], "83.217.211.149")
-        self.assertEqual(find_provider_by_address("83.217.211.149")[1], "Zapret DNS")
+        # Адреса своего Zapret DNS — только в config.zapret_dns: плитка берёт их оттуда.
+        self.assertEqual(find_provider_by_address(zapret_dns.IPV4[0])[1], "Zapret DNS")
+        self.assertEqual(dns_providers.zapret_dns_provider()["doh"], zapret_dns.DOH_URL)
+        for former in zapret_dns.FORMER_IPV4 + zapret_dns.FORMER_IPV6:
+            self.assertIsNone(find_provider_by_address(former), former)
+            self.assertNotIn(former, dns_providers.OUTDATED_DNS_ADDRESS_REPLACEMENTS)
 
     def test_dns_sb_is_not_among_popular_servers(self) -> None:
         self.assertNotIn("Dns.SB", DNS_PROVIDERS["Популярные"])

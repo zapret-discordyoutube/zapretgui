@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from blockcheck.ui import result_cards_model as cards
+from config import zapret_dns
 from diagnostics import service_view as view
 from diagnostics.service_view import ViewRow
 
@@ -58,7 +59,7 @@ class TargetRowsTests(unittest.TestCase):
         self.assertEqual(rows["QUIC (UDP 443)"].level, "warn")
         self.assertEqual(rows["Объём загрузки"].level, "warn")
         self.assertEqual(rows["Скорость ответа"], ViewRow("warn", "Скорость ответа", "пауза 2,9 с"))
-        self.assertIn("закрыт он именно на вашей линии", rows["С сервера Zapret DNS в Нидерландах"].text)
+        self.assertIn("закрыт он именно на вашей линии", rows[f"С сервера Zapret DNS {zapret_dns.COUNTRY_RU_IN}"].text)
         self.assertEqual(rows["Заметка"].text, "проверен запасной узел")
 
     def test_quic_levels_follow_the_verdict(self) -> None:

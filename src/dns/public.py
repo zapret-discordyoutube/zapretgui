@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dns.commands import (
+    adopt_zapret_dns_server,
     apply_dns,
+    check_in_zapret_dns,
     check_dns_answering,
     consume_warmed_state,
     delete_custom_server,
@@ -12,6 +14,7 @@ from dns.commands import (
     mark_isp_dns_warning_shown,
     measure_dns_latency,
     migrate_outdated_dns_addresses,
+    refresh_zapret_dns_server,
     repair_local_proxy,
     reset_to_auto,
     save_custom_server,
@@ -28,7 +31,9 @@ __all__ = [
     "CustomServerResult",
     "DnsCommandResult",
     "DnsState",
+    "adopt_zapret_dns_server",
     "apply_dns",
+    "check_in_zapret_dns",
     "check_dns_answering",
     "consume_warmed_state",
     "delete_custom_server",
@@ -39,6 +44,7 @@ __all__ = [
     "mark_isp_dns_warning_shown",
     "measure_dns_latency",
     "migrate_outdated_dns_addresses",
+    "refresh_zapret_dns_server",
     "repair_local_proxy",
     "reset_to_auto",
     "save_custom_server",

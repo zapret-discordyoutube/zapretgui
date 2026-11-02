@@ -162,6 +162,10 @@ def default_telegram_proxy() -> dict[str, Any]:
 def default_dns() -> dict[str, Any]:
     return {
         "custom_servers": [],
+        # Адрес своего сервера Zapret DNS, узнанный по имени и проверенный (dns.zapret_dns_server):
+        # ipv4 — нынешний (пусто — встроенный из config.zapret_dns), former_ipv4 — прежние узнанные,
+        # с них переводятся адаптеры; checked_at — время UNIX прошлого удачного вопроса.
+        "zapret_dns_server": {"ipv4": [], "former_ipv4": [], "checked_at": 0.0},
     }
 
 

@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import QApplication, QHBoxLayout, QWidget
 from qfluentwidgets import CaptionLabel, InfoBar, InfoBarPosition, PushButton, RoundMenu, SegmentedWidget
 
 from app.ui_texts import tr as tr_catalog
-from config.urls import ZAPRET_DNS_SITE_HOST, ZAPRET_DNS_SITE_URL
+from config import zapret_dns
 from diagnostics.history import format_time
 from dns import page_plans as dns_page_plans
 from dns import custom_servers
@@ -42,8 +42,11 @@ from dns.dns_providers import (
     LOCAL_PROXY_GROUP,
     STATUS_AT_RISK,
     STATUS_BLOCKED,
+    ZAPRET_DNS_GROUP,
+    ZAPRET_DNS_PROVIDER_NAME,
     is_encrypted_only,
     proxy_mode_for,
+    zapret_dns_provider,
 )
 from dns.server_check_plans import CARD_NETWORK, CARD_OK, CARD_SILENT, CARD_TITLES
 from dns.state import LineCheck
@@ -522,6 +525,7 @@ class NetworkPage(BasePage):
     def _render(self) -> None:
         if self._closed:
             return
+        self._sync_live_providers()
         plan = self._current_plan() if self._loaded else dns_page_plans.CurrentDnsPlan(kind="none")
         self.now_panel.set_state(self._now_state(plan))
         self.now_panel.update_adapter_tooltips(self._adapter_tooltips())
@@ -529,7 +533,20 @@ class NetworkPage(BasePage):
         # Предупреждение зависит и от отметок адаптеров: неотмеченный адаптер — дорога мимо выбранного сервера.
         self._render_notice()
 
+    def _sync_live_providers(self) -> None:
+        """Копия каталога страницы догоняет живую запись «Zapret DNS» после переезда сервера.
+
+        Страница держит глубокую копию каталога провайдеров, а адрес своего сервера
+        меняется во время работы (dns.zapret_dns_server.adopt). Без сверки плитка
+        показала бы и записала на адаптер прежний адрес.
+        """
+        live = zapret_dns_provider()
+        shown = self._providers.get(ZAPRET_DNS_GROUP, {}).get(ZAPRET_DNS_PROVIDER_NAME)
+        if shown is not None and shown.get("ipv4") != live.get("ipv4"):
+            self._providers = build_dns_providers_with_custom(DNS_PROVIDERS, self._custom_servers)
+
     def _provider(self, name: str) -> dict | None:
+        self._sync_live_providers()
         for group in self._providers.values():
             if name in group:
                 return group[name]
@@ -814,7 +831,7 @@ class NetworkPage(BasePage):
             title=name,
             badge=self._t("page.network.promo.badge", "сервер проекта"),
             note=self._t("page.network.promo.note", "Открывает ChatGPT, Claude, Gemini и Spotify без VPN"),
-            address=ZAPRET_DNS_SITE_HOST,
+            address=zapret_dns.HOST,
             icon_name=str(data.get("icon", "")),
             color=str(data.get("color", "")),
             icons=PROMO_SERVICE_ICONS,
@@ -827,7 +844,7 @@ class NetworkPage(BasePage):
 
     def _open_promo_site(self) -> None:
         """Сайт открывает фоновая задача: запуск браузера не должен задерживать окно."""
-        self._site_lane.request(ZAPRET_DNS_SITE_URL)
+        self._site_lane.request(zapret_dns.SITE_URL)
 
     def _on_site_opened(self, url, result) -> None:
         if not getattr(result, "ok", False):

@@ -6,6 +6,7 @@ declarative index used by the left sidebar global search.
 
 from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2, EXE_NAME_WINWS1, EXE_NAME_WINWS2
 from app.page_names import PageName
+from config import zapret_dns
 
 
 DEFAULT_UI_LANGUAGE = "ru"
@@ -542,16 +543,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Add a site that is not on the BlockCheck list to the check.",
     },
     "page.blockcheck.ask_outside": {
-        "ru": "Сверить с сервером в Нидерландах",
-        "en": "Cross-check with the server in the Netherlands",
+        "ru": f"Сверить с сервером {zapret_dns.COUNTRY_RU_IN}",
+        "en": f"Cross-check with the server {zapret_dns.COUNTRY_EN_IN}",
     },
     "page.blockcheck.ask_outside.description": {
         "ru": (
-            "Закрытые сайты проверит и сервер Zapret DNS в Нидерландах: так видно, "
+            f"Закрытые сайты проверит и сервер Zapret DNS {zapret_dns.COUNTRY_RU_IN}: так видно, "
             "блокировка это или сайт не работает сам. Провайдер увидит соединение с сервером проекта."
         ),
         "en": (
-            "Blocked sites are also checked by the Zapret DNS server in the Netherlands: this shows whether "
+            f"Blocked sites are also checked by the Zapret DNS server {zapret_dns.COUNTRY_EN_IN}: this shows whether "
             "it is a block or the site itself is down. Your provider will see the connection to the project server."
         ),
     },

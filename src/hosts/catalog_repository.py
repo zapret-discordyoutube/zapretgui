@@ -13,6 +13,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import zapret_dns
+
 
 CATALOG_APPLICATION_ID = 0x5A484354  # "ZHCT" -- Zapret Hosts Catalog
 CATALOG_SCHEMA_VERSION = 1
@@ -229,6 +231,23 @@ def _append_entry(
     services.setdefault(service_name, {})[hostname] = list(row)
 
 
+def _answer_address(profile_id: str, ip_address: str) -> str:
+    """Адрес ответа каталога; метка своего Zapret DNS — его нынешний адрес.
+
+    Профиль «Zapret DNS» не хранит адрес сервера: сервер переезжает, а адрес
+    задан в одном месте (config.zapret_dns) и может быть узнан по имени
+    (dns.zapret_dns_server). Метка стоит только в строках этого профиля;
+    контрольная сумма каталога считается по самой метке.
+    """
+    if ip_address != zapret_dns.CATALOG_ADDRESS_MARKER:
+        return ip_address
+    if profile_id != zapret_dns.CATALOG_PROFILE_ID:
+        raise HostsCatalogError(f"метка адреса Zapret DNS в чужом профиле {profile_id}")
+    from dns.zapret_dns_server import active_ipv4
+
+    return active_ipv4()[0]
+
+
 def _load_snapshot(connection: sqlite3.Connection, meta: dict[str, str]) -> HostsCatalog:
     profile_rows = list(
         connection.execute(
@@ -308,7 +327,7 @@ def _load_snapshot(connection: sqlite3.Connection, meta: dict[str, str]) -> Host
             domain_order.append(key)
         domain_values[key].setdefault(int(row["priority"]), {})[
             str(row["profile_id"])
-        ] = str(row["ip_address"])
+        ] = _answer_address(str(row["profile_id"]), str(row["ip_address"]))
 
     for key in domain_order:
         _domain_id, service_id, hostname = key

@@ -23,8 +23,7 @@ PREMIUM_GUIDE_URL = "https://wiki.zapret.moe/Zapret/premium"  # Гайд по Za
 GIT_SITE_URL = "https://git.zapret.moe/"  # Git-сайт проекта: исходный код и выпуски программ
 GIT_REPO_URL = f"{GIT_SITE_URL}zapretdiscordyoutube/zapretgui"  # Исходный код Zapret 2 GUI
 KVN_REPO_URL = f"{GIT_SITE_URL}zapretkvn/zapret-kvn"  # Исходный код Zapret KVN
-ZAPRET_DNS_SITE_URL = "https://dns.zapret.moe/"  # Сайт своего DNS-сервера проекта: состояние и список сервисов
-ZAPRET_DNS_SITE_HOST = "dns.zapret.moe"  # Его имя: адрес сервера на плитке «Настройки DNS»
+# Сайт и имя своего DNS-сервера проекта — в config.zapret_dns (всё о сервере в одном месте).
 # Статьи вики к шагам обучающего тура (ключ — шаг из ui.onboarding.steps).
 # Шаги без подходящей статьи здесь не указаны — у них нет кнопки «Подробнее в вики».
 ONBOARDING_WIKI_URLS = {
