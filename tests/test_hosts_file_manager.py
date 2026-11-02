@@ -83,6 +83,62 @@ class HostsFileManagerTests(unittest.TestCase):
         # Ничего не записано — проверять нечего.
         self.assertEqual(result.touched, ())
 
+    def test_write_with_no_answering_relay_asks_the_profile_server_and_tries_once_more(self) -> None:
+        # Comss 2026-11-01 перевёл 309 имён на новые посредники: старые молчат, а свежие знает сам сервер.
+        from hosts import commands as hosts_commands
+        from utils.probe_gate import Why
+
+        calls: list[str] = []
+
+        class FakeHostsManager:
+            last_status = ""
+            stranded_services: list[str] = []
+
+            def apply_service_dns_selections(self, service_dns) -> bool:
+                calls.append("apply")
+                if len(calls) == 1:
+                    self.stranded_services = ["Gemini AI"]
+                    self.last_status = "Gemini AI: ни один сервер-посредник профиля не отвечает"
+                    return False
+                self.stranded_services = []
+                self.last_status = "Файл hosts обновлён"
+                return True
+
+        def check(selection, *, why, recheck):
+            calls.append(f"check:{why.name}:{sorted(recheck)}")
+
+        with (
+            patch.object(hosts_commands, "create_hosts_manager", return_value=FakeHostsManager()),
+            patch.object(hosts_commands, "save_user_selection", side_effect=lambda sel: calls.append("save")),
+            patch.object(hosts_commands, "load_page_snapshot", return_value=None),
+            patch.object(hosts_commands, "load_user_selection", return_value={}),
+            patch.object(hosts_commands, "check_addresses", side_effect=check),
+        ):
+            result = hosts_commands.apply_hosts_draft({"Gemini AI": "comss_dns"})
+
+        self.assertTrue(result.success)
+        self.assertEqual(calls, ["apply", f"check:{Why.USER.name}:['Gemini AI']", "apply", "save"])
+        self.assertEqual(result.message, "Файл hosts обновлён")
+
+    def test_other_write_failures_are_not_retried(self) -> None:
+        from hosts import commands as hosts_commands
+
+        class FakeHostsManager:
+            last_status = "Файл hosts недоступен для изменения"
+            stranded_services: list[str] = []
+
+            def apply_service_dns_selections(self, service_dns) -> bool:
+                return False
+
+        with (
+            patch.object(hosts_commands, "create_hosts_manager", return_value=FakeHostsManager()),
+            patch.object(hosts_commands, "save_user_selection"),
+            patch.object(hosts_commands, "load_page_snapshot", return_value=None),
+            patch.object(hosts_commands, "load_user_selection", return_value={}),
+            patch.object(hosts_commands, "check_addresses", side_effect=AssertionError("повторять нечего")),
+        ):
+            self.assertFalse(hosts_commands.apply_hosts_draft({"ChatGPT": "comss_dns"}).success)
+
     def test_check_after_the_write_rewrites_hosts_only_when_it_found_something_better(self) -> None:
         from hosts import commands as hosts_commands
         from hosts.address_engine import EngineReport

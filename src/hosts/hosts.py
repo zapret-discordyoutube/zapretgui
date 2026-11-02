@@ -738,6 +738,8 @@ class HostsManager:
             static_enabled: set(service_name) для сервисов, которые включаются без выбора профиля
         """
         log("🟡 apply_service_dns_selections начат", "DEBUG")
+        # Сервисы, у которых не ответил ни один посредник: запись по ним можно повторить со свежими.
+        self.stranded_services: list[str] = []
 
         selected_rows, requested_any_profile = _build_service_selection_rows(service_dns, static_enabled)
 
@@ -761,6 +763,7 @@ class HostsManager:
             # сервис идёт через остальные. Отказ — только если у имени не осталось ни одного.
             dead_keys = {str(address).strip().casefold() for address in dead}
             stranded = _services_left_without_relay(service_dns, dead_keys)
+            self.stranded_services = list(stranded)
             if stranded:
                 self.set_status(
                     f"{', '.join(stranded)}: ни один сервер-посредник профиля не отвечает из вашей сети "

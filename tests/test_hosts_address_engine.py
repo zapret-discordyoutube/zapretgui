@@ -71,8 +71,14 @@ YOUTUBE_EVEN = _catalog(
 )
 
 
-def _check(catalog, selection, verdicts, *, fresh=None, previous=None, ipv6=True, strict=True, network=True, recheck=None, relays=(), sweep=None, why=None):
+def _check(catalog, selection, verdicts, *, fresh=None, previous=None, ipv6=True, strict=True, network=True, recheck=None, relays=(), sweep=None, why=None, profile_answers=None):
     asked: list[tuple[str, str, str]] = []
+    profile_asked: list[tuple[str, str]] = []
+
+    def profile_resolve(profile_id, host, _want_v6):
+        profile_asked.append((profile_id, host))
+        return profile_answers.get(host) if host in profile_answers else None
+
     resolved: list[str] = []
 
     def probe(address, host, front):
@@ -91,9 +97,11 @@ def _check(catalog, selection, verdicts, *, fresh=None, previous=None, ipv6=True
         recheck=recheck,
         relays=relays,
         sweep=sweep,
+        profile_resolve=profile_resolve if profile_answers is not None else None,
         now=lambda: datetime(2026, 10, 13, 14, 20),
     )
     _check.resolved = resolved
+    _check.profile_asked = profile_asked
     return overlay, report, asked
 
 
@@ -646,6 +654,87 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(report.network)
         self.assertFalse(report.changed)
         self.assertEqual(_rows(overlay), _rows(first))
+
+
+# Как Gemini у GeoHide/Comss: несколько имён, у каждого два посредника каталога.
+GEMINI_HOSTS = ("gemini.google.com", "aistudio.google.com", "bard.google.com")
+GEMINI = _catalog(
+    dns_gemini=("Gemini AI", "relay", [(host, address) for host in GEMINI_HOSTS for address in ("5.5.5.1", "5.5.5.2")])
+)
+OLD_RELAYS = {"5.5.5.1", "5.5.5.2"}
+
+
+class ProfileServerTests(unittest.TestCase):
+    """Свежие посредники — у DNS-сервера самого профиля (просьба владельца 2026-11-01:
+    «пусть программа сама запрашивает новые — тогда расхождений не будет вообще»)."""
+
+    MOVED = {host: ["7.7.7.1"] for host in GEMINI_HOSTS}
+
+    def test_server_moved_the_service_and_the_old_relays_are_dead(self) -> None:
+        verdicts = {"5.5.5.1": Probe(DEAD), "5.5.5.2": Probe(DEAD), "7.7.7.1": Probe(ALIVE, 30.0)}
+
+        overlay, report, _asked = _check(GEMINI, {"Gemini AI": "relay"}, verdicts, relays=OLD_RELAYS, profile_answers=self.MOVED)
+
+        self.assertEqual(_rows(overlay, "dns.gemini", "relay"), [(host, "7.7.7.1") for host in GEMINI_HOSTS])
+        self.assertEqual(report.added, {"Gemini AI": ("7.7.7.1",)})
+        self.assertEqual(report.dropped, {"Gemini AI": ("5.5.5.1", "5.5.5.2")})
+        self.assertEqual({profile for profile, _host in _check.profile_asked}, {"relay"})
+
+    def test_server_moved_the_service_and_the_program_follows_even_if_old_relays_still_answer(self) -> None:
+        # Старый посредник Comss 80.74.30.162 отвечал, но на gemini.google.com отдавал пустую страницу.
+        verdicts = {"5.5.5.1": Probe(ALIVE, 20.0), "5.5.5.2": Probe(ALIVE, 20.0), "7.7.7.1": Probe(ALIVE, 30.0)}
+
+        overlay, _report, _asked = _check(GEMINI, {"Gemini AI": "relay"}, verdicts, relays=OLD_RELAYS, profile_answers=self.MOVED)
+
+        self.assertEqual(_rows(overlay, "dns.gemini", "relay"), [(host, "7.7.7.1") for host in GEMINI_HOSTS])
+
+    def test_new_relay_that_does_not_answer_changes_nothing(self) -> None:
+        verdicts = {"5.5.5.1": Probe(ALIVE, 20.0), "5.5.5.2": Probe(ALIVE, 25.0), "7.7.7.1": Probe(DEAD)}
+
+        overlay, report, _asked = _check(GEMINI, {"Gemini AI": "relay"}, verdicts, relays=OLD_RELAYS, profile_answers=self.MOVED)
+
+        self.assertEqual(overlay["services"], {})
+        self.assertEqual(report.added, {})
+        self.assertEqual(report.dropped, {})
+
+    def test_site_address_of_one_name_is_not_taken_for_a_relay(self) -> None:
+        # Обычный адрес сайта у CDN свой у каждого имени и меняется постоянно: за ним не гоняемся.
+        answers = {"gemini.google.com": ["9.9.9.9"], "aistudio.google.com": ["5.5.5.1"], "bard.google.com": ["5.5.5.1"]}
+        verdicts = {"5.5.5.1": Probe(ALIVE, 20.0), "5.5.5.2": Probe(ALIVE, 25.0), "9.9.9.9": Probe(ALIVE, 5.0)}
+
+        overlay, _report, asked = _check(GEMINI, {"Gemini AI": "relay"}, verdicts, relays=OLD_RELAYS, profile_answers=answers)
+
+        self.assertNotIn("9.9.9.9", {address for address, _host, _front in asked})
+        self.assertNotIn("9.9.9.9", {address for _host, address in _rows(overlay, "dns.gemini", "relay")} if overlay["services"] else set())
+
+    def test_silent_profile_server_changes_nothing(self) -> None:
+        verdicts = {"5.5.5.1": Probe(ALIVE, 20.0), "5.5.5.2": Probe(ALIVE, 25.0)}
+
+        overlay, report, _asked = _check(GEMINI, {"Gemini AI": "relay"}, verdicts, relays=OLD_RELAYS, profile_answers={})
+
+        self.assertEqual(overlay["services"], {})
+        self.assertFalse(report.changed)
+
+    def test_scheduled_check_notices_a_moved_relay_although_the_old_one_answers(self) -> None:
+        verdicts = {"5.5.5.1": Probe(ALIVE, 20.0), "5.5.5.2": Probe(ALIVE, 25.0), "7.7.7.1": Probe(ALIVE, 30.0)}
+
+        overlay, _report, _asked = _check(
+            GEMINI, {"Gemini AI": "relay"}, verdicts, relays=OLD_RELAYS, profile_answers=self.MOVED, why=Why.SCHEDULE
+        )
+
+        self.assertIsNotNone(overlay)
+        self.assertEqual(_rows(overlay, "dns.gemini", "relay"), [(host, "7.7.7.1") for host in GEMINI_HOSTS])
+
+    def test_scheduled_check_with_the_same_answers_ends_without_probing_more(self) -> None:
+        verdicts = {"5.5.5.1": Probe(ALIVE, 20.0), "5.5.5.2": Probe(ALIVE, 25.0)}
+        same = {host: ["5.5.5.1", "5.5.5.2"] for host in GEMINI_HOSTS}
+
+        overlay, _report, asked = _check(
+            GEMINI, {"Gemini AI": "relay"}, verdicts, relays=OLD_RELAYS, profile_answers=same, why=Why.SCHEDULE
+        )
+
+        self.assertIsNone(overlay)
+        self.assertEqual({address for address, _host, _front in asked}, {"5.5.5.1"})
 
 
 class ScheduledCheckTests(unittest.TestCase):

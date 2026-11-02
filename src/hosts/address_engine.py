@@ -41,6 +41,17 @@ hosts и сверка при запуске. Сеть сюда приходит 
 сервисов, у которых беда. Так программа без повода не устраивает пачку
 соединений к десяткам адресов при каждом запуске.
 
+**Профиль DNS** (Comss DNS, GeoHide…). Его строки — ответы одного DNS-сервера,
+а сервер переводит имена на новые посредники без предупреждения. Поэтому при
+каждой проверке программа спрашивает сам сервер профиля (``profile_resolve``,
+``hosts.profile_dns``) — шифрованным запросом, из сети пользователя. В счёт идут
+только адреса посредников: известные каталогу или отданные сервером сразу
+нескольким именам (``RELAY_MIN_NAMES``) — обычные адреса сайтов у CDN меняются
+постоянно, и гоняться за ними незачем. Если сервер отдаёт посредник, которого
+нет в hosts, это сигнал беды и для плановой проверки: новый посредник
+проверяется той же пробой (с именем сервиса), и, если он отвечает, становится
+первым, а старые посредники, которых сервер больше не отдаёт, убираются.
+
 Осторожность. Если не ответил ни один адрес и связи с интернетом нет, ничего
 не меняется: иначе при обрыве «умерли» бы все адреса разом. Имя никогда не остаётся без адреса: если
 убирать пришлось бы всё, остаётся каталог. В фоновой проверке адрес убирается
@@ -88,6 +99,9 @@ SWITCH_RATIO = 0.6
 # Первый адрес уступает место из-за потерь, когда у него без ответа осталось хотя бы столько
 # замеров и у другого адреса их меньше на столько же: одна потеря бывает и на здоровой линии.
 LOSS_SWITCH = 2
+# Новый адрес из ответа сервера профиля считается посредником, если сервер отдал его
+# сразу стольким разным именам: посредник один на весь сервис, адрес сайта у CDN — свой у имени.
+RELAY_MIN_NAMES = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +221,7 @@ def check_selection(
     relays: Collection[str] = (),
     recheck: Collection[str] | None = None,
     sweep: Callable[[list[str]], dict[str, float]] | None = None,
+    profile_resolve: Callable[[str, str, bool], list[str] | None] | None = None,
     now: Callable[[], datetime] = datetime.now,
 ) -> tuple[dict | None, EngineReport]:
     """Проверяет адреса выбранных сервисов. Возвращает (новый набор или None, отчёт).
@@ -218,7 +233,9 @@ def check_selection(
     известных адресов не искать). ``relays`` — адреса посредников каталога. ``why`` — повод
     (``utils.probe_gate.Why``): ``USER`` — человек ждёт результата, мёртвый адрес убирается
     сразу, без второй проверки; ``SCHEDULE`` — сначала только первые адреса, полная проверка
-    лишь при беде. ``recheck`` — названия сервисов,
+    лишь при беде. ``profile_resolve(профиль, имя, нужен_ли_IPv6)`` — что сейчас
+    отдаёт DNS-сервер самого профиля (None — сервера нет или он не ответил).
+    ``recheck`` — названия сервисов,
     которые проверить сейчас (None — все): человек переключил один сервис и не
     должен ждать, пока перепроверятся остальные двадцать; у остальных остаются
     адреса прошлой проверки. None вместо набора — менять нечего (нет связи или
@@ -246,6 +263,7 @@ def check_selection(
     if not selected:
         return None, EngineReport()
     strict = why == Why.USER
+    fresh_relays = _ask_profile_servers(plans, profile_resolve, relay_set, ipv6)
 
     def _checked(plan: _Plan, addresses: list[str], address: str) -> bool:
         """Проверять ли адрес. Без паспорта — только там, где есть из чего выбирать первого."""
@@ -277,6 +295,16 @@ def check_selection(
                     owner.setdefault(key, plan.service_id)
         light = _probe_all(firsts, probe)
         troubled = {owner[key] for key, found in light.items() if found.verdict == DEAD}
+        # Сервер профиля отдаёт посредник, которого в hosts нет: тоже беда, даже если старый ещё отвечает.
+        for plan in plans:
+            rows = written.get((plan.service_id, plan.profile_id))
+            current = _by_host([(str(host), str(address)) for host, address in rows]) if rows else plan.hosts
+            if any(
+                address not in current.get(host, [])
+                for host in plan.hosts
+                for address in fresh_relays.get((plan.profile_id, host), ())
+            ):
+                troubled.add(plan.service_id)
         if not troubled:
             # Браузер получает живой адрес: менять нечего, искать незачем.
             return None, EngineReport(checked=len(light), checked_at=before["checked_at"])
@@ -355,6 +383,15 @@ def check_selection(
                     key=accepted.__getitem__,
                 )
                 found[(index, host)].extend(fastest[:SCAN_VERIFY])
+    if may_search(why):
+        # Профиль DNS: кандидаты — посредники, которых сервер профиля отдаёт сейчас.
+        for index, plan in enumerate(plans):
+            if plan.passport is not None:
+                continue
+            for host, addresses in plan.hosts.items():
+                fresh = [address for address in fresh_relays.get((plan.profile_id, host), ()) if address not in addresses]
+                if fresh:
+                    found.setdefault((index, host), []).extend(fresh[: SEEK_PER_FAMILY * 2])
     for (index, host), extra in found.items():
         plan = plans[index]
         for address in extra:
@@ -415,6 +452,15 @@ def check_selection(
                     proven.append(address)
                     score[address] = _score(probed)
             ranked.extend((address, _RANK_ALIVE) for address in sorted(proven, key=score.__getitem__))
+            handed = set(fresh_relays.get((plan.profile_id, host), ())) if plan.passport is None else set()
+            if handed and any(address in handed and rank == _RANK_ALIVE for address, rank in ranked):
+                # Сервер профиля перевёл имя на другой посредник, и тот отвечает: старые посредники,
+                # которых сервер больше не отдаёт, из hosts уходят. Адреса сайтов не трогаются.
+                doomed.extend(
+                    address
+                    for address in addresses
+                    if address in relay_set and address not in handed and address not in doomed
+                )
             if full:
                 # Адрес IPv4 считается мёртвым, только когда рядом отвечает другой IPv4. Не ответил ни
                 # один — значит, слепа проба (ей мешает обход, антивирус, сбой связи), а не умерли все
@@ -506,6 +552,56 @@ def check_selection(
         checked_at=checked_at,
     )
     return after, report
+
+
+def _ask_profile_servers(
+    plans: list[_Plan],
+    profile_resolve: Callable[[str, str, bool], list[str] | None] | None,
+    relay_set: set[str],
+    ipv6: bool,
+) -> dict[tuple[str, str], list[str]]:
+    """(профиль, имя) → посредники, которые сервер профиля отдаёт сейчас. Пусто — спросить нечего.
+
+    Посредником считается адрес, известный каталогу как посредник, или отданный
+    сервером сразу ``RELAY_MIN_NAMES`` разным именам этого профиля.
+    """
+    if profile_resolve is None:
+        return {}
+    asked = list(
+        dict.fromkeys(
+            (plan.profile_id, host)
+            for plan in plans
+            if plan.passport is None and plan.profile_id != HOSTS_PROFILE_ID
+            for host in plan.hosts
+        )
+    )
+    if not asked:
+        return {}
+
+    def _answer(item: tuple[str, str]) -> list[str] | None:
+        try:
+            answer = profile_resolve(item[0], item[1], ipv6)
+        except Exception:
+            return None
+        return None if answer is None else [str(address).strip().lower() for address in answer]
+
+    with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(asked)), thread_name_prefix="hosts-engine-profile-dns") as pool:
+        answers = dict(zip(asked, pool.map(_answer, asked)))
+    names_by_address: dict[tuple[str, str], set[str]] = {}
+    for (profile_id, host), answer in answers.items():
+        for address in answer or ():
+            names_by_address.setdefault((profile_id, address), set()).add(host)
+    result: dict[tuple[str, str], list[str]] = {}
+    for (profile_id, host), answer in answers.items():
+        relays = [
+            address
+            for address in answer or ()
+            if (ipv6 or not _is_v6(address))
+            and (address in relay_set or len(names_by_address[(profile_id, address)]) >= RELAY_MIN_NAMES)
+        ]
+        if relays:
+            result[(profile_id, host)] = relays
+    return result
 
 
 def _probe_all(

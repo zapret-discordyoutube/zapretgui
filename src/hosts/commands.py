@@ -90,7 +90,7 @@ def _check_addresses(selection: dict[str, str] | None, *, why, recheck):
     global _OVERLAY_BEFORE_REFRESH
     import time
 
-    from hosts import address_engine, proxy_domains
+    from hosts import address_engine, profile_dns, proxy_domains
     from hosts.address_probe import ALIVE, check_address, sweep
     from hosts.ipv6_detection import is_ipv6_available
     from hosts.relay_check import internet_reachable
@@ -125,6 +125,8 @@ def _check_addresses(selection: dict[str, str] | None, *, why, recheck):
         relays=proxy_domains.relay_addresses_of(catalog),
         probe=_probe,
         resolve=_fresh_addresses,
+        # Свежие посредники профиля — у DNS-сервера самого профиля (hosts.profile_dns).
+        profile_resolve=profile_dns.ask_profile,
         network_ok=internet_reachable,
         ipv6=bool(is_ipv6_available()),
         why=why,
@@ -214,6 +216,7 @@ def apply_hosts_draft(selection: dict[str, str], adobe: bool | None = None) -> H
     переписан ещё раз, уже без участия человека.
     """
     from log.log import log
+    from utils.probe_gate import Why
 
     manager = create_hosts_manager(
         status_callback=lambda message: log(f"Hosts: {message}", "DEBUG")
@@ -231,6 +234,18 @@ def apply_hosts_draft(selection: dict[str, str], adobe: bool | None = None) -> H
         )
         success = bool(manager.apply_service_dns_selections(selection))
         message = str(manager.last_status or "")
+        stranded = list(getattr(manager, "stranded_services", ()) or ())
+        if not success and stranded:
+            # Ни один посредник профиля не ответил: возможно, DNS-сервер профиля уже перевёл
+            # сервис на другие. Свежие посредники спрашиваются у него самого, и запись — ещё раз.
+            log(f"Hosts: посредники не отвечают ({', '.join(stranded)}) — спрашиваю свежие у DNS профиля", "INFO")
+            try:
+                check_addresses(selection, why=Why.USER, recheck=set(stranded))
+            except Exception as exc:
+                log(f"Hosts: свежие посредники не получены: {exc}", "WARNING")
+            else:
+                success = bool(manager.apply_service_dns_selections(selection))
+                message = str(manager.last_status or message)
         if success:
             save_user_selection(selection)
         if success and adobe is not None:
