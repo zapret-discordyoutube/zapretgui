@@ -495,11 +495,13 @@ def judge_ech(facts: EchFacts | None) -> tuple[str, str]:
 # Как выключить ECH в браузере. Firefox: настройка about:config (Mozilla). Edge и Chrome: переключателя в настройках
 # нет (флаг в chrome://flags убран с Chrome 122), ECH выключает правило EncryptedClientHelloEnabled = 0 — на Edge 156
 # проверено по журналу сети: с правилом приветствия идут без ECH (win10, 2026-11-01).
-ECH_OFF_STEPS = (
-    "в Firefox — about:config → network.dns.echconfig.enabled = false; в Edge и Chrome переключателя нет: "
-    "выполните в командной строке «reg add HKCU\\Software\\Policies\\Microsoft\\Edge /v EncryptedClientHelloEnabled "
-    "/t REG_DWORD /d 0 /f» (для Chrome — Google\\Chrome вместо Microsoft\\Edge) и перезапустите браузер"
+ECH_STEP_FIREFOX = "в Firefox — about:config → network.dns.echconfig.enabled = false"
+ECH_STEP_CHROMIUM = (
+    "в Edge и Chrome переключателя нет: выполните в командной строке «reg add HKCU\\Software\\Policies\\Microsoft\\Edge "
+    "/v EncryptedClientHelloEnabled /t REG_DWORD /d 0 /f» (для Chrome — Google\\Chrome вместо Microsoft\\Edge) "
+    "и перезапустите браузер"
 )
+ECH_OFF_STEPS = f"{ECH_STEP_FIREFOX}; {ECH_STEP_CHROMIUM}"
 ADVICE_ECH = f"Если сайты за Cloudflare не открываются, выключите в браузере ECH: {ECH_OFF_STEPS}."
 
 

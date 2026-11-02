@@ -137,6 +137,13 @@ class BlockcheckFeature:
         except Exception:
             return ""
 
+    def read_strategy_preset_text(self) -> str:
+        """Текст выбранного пресета Zapret 2 — туда «Применить» пишет стратегию. Читает файл — звать в фоне."""
+        from settings.mode import ZAPRET2_MODE
+
+        source_text, _manifest = self.presets_feature.read_selected_preset_source(ZAPRET2_MODE)
+        return str(source_text or "")
+
     def load_past_blockcheck_report(self, *args, **kwargs):
         return self._worker_commands().load_past_blockcheck_report(*args, **kwargs)
 

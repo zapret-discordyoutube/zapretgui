@@ -151,6 +151,7 @@ class BlockcheckPage(BasePage):
         start_zapret=None,
         zapret_is_running=None,
         stop_zapret=None,
+        notify=None,
     ):
         super().__init__(
             title=tr_catalog("page.blockcheck.title", default="BlockCheck"),
@@ -171,6 +172,7 @@ class BlockcheckPage(BasePage):
         self._open_dns_settings = open_dns_settings
         self._ensure_zapret_for_strategy = ensure_zapret_for_strategy
         self._zapret_is_running = zapret_is_running
+        self._notify = notify
         self._start_zapret = start_zapret
         self._stop_zapret = stop_zapret
         # «С обходом и без»: две проверки подряд с переключением Zapret между ними. Без управления Zapret кнопки нет.
@@ -669,6 +671,7 @@ class BlockcheckPage(BasePage):
                 open_dns_settings=lambda: self._on_problem_action("dns", ""),
                 ensure_zapret_for_strategy=self._ensure_zapret_for_strategy,
                 zapret_is_running=self._zapret_is_running,
+                notify=self._notify,
             )
             self._strategy_tab_page.report_requested.connect(self._open_log_report)
             self._strategy_tab_page.setVisible(False)

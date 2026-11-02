@@ -133,6 +133,7 @@ def diagnose(
     probe_addresses,
     visit: Callable[[tuple[str, ...]], object],
     cancelled: Callable[[], bool] = lambda: False,
+    on_attempt: Callable[[tuple[str, ...], str], None] | None = None,
 ) -> Diagnosis:
     """Почему браузер не открыл сайт. ``first`` — неудачное открытие с журналом сети;
     ``visit(args)`` — открыть сайт ещё раз с этими ключами (тоже с журналом сети).
@@ -181,6 +182,8 @@ def diagnose(
             if found != _SILENT:
                 break
         tried.append((fixes, found))
+        if on_attempt is not None:
+            on_attempt(fixes, found)
         if found == _FAILED and getattr(result, "text", "") and not facts["reason"]:
             facts["reason"] = result.text
         return found

@@ -91,8 +91,11 @@ class StrategyScanPage(BasePage):
         open_dns_settings=None,
         ensure_zapret_for_strategy=None,
         zapret_is_running=None,
+        notify=None,
     ):
         self._embedded = bool(embedded)
+        # Уведомления окна с кнопками («Выключить ECH», «Выключить прокси»); нет — простое уведомление.
+        self._notify = notify
         # После «Применить»: запустить или перезапустить Zapret, чтобы стратегия заработала сразу.
         self._ensure_zapret_for_strategy = ensure_zapret_for_strategy
         # …и, когда он запустится, проверить сайт уже через пресет пользователя.
@@ -1307,26 +1310,62 @@ class StrategyScanPage(BasePage):
         if previous is not None:
             previous.cancel()
         worker = StrategyApplyCheckWorker(
-            host, is_running=self._zapret_is_running, restarting=restarting, companions=self._apply_check_companions, parent=self
+            host,
+            is_running=self._zapret_is_running,
+            restarting=restarting,
+            companions=self._apply_check_companions,
+            read_preset=getattr(self._blockcheck, "read_strategy_preset_text", None),
+            parent=self,
         )
         worker.completed.connect(self._on_apply_check_finished)
+        worker.progress.connect(self._on_apply_check_progress)
         worker.finished.connect(worker.deleteLater)
         self._apply_check_worker = worker
         self._on_log(f"Проверяю {host} через ваш пресет, когда Zapret запустится...")
         worker.start()
+
+    def _apply_check_log(self, line: str) -> None:
+        """Строка проверки после «Применить» — на экран и в файл журнала подбора (он уходит в обращение в поддержку)."""
+        self._on_log(line)
+        self._blockcheck.append_strategy_scan_run_log(self._run_log_file, line)
+
+    def _on_apply_check_progress(self, line: str) -> None:
+        if self.sender() is not self._apply_check_worker or self._cleanup_in_progress:
+            return
+        self._apply_check_log(str(line))
 
     def _on_apply_check_finished(self, host: str, check) -> None:
         worker = self.sender()
         if worker is not self._apply_check_worker or self._cleanup_in_progress:
             return  # итог старой проверки: после неё уже было новое «Применить»
         self._apply_check_worker = None
-        from blockcheck.strategy_apply_check import apply_check_message
+        from blockcheck.strategy_apply_check import apply_check_buttons, apply_check_message
 
-        self._on_log(f"Проверка через пресет: {host} — {check.code}{f' ({check.text})' if check.text else ''}")
-        message = apply_check_message(host, check)
+        buttons = apply_check_buttons(check) if callable(self._notify) else []
+        message = apply_check_message(host, check, with_buttons=bool(buttons))
+        self._apply_check_log(f"Проверка через пресет: {host} — {check.code}{f' ({check.text})' if check.text else ''}")
         if message is None:
             return
         kind, title, body = message
+        self._apply_check_log(f"{title}. {body}")
+        if callable(self._notify):
+            from app_notifications import advisory_notification
+
+            self._notify(
+                advisory_notification(
+                    level=kind,
+                    title=title,
+                    content=body,
+                    source="blockcheck.apply_check",
+                    presentation="infobar",
+                    queue="immediate",
+                    # С кнопками уведомление ждёт человека: иначе оно исчезнет, пока он читает шаги.
+                    duration=-1 if buttons else 15000,
+                    buttons=buttons,
+                    dedupe_key=f"blockcheck.apply_check.{host}",
+                )
+            )
+            return
         show = {"warning": InfoBarHelper.warning, "info": InfoBarHelper.info}.get(kind, InfoBarHelper.success)
         show(self.window(), title, body)
 

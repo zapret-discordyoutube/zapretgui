@@ -48,14 +48,16 @@ class WaitTests(unittest.TestCase):
 
 
 class CheckSiteTests(unittest.TestCase):
-    def _run(self, outcomes_by_call, *, running=True, visit=None, retry=None):
+    def _run(self, outcomes_by_call, *, running=True, visit=None, retry=None, quic_visit=None):
         from blockcheck import browser_check
 
         calls = iter(outcomes_by_call)
         visit = visit or browser_check.BrowserVisit(browser_check.BROWSER_MISSING)
         self.retries: list[tuple[str, ...]] = []
 
-        def open_browser(host, *, cancelled, extra=(), net_log=False):
+        def open_browser(host, *, cancelled, extra=(), net_log=False, quic=False):
+            if quic:
+                return quic_visit or visit
             if not extra:
                 return visit
             self.retries.append(tuple(extra))
@@ -97,7 +99,7 @@ class CheckSiteTests(unittest.TestCase):
         silent = browser_check.BrowserVisit(browser_check.BROWSER_NO_ANSWER, browser="msedge.exe", details="код выхода 0; вывод пуст")
         opened = browser_check.BrowserVisit(browser_check.BROWSER_OK, browser="msedge.exe")
         answers = iter([silent, opened])
-        result = self._run_with_browser(lambda host, **_k: next(answers))
+        result = self._run_with_browser(lambda host, quic=False, **_k: opened if quic else next(answers))
         self.assertEqual((result.code, result.browser), (check.CHECK_OK, "Edge"))
         # Молчит и второй раз — не «работает» и не «не открылся»: проверить не вышло, с тем, что вернул браузер.
         result = self._run_with_browser(lambda host, **_k: silent)
@@ -269,3 +271,222 @@ class MessageTests(unittest.TestCase):
         _kind, _title, body = check.apply_check_message("x.com", parts)
         self.assertIn("a.example, b.example, c.example и другие", body)
         self.assertIn("подберите стратегию для a.example", body)
+
+
+class ForTheirBrowserTests(unittest.TestCase):
+    """Совет и кнопки — для браузера человека по умолчанию."""
+
+    def _ech(self, family: str, title: str) -> check.ApplyCheck:
+        from blockcheck import browser_diagnosis as bd
+
+        return check.ApplyCheck(
+            check.CHECK_BROWSER_FIXED, "страница не загрузилась за 20 с", browser="Edge", fixes=(bd.FIX_ECH,),
+            address="172.67.186.237", probe_address="104.21.32.151", user_browser=family, user_browser_title=title,
+        )
+
+    def test_firefox_user_gets_only_the_firefox_step_and_a_button(self) -> None:
+        result = self._ech("firefox", "Firefox")
+        buttons = check.apply_check_buttons(result)
+        self.assertEqual([button["text"] for button in buttons], ["Выключить ECH в Firefox"])
+        self.assertEqual(buttons[0]["value"], "off_ech:firefox:Firefox")
+        _kind, _title, body = check.apply_check_message("www.castingcall.club", result, with_buttons=True)
+        self.assertIn("выключите ECH в Firefox — кнопкой ниже или вручную: about:config", body)
+        self.assertNotIn("reg add", body)
+        # Без кнопок текст на них не ссылается.
+        _kind, _title, plain = check.apply_check_message("www.castingcall.club", result)
+        self.assertNotIn("кнопкой ниже", plain)
+
+    def test_edge_user_gets_the_edge_rule(self) -> None:
+        _kind, _title, body = check.apply_check_message("x.com", self._ech("edge", "Edge"), with_buttons=True)
+        self.assertIn(r"reg add HKCU\Software\Policies\Microsoft\Edge /v EncryptedClientHelloEnabled", body)
+        self.assertNotIn("about:config", body)
+
+    def test_browser_the_program_cannot_switch_gets_all_steps_and_no_button(self) -> None:
+        result = self._ech("other_chromium", "Яндекс Браузер")
+        self.assertEqual(check.apply_check_buttons(result), [])
+        _kind, _title, body = check.apply_check_message("x.com", result, with_buttons=False)
+        self.assertIn("about:config", body)
+        self.assertIn("reg add", body)
+
+    def test_proxy_and_ipv6_buttons(self) -> None:
+        from blockcheck import browser_diagnosis as bd
+
+        proxy = check.ApplyCheck(check.CHECK_BROWSER_FIXED, "", browser="Edge", fixes=(bd.FIX_PROXY,), proxy="127.0.0.1:8080")
+        self.assertEqual([button["kind"] for button in check.apply_check_buttons(proxy)], ["disable_proxy"])
+        ipv6 = check.ApplyCheck(check.CHECK_BROWSER_FIXED, "", browser="Edge", fixes=(bd.FIX_ADDRESS,), address="2606:4700::1", probe_address="1.1.1.1")
+        self.assertEqual([button["value"] for button in check.apply_check_buttons(ipv6)], ["open_adapters"])
+        # Не доказано — кнопок нет.
+        self.assertEqual(check.apply_check_buttons(check.ApplyCheck(check.CHECK_BROWSER_FAILED, "")), [])
+
+
+class ProgressTests(unittest.TestCase):
+    def test_each_step_of_the_search_is_told(self) -> None:
+        from blockcheck import browser_check
+        from blockcheck.browser_netlog import HUNG, Connection, NetFacts
+        from blockcheck.default_browser import DefaultBrowser
+
+        net = NetFacts((Connection("discord.com", "1.1.1.1", True, HUNG),))
+        failed = browser_check.BrowserVisit(browser_check.BROWSER_TIMEOUT, "", "страница не загрузилась за 20 с", "msedge.exe", net=net)
+        opened = browser_check.BrowserVisit(browser_check.BROWSER_OK, browser="msedge.exe")
+        lines: list[str] = []
+
+        def open_browser(host, *, cancelled, extra=(), net_log=False, quic=False):
+            return opened if extra else failed
+
+        with (
+            patch("blockcheck.strategy_search.probes.resolve_target_addresses", return_value=(["1.1.1.1", "1.1.2.1"], "")),
+            patch("blockcheck.strategy_search.probes.probe_https_addresses", return_value=[OK, OK]),
+            patch.object(check, "wait_until_running", return_value=True),
+        ):
+            cancel = SocketCancel()
+            cancel.sleep = lambda seconds: True
+            result = check.run_apply_check(
+                "discord.com", is_running=lambda: True, restarting=False, cancel=cancel, open_browser=open_browser,
+                say=lines.append, user_browser=DefaultBrowser("firefox", "Firefox"),
+            )
+        self.assertEqual((result.code, result.user_browser), (check.CHECK_BROWSER_FIXED, "firefox"))
+        text = "\n".join(lines)
+        self.assertIn("Проба открыла discord.com", text)
+        self.assertIn("Edge не открыл discord.com: страница не загрузилась за 20 с. Ищу причину по журналу сети браузера: шёл на 1.1.1.1, прятал имя сайта (ECH).", text)
+        self.assertIn("Открываю discord.com ещё раз — без ECH: открылся.", text)
+
+
+class BrowserFixActionTests(unittest.TestCase):
+    def test_turning_ech_off_offers_undo(self) -> None:
+        from blockcheck import browser_fixes
+
+        registry = {}
+
+        class Registry:
+            def set_dword(self, path, name, value):
+                registry[(path, name)] = value
+
+            def delete_value(self, path, name):
+                registry.pop((path, name), None)
+
+            def key_is_empty(self, path):
+                return not any(key[0] == path for key in registry)
+
+            def delete_key(self, path):
+                pass
+
+        ok, text, buttons = browser_fixes.run_fix("off_ech:edge:Edge", registry=Registry())
+        self.assertTrue(ok)
+        self.assertIn("Закройте все окна Edge", text)
+        self.assertEqual([(button["text"], button["value"]) for button in buttons], [("Вернуть как было", "restore_ech:edge:Edge")])
+        ok, _text, buttons = browser_fixes.run_fix("restore_ech:edge:Edge", registry=Registry())
+        self.assertTrue(ok)
+        self.assertEqual((registry, buttons), ({}, []))
+
+
+class ProfileThatCatchesTheSiteTests(unittest.TestCase):
+    """Проба через пресет не открыла: называется профиль, который движок берёт для сайта."""
+
+    PRESET = "--new\n--name=Общий\n--filter-tcp=443\n--hostlist-domains=castingcall.club,example.com\n--lua-desync=fake\n" \
+        "--new\n--filter-tcp=443\n--hostlist-domains=castingcall.club\n--lua-desync=multisplit\n"
+
+    def _failed_run(self, preset: str):
+        lines: list[str] = []
+        with (
+            patch("blockcheck.strategy_search.probes.resolve_target_addresses", return_value=(["104.21.32.151"], "")),
+            patch("blockcheck.strategy_search.probes.probe_https_addresses", return_value=[RESET]),
+            patch.object(check, "wait_until_running", return_value=True),
+        ):
+            cancel = SocketCancel()
+            cancel.sleep = lambda seconds: True
+            result = check.run_apply_check(
+                "www.castingcall.club", is_running=lambda: True, restarting=False, cancel=cancel, say=lines.append, read_preset=lambda: preset
+            )
+        return result, lines
+
+    def test_profile_above_is_named_with_the_step_to_move_the_site_profile(self) -> None:
+        result, lines = self._failed_run(self.PRESET)
+        self.assertEqual((result.code, result.profile_number, result.profile_title, result.profile_own), (check.CHECK_FAILED, 1, "Общий", False))
+        _kind, title, body = check.apply_check_message("www.castingcall.club", result)
+        self.assertEqual(title, "В вашем пресете сайт не открылся")
+        self.assertIn("сайт забирает профиль №1 «Общий» — www.castingcall.club записан прямо в нём", body)
+        self.assertIn("перетащите профиль сайта выше «Общий»", body)
+        self.assertNotIn("Скорее всего", body)
+        self.assertIn("Движок берёт www.castingcall.club профилем №1 «Общий»", "\n".join(lines))
+
+    def test_site_already_in_its_own_profile_is_not_an_order_problem(self) -> None:
+        own_first = "--new\n--filter-tcp=443\n--hostlist-domains=castingcall.club\n--lua-desync=multisplit\n"
+        result, _lines = self._failed_run(own_first)
+        self.assertTrue(result.profile_own)
+        _kind, _title, body = check.apply_check_message("www.castingcall.club", result)
+        self.assertIn("Порядок ни при чём", body)
+        self.assertNotIn("перетащите", body)
+
+    def test_no_profile_takes_the_site(self) -> None:
+        result, _lines = self._failed_run("--new\n--name=Другое\n--filter-tcp=443\n--hostlist-domains=example.com\n--lua-desync=fake\n")
+        self.assertTrue(result.profile_none)
+        _kind, _title, body = check.apply_check_message("www.castingcall.club", result)
+        self.assertIn("Ни один включённый профиль", body)
+
+    def test_unreadable_preset_falls_back_to_the_careful_wording(self) -> None:
+        def broken():
+            raise OSError("нет файла")
+
+        lines: list[str] = []
+        with (
+            patch("blockcheck.strategy_search.probes.resolve_target_addresses", return_value=(["104.21.32.151"], "")),
+            patch("blockcheck.strategy_search.probes.probe_https_addresses", return_value=[RESET]),
+            patch.object(check, "wait_until_running", return_value=True),
+        ):
+            cancel = SocketCancel()
+            cancel.sleep = lambda seconds: True
+            result = check.run_apply_check("x.com", is_running=lambda: True, restarting=False, cancel=cancel, say=lines.append, read_preset=broken)
+        _kind, _title, body = check.apply_check_message("x.com", result)
+        self.assertIn("Скорее всего", body)
+
+
+
+class QuicTests(unittest.TestCase):
+    """Без QUIC браузер сайт открыл — проверка ещё и с QUIC, как работают браузеры."""
+
+    def _run(self, quic_visit):
+        from blockcheck import browser_check
+        from blockcheck.default_browser import DefaultBrowser
+
+        opened = browser_check.BrowserVisit(browser_check.BROWSER_OK, browser="msedge.exe")
+        lines: list[str] = []
+
+        def open_browser(host, *, cancelled, extra=(), net_log=False, quic=False):
+            return quic_visit if quic else opened
+
+        with (
+            patch("blockcheck.strategy_search.probes.resolve_target_addresses", return_value=(["1.1.1.1"], "")),
+            patch("blockcheck.strategy_search.probes.probe_https_addresses", return_value=[OK]),
+            patch.object(check, "wait_until_running", return_value=True),
+        ):
+            cancel = SocketCancel()
+            cancel.sleep = lambda seconds: True
+            result = check.run_apply_check(
+                "discord.com", is_running=lambda: True, restarting=False, cancel=cancel, open_browser=open_browser,
+                say=lines.append, user_browser=DefaultBrowser("firefox", "Firefox"),
+            )
+        return result, "\n".join(lines)
+
+    def test_site_that_fails_only_with_quic_gets_its_own_warning_and_button(self) -> None:
+        from blockcheck import browser_check
+
+        failed = browser_check.BrowserVisit(browser_check.BROWSER_TIMEOUT, "", "страница не загрузилась за 20 с", "msedge.exe")
+        result, said = self._run(failed)
+        self.assertEqual((result.code, result.text), (check.CHECK_BROWSER_QUIC, "страница не загрузилась за 20 с"))
+        self.assertIn("С QUIC Edge не открыл discord.com", said)
+        buttons = check.apply_check_buttons(result)
+        self.assertEqual([(button["text"], button["value"]) for button in buttons], [("Выключить QUIC в Firefox", "off_quic:firefox:Firefox")])
+        kind, title, body = check.apply_check_message("discord.com", result, with_buttons=True)
+        self.assertEqual((kind, title), ("warning", "С QUIC сайт не открывается"))
+        self.assertIn("выключите QUIC в Firefox — кнопкой ниже или вручную: about:config → network.http.http3.enable = false", body)
+
+    def test_quic_that_opens_or_stays_silent_keeps_the_site_working(self) -> None:
+        from blockcheck import browser_check
+
+        result, said = self._run(browser_check.BrowserVisit(browser_check.BROWSER_OK, browser="msedge.exe"))
+        self.assertEqual(result.code, check.CHECK_OK)
+        self.assertIn("С QUIC Edge тоже открыл", said)
+        silent = browser_check.BrowserVisit(browser_check.BROWSER_NO_ANSWER, "", "браузер не ответил", "msedge.exe")
+        result, said = self._run(silent)
+        self.assertEqual(result.code, check.CHECK_OK)
+        self.assertIn("промолчал", said)

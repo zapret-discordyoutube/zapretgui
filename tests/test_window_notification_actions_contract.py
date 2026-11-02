@@ -45,6 +45,30 @@ class WindowNotificationActionsContractTests(unittest.TestCase):
         self.assertIn("_notify_windows_server_wlanapi_install_result", center_source)
         self.assertIn("install_windows_server_wlanapi=features.runtime.install_windows_server_wlanapi", setup_source)
 
+    def test_browser_fix_button_runs_its_value_in_the_background_request(self) -> None:
+        # Кнопки проверки после «Применить» («Выключить ECH», «Вернуть как было») идут через фоновый запрос окна.
+        request_browser_fix = Mock()
+        handler = WindowNotificationActionHandler(
+            notify=Mock(),
+            runtime_actions=Mock(),
+            show_page=Mock(),
+            open_url=Mock(),
+            request_disable_proxy=Mock(),
+            request_disable_kaspersky_warning=Mock(),
+            request_disable_telega_warning=Mock(),
+            request_windivert_autofix=Mock(),
+            request_windows_server_wlanapi_install=Mock(),
+            request_launch_conflict_action=Mock(),
+            request_browser_fix=request_browser_fix,
+        )
+        bar = object()
+        callback = handler.build_action_callback({"kind": "browser_fix", "value": "ech_off:edge:Edge"}, bar)
+        callback()
+        request_browser_fix.assert_called_once_with("ech_off:edge:Edge", bar)
+        center_source = inspect.getsource(WindowNotificationCenter)
+        self.assertIn("request_browser_fix=self._request_browser_fix", center_source)
+        self.assertIn("_notify_browser_fix_result", center_source)
+
     def test_notification_pending_state_uses_shared_latest_worker_state(self) -> None:
         center_source = inspect.getsource(WindowNotificationCenter)
         center_init_source = inspect.getsource(WindowNotificationCenter.__init__)

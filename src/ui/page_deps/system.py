@@ -313,6 +313,7 @@ def build_blockcheck_page_kwargs(
     dns_feature,
     runtime_feature,
     show_page=None,
+    notify=None,
 ) -> dict:
     _ = page_name
 
@@ -351,6 +352,8 @@ def build_blockcheck_page_kwargs(
     return {
         "blockcheck_feature": blockcheck_feature,
         "dns_feature": dns_feature,
+        # Уведомления окна с кнопками: проверка после «Применить» предлагает исправить найденное.
+        "notify": notify,
         "create_strategy_scan_worker": _create_strategy_scan_worker,
         "create_geo_sites_worker": _create_geo_sites_worker,
         "ensure_zapret_for_strategy": _ensure_zapret_for_strategy,

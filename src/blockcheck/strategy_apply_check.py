@@ -46,6 +46,8 @@ CHECK_BROWSER_FAILED = "browser_failed"
 CHECK_BROWSER_UNKNOWN = "browser_unknown"
 # Браузер не открыл сайт, а с изменением (``fixes``) открыл: причина доказана.
 CHECK_BROWSER_FIXED = "browser_fixed"
+# Без QUIC браузер сайт открыл, а с QUIC (HTTP/3), как браузеры работают обычно, — нет.
+CHECK_BROWSER_QUIC = "browser_quic"
 # До сайта браузер достучался, а страница ждала части с других имён (``hosts``), и они не открылись.
 CHECK_BROWSER_PARTS = "browser_parts"
 
@@ -66,6 +68,16 @@ class ApplyCheck:
     secure_dns: bool = False
     # Изменения, с которыми браузер открывал сайт ещё раз (``browser_diagnosis.FIX_*``).
     tried: tuple[str, ...] = ()
+    # Браузер человека по умолчанию (``default_browser``): совет и кнопки — для него.
+    user_browser: str = ""
+    user_browser_title: str = ""
+    # Проба через пресет не открыла: какой профиль движок берёт для сайта (``preset_match``).
+    profile_number: int = 0
+    profile_title: str = ""
+    profile_reason: str = ""
+    profile_own: bool = False
+    # Пресет прочитан, а ни один профиль сайт не берёт.
+    profile_none: bool = False
 
 
 def check_companions(hosts, *, cancel) -> ApplyCheck:
@@ -133,22 +145,68 @@ def wait_until_running(is_running: Callable[[], bool], *, restarting: bool, slee
     return False
 
 
-def run_apply_check(host: str, *, is_running, restarting: bool, cancel, open_browser=None, companions=()) -> ApplyCheck:
+def _quiet(_line: str) -> None:
+    return None
+
+
+def _with_profile(check: ApplyCheck, host: str, read_preset, say: Callable[[str], None]) -> ApplyCheck:
+    """Проба через пресет не открыла — назвать профиль, который берёт сайт, по правилу движка (``preset_match``)."""
+    if read_preset is None:
+        return check
+    from blockcheck.preset_match import first_profile_for
+    from blockcheck.strategy_search import probes
+    from lists.core.paths import get_lists_dir
+
+    try:
+        text = read_preset()
+        addresses, _error = probes.resolve_target_addresses(host, 443)
+        hit = first_profile_for(text, host, addresses, lists_dir=get_lists_dir())
+    except Exception as error:  # подсказка о порядке — не повод ронять проверку
+        log(f"Не вышло найти профиль для {host} в пресете: {error}", "WARNING")
+        return check
+    if hit is None:
+        say(f"В пресете ни один включённый профиль не берёт {host}.")
+        return replace(check, profile_none=True)
+    say(f"Движок берёт {host} профилем №{hit.number} «{hit.title}»: {hit.reason}.")
+    return replace(check, profile_number=hit.number, profile_title=hit.title, profile_reason=hit.reason, profile_own=hit.own)
+
+
+def run_apply_check(
+    host: str,
+    *,
+    is_running,
+    restarting: bool,
+    cancel,
+    open_browser=None,
+    companions=(),
+    say: Callable[[str], None] = _quiet,
+    user_browser=None,
+    read_preset=None,
+) -> ApplyCheck:
     """Дождаться Zapret и проверить сайт; при провале — ещё раз чуть позже; открылся — и в браузере.
 
     Второй заход нужен, если работающий Zapret перечитал пресет позже, чем мы
-    начали проверку: первая проба тогда шла ещё со старым пресетом.
+    начали проверку: первая проба тогда шла ещё со старым пресетом. ``say`` — строки
+    хода проверки для журнала подбора; ``user_browser`` — браузер человека по умолчанию.
     """
     if not wait_until_running(is_running, restarting=restarting, sleep=cancel.sleep, cancelled=lambda: cancel.cancelled):
         return ApplyCheck(CHECK_SKIPPED, "Zapret не запустился")
+    say(f"Zapret запущен. Проверяю {host} пробой программы через ваш пресет…")
     check = check_site(host, cancel=cancel, companions=companions)
     if check.code == CHECK_FAILED:
+        say(f"Проба не открыла {host} ({check.text}). Через {RESTART_SETTLE_SECONDS:g} с проверю ещё раз: Zapret мог перечитать пресет позже.")
         if not cancel.sleep(RESTART_SETTLE_SECONDS):
             return ApplyCheck(CHECK_SKIPPED, "проверку остановили")
         check = check_site(host, cancel=cancel, companions=companions)
+    if check.code == CHECK_FAILED:
+        return _with_profile(check, host, read_preset, say)
     if check.code != CHECK_OK:
         return check
-    return _confirm_in_browser(host, check, cancel=cancel, open_browser=open_browser)
+    say(f"Проба открыла {host} через ваш пресет.")
+    result = _confirm_in_browser(host, check, cancel=cancel, open_browser=open_browser, say=say)
+    if user_browser is not None and user_browser.known:
+        result = replace(result, user_browser=user_browser.family, user_browser_title=user_browser.title)
+    return result
 
 
 def _browser_visits(host: str, *, cancel, open_browser):
@@ -188,7 +246,25 @@ def _site_failed_in_log(visit, host: str) -> str:
     return "соединения с сайтом не ответили"
 
 
-def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=None) -> ApplyCheck:
+_OUTCOME_WORDS = {"opened": "открылся", "failed": "не открылся", "silent": "браузер промолчал"}
+
+
+def _net_summary(visit, host: str) -> str:
+    """Что видно в журнале сети неудачного открытия — одной фразой для журнала подбора."""
+    net = visit.net
+    connections = net.for_host(host) if net is not None else ()
+    if not connections:
+        return "журнал сети пуст"
+    addresses = ", ".join(dict.fromkeys(connection.address for connection in connections))
+    parts = [f"шёл на {addresses}"]
+    if any(connection.ech for connection in connections):
+        parts.append("прятал имя сайта (ECH)")
+    if host in net.proxies:
+        parts.append(f"через прокси {net.proxies[host]}")
+    return ", ".join(parts)
+
+
+def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=None, say: Callable[[str], None] = _quiet) -> ApplyCheck:
     """Проба открыла сайт — подтверждает настоящий браузер; не открыл — ищется причина. Нет браузера — итог пробы.
 
     Браузер, который завершился, ничего не сказав о сайте, проверку не прошёл и не провалил: так молчит
@@ -197,6 +273,7 @@ def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=No
     """
     from blockcheck import browser_check, browser_diagnosis
 
+    say(f"Открываю {host} настоящим браузером без окна — так, как его откроете вы…")
     visits = _browser_visits(host, cancel=cancel, open_browser=open_browser)
     for visit in visits:
         if visit.details:
@@ -208,7 +285,8 @@ def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=No
     visit = visits[-1]
     found = {"addresses": check.addresses, "browser": visit.title}
     if visit.ok:
-        return ApplyCheck(CHECK_OK, check.text, **found)
+        say(f"{visit.title} открыл {host}. Открываю ещё раз с QUIC (HTTP/3) — так браузеры работают обычно…")
+        return _confirm_with_quic(host, visit, check, found, cancel=cancel, open_browser=open_browser, say=say)
     if visit.state == browser_check.BROWSER_NO_ANSWER:
         failed_in_log = _site_failed_in_log(visit, host)
         if not failed_in_log:
@@ -216,6 +294,7 @@ def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=No
         # Браузер не сказал, а журнал показал: до сайта он не достучался. Это неудача с фактами — ищется причина.
         visit = replace(visit, state=browser_check.BROWSER_FAILED, text=failed_in_log)
 
+    say(f"{visit.title} не открыл {host}: {visit.text}. Ищу причину по журналу сети браузера: {_net_summary(visit, host)}.")
     browser_path = next((path for path in browser_check.find_browsers() if path.lower().endswith(visit.browser.lower())), None)
 
     def again(args: tuple[str, ...]):
@@ -223,7 +302,13 @@ def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=No
             return open_browser(host, cancelled=lambda: cancel.cancelled, extra=args, net_log=True)
         return browser_check.open_in_browser(host, cancelled=lambda: cancel.cancelled, browser=browser_path, extra=args, net_log=True)
 
-    result = browser_diagnosis.diagnose(host, visit, probe_addresses=check.addresses, visit=again, cancelled=lambda: cancel.cancelled)
+    def told(fixes: tuple[str, ...], outcome: str) -> None:
+        tried = replace(check, tried=fixes, probe_address=next(iter(check.addresses), ""))
+        say(f"Открываю {host} ещё раз — {_tried_text(tried)}: {_OUTCOME_WORDS.get(outcome, outcome)}.")
+
+    result = browser_diagnosis.diagnose(
+        host, visit, probe_addresses=check.addresses, visit=again, cancelled=lambda: cancel.cancelled, on_attempt=told
+    )
     log(f"Поиск причины для {host} в браузере {visit.browser}: {result.code}, изменения {result.fixes}, пробовали {result.tried}", "INFO")
     if cancel.cancelled:
         return ApplyCheck(CHECK_SKIPPED, "проверку остановили")
@@ -239,13 +324,43 @@ def _confirm_in_browser(host: str, check: ApplyCheck, *, cancel, open_browser=No
     return ApplyCheck(CHECK_BROWSER_FAILED, result.reason or visit.text, **found)
 
 
+def _confirm_with_quic(host: str, visit, check: ApplyCheck, found: dict, *, cancel, open_browser, say) -> ApplyCheck:
+    """Без QUIC браузер сайт открыл — открыть ещё раз с QUIC. Не открыл — доказано: с QUIC сайт не открывается.
+
+    Проверка без окна выключает QUIC, чтобы проверялась стратегия для TCP. А браузеры по умолчанию пробуют
+    QUIC первым (Edge без окна тоже: в журнале сети сотни событий QUIC, win10, 2026-11-02).
+    """
+    from blockcheck import browser_check
+
+    if open_browser is not None:
+        quic_visit = open_browser(host, cancelled=lambda: cancel.cancelled, quic=True, net_log=True)
+    else:
+        path = next((item for item in browser_check.find_browsers() if item.lower().endswith(visit.browser.lower())), None)
+        quic_visit = browser_check.open_in_browser(host, cancelled=lambda: cancel.cancelled, browser=path, quic=True, net_log=True)
+    if cancel.cancelled:
+        return ApplyCheck(CHECK_SKIPPED, "проверку остановили")
+    if quic_visit.ok:
+        say(f"С QUIC {visit.title} тоже открыл {host}.")
+        return ApplyCheck(CHECK_OK, check.text, **found)
+    if quic_visit.state == browser_check.BROWSER_NO_ANSWER and not _site_failed_in_log(quic_visit, host):
+        # Молчание о сайте ничего не говорит: итог — то, что уже доказано без QUIC.
+        say(f"С QUIC {visit.title} промолчал — об этом вывода нет.")
+        return ApplyCheck(CHECK_OK, check.text, **found)
+    reason = quic_visit.text if quic_visit.state != browser_check.BROWSER_NO_ANSWER else _site_failed_in_log(quic_visit, host)
+    say(f"С QUIC {visit.title} не открыл {host}: {reason}.")
+    return ApplyCheck(CHECK_BROWSER_QUIC, reason, **found)
+
+
 class StrategyApplyCheckWorker(QThread):
     """Фоновая проверка после «Применить»: итог приходит сигналом в поток окна."""
 
     completed = pyqtSignal(str, object)  # host, ApplyCheck
+    # Строка хода проверки — в журнал подбора, пока она идёт.
+    progress = pyqtSignal(str)
 
-    def __init__(self, host: str, *, is_running, restarting: bool, companions=(), parent=None) -> None:
+    def __init__(self, host: str, *, is_running, restarting: bool, companions=(), read_preset=None, parent=None) -> None:
         super().__init__(parent)
+        self._read_preset = read_preset
         from utils.socket_cancel import SocketCancel
 
         self._host = str(host or "")
@@ -258,9 +373,18 @@ class StrategyApplyCheckWorker(QThread):
         self._cancel.cancel()
 
     def run(self) -> None:
+        from blockcheck.default_browser import default_browser
+
         try:
             check = run_apply_check(
-                self._host, is_running=self._is_running, restarting=self._restarting, cancel=self._cancel, companions=self._companions
+                self._host,
+                is_running=self._is_running,
+                restarting=self._restarting,
+                cancel=self._cancel,
+                companions=self._companions,
+                say=self.progress.emit,
+                user_browser=default_browser(),
+                read_preset=self._read_preset,
             )
         except Exception as error:  # проверка — подсказка, её сбой не должен ронять окно
             check = ApplyCheck(CHECK_SKIPPED, str(error))
@@ -268,10 +392,28 @@ class StrategyApplyCheckWorker(QThread):
 
 
 # Что сделать человеку, когда причина в браузере доказана (``browser_diagnosis.FIX_*``).
-def _step_ech() -> str:
-    from diagnostics.filter_habits import ECH_OFF_STEPS
+def _step_off(what: str, check: ApplyCheck, *, with_buttons: bool) -> str:
+    """Как выключить ECH или QUIC — для браузера человека по умолчанию; не узнан — для всех."""
+    from blockcheck import browser_switch
+    from blockcheck.default_browser import BROWSER_FIREFOX
 
-    return f"выключите в своём браузере ECH: {ECH_OFF_STEPS}"
+    feature = browser_switch.FEATURES[what]
+    family, title = check.user_browser, check.user_browser_title
+    firefox = "about:config → " + ", ".join(f"{name} = false" for name in feature.firefox_prefs)
+
+    def command(key: str) -> str:
+        return f"reg add HKCU\\{key} /v {feature.policy} /t REG_DWORD /d 0 /f"
+
+    lead = f"выключите {feature.name} в {title}" + (" — кнопкой ниже или вручную" if with_buttons and browser_switch.can_switch(family) else "")
+    if family == BROWSER_FIREFOX:
+        return f"{lead}: {firefox}"
+    if family in browser_switch.POLICY_KEYS:
+        return f"{lead}: переключателя в настройках нет — выполните в командной строке «{command(browser_switch.POLICY_KEYS[family])}» и перезапустите {title}"
+    edge = browser_switch.POLICY_KEYS["edge"]
+    return (
+        f"выключите в своём браузере {feature.name}: в Firefox — {firefox}; в Edge и Chrome переключателя нет: выполните в "
+        f"командной строке «{command(edge)}» (для Chrome — Google\\Chrome вместо Microsoft\\Edge) и перезапустите браузер"
+    )
 
 
 STEP_SECURE_DNS = (
@@ -279,11 +421,13 @@ STEP_SECURE_DNS = (
     "«Использовать безопасный DNS» (в Firefox — «DNS через HTTPS» → «Выкл.»)"
 )
 STEP_PROXY = "выключите прокси: в Параметрах Windows найдите поиском «прокси» и выключите прокси-сервер — или добавьте сайт в исключения прокси"
+STEP_PROXY_BUTTON = "выключите прокси кнопкой ниже — или в Параметрах Windows (поиск «прокси»), или добавьте сайт в исключения прокси"
 STEP_IPV6 = "в свойствах сетевого подключения Windows снимите галочку «IP версии 6 (TCP/IPv6)»"
+STEP_IPV6_BUTTON = "снимите галочку «IP версии 6 (TCP/IPv6)» в свойствах сетевого подключения — кнопка ниже откроет сетевые подключения"
 STEP_OTHER_ADDRESS = "запустите подбор ещё раз: сайт отдаёт браузеру и другие адреса, и стратегия должна открывать их тоже"
 
 
-def _fix_lines(check: ApplyCheck) -> tuple[list[str], list[str]]:
+def _fix_lines(check: ApplyCheck, *, with_buttons: bool = False) -> tuple[list[str], list[str]]:
     """(что изменили — сайт открылся; что сделать) по доказанным причинам."""
     from blockcheck import browser_diagnosis as bd
 
@@ -292,12 +436,12 @@ def _fix_lines(check: ApplyCheck) -> tuple[list[str], list[str]]:
     for fix in check.fixes:
         if fix == bd.FIX_ECH:
             changes.append("браузер пошёл на тот же адрес, но без ECH (так браузер прячет имя сайта; с ECH соединение не проходит)")
-            steps.append(_step_ech())
+            steps.append(_step_off("ech", check, with_buttons=with_buttons))
         elif fix == bd.FIX_ADDRESS:
             own = f" (сам браузер шёл на {check.address})" if check.address else ""
             changes.append(f"браузеру дали адрес {check.probe_address}, который проверила программа{own}")
             if ":" in check.address:
-                steps.append(STEP_IPV6)
+                steps.append(STEP_IPV6_BUTTON if with_buttons else STEP_IPV6)
             elif check.secure_dns:
                 # Другой адрес браузеру дал его шифрованный DNS: так по журналу сети.
                 steps.append(STEP_SECURE_DNS)
@@ -306,7 +450,7 @@ def _fix_lines(check: ApplyCheck) -> tuple[list[str], list[str]]:
         elif fix == bd.FIX_PROXY:
             via = f" {check.proxy}" if check.proxy else ""
             changes.append(f"браузер пошёл напрямую, без прокси{via} из настроек Windows")
-            steps.append(STEP_PROXY)
+            steps.append(STEP_PROXY_BUTTON if with_buttons else STEP_PROXY)
     return changes, list(dict.fromkeys(steps))
 
 
@@ -321,10 +465,24 @@ def _tried_text(check: ApplyCheck) -> str:
     return ", ".join(words[fix] for fix in check.tried if fix in words)
 
 
-def apply_check_message(host: str, check: ApplyCheck) -> tuple[str, str, str] | None:
+def apply_check_buttons(check: ApplyCheck) -> list[dict]:
+    """Кнопки «исправить» к уведомлению: только для доказанных причин (``browser_fixes``)."""
+    from blockcheck.browser_fixes import fix_buttons, switch_button
+    from blockcheck.default_browser import DefaultBrowser
+
+    browser = DefaultBrowser(check.user_browser, check.user_browser_title)
+    if check.code == CHECK_BROWSER_QUIC:
+        return [button for button in (switch_button("quic", browser),) if button]
+    if check.code != CHECK_BROWSER_FIXED:
+        return []
+    return fix_buttons(check.fixes, browser=browser, ipv6=":" in check.address)
+
+
+def apply_check_message(host: str, check: ApplyCheck, *, with_buttons: bool = False) -> tuple[str, str, str] | None:
     """(вид, заголовок, текст) уведомления; None — сказать нечего.
 
-    Каждый текст говорит, что проверено, что нашлось и что сделать дальше.
+    Каждый текст говорит, что проверено, что нашлось и что сделать дальше. ``with_buttons`` — к уведомлению
+    приложены кнопки ``apply_check_buttons``: текст на них ссылается.
     """
     code, text, browser = check.code, check.text, check.browser or "браузер"
     probe = "проба программы через ваш пресет сайт открыла"
@@ -334,16 +492,35 @@ def apply_check_message(host: str, check: ApplyCheck) -> tuple[str, str, str] | 
         note = f" {text[:1].upper()}{text[1:]}." if text else ""
         return "success", "Стратегия работает", f"{host} открывается через ваш пресет. {checked}{note} Можно пользоваться."
     if code == CHECK_FAILED:
-        return (
-            "warning",
-            "В вашем пресете сайт не открылся",
-            f"{host}: {text or 'не открылся'}. В подборе эта стратегия сайт открывала, а в вашем пресете — нет. "
-            "Скорее всего, сайт забирает другой профиль, который стоит в пресете выше. Что сделать: на странице "
-            "«Настройка пресета» откройте «Порядок в пресете», перетащите профиль сайта выше остальных и снова нажмите "
-            "«Применить». Не помогло — запустите подбор ещё раз.",
-        )
+        lead = f"{host}: {text or 'не открылся'}. В подборе эта стратегия сайт открывала, а в вашем пресете — нет."
+        order = "на странице «Настройка пресета» откройте «Порядок в пресете»"
+        if check.profile_number and not check.profile_own:
+            body = (
+                f"{lead} Программа прошла пресет так же, как движок: сайт забирает профиль №{check.profile_number} "
+                f"«{check.profile_title}» — {check.profile_reason}. Он стоит выше профиля сайта, а движок берёт первый "
+                f"подходящий сверху. Что сделать: {order}, перетащите профиль сайта выше «{check.profile_title}» и снова "
+                "нажмите «Применить»."
+            )
+        elif check.profile_number:
+            body = (
+                f"{lead} Порядок ни при чём: движок берёт сайт его собственным профилем (№{check.profile_number}). "
+                "Значит, стратегия в полном пресете ведёт себя иначе, чем в подборе (там она проверялась в отдельном "
+                "маленьком профиле). Что сделать: запустите подбор ещё раз; если снова в подборе сработает, а в пресете "
+                "нет — отправьте журнал подбора в поддержку: в нём записан весь ход этой проверки."
+            )
+        elif check.profile_none:
+            body = (
+                f"{lead} Ни один включённый профиль пресета этот сайт не берёт — стратегия к нему не применяется. "
+                f"Что сделать: {order} и проверьте, что профиль сайта есть и включён; затем снова нажмите «Применить»."
+            )
+        else:
+            body = (
+                f"{lead} Скорее всего, сайт забирает другой профиль, который стоит в пресете выше. Что сделать: {order}, "
+                "перетащите профиль сайта выше остальных и снова нажмите «Применить». Не помогло — запустите подбор ещё раз."
+            )
+        return "warning", "В вашем пресете сайт не открылся", body
     if code == CHECK_BROWSER_FIXED:
-        changes, steps = _fix_lines(check)
+        changes, steps = _fix_lines(check, with_buttons=with_buttons and bool(apply_check_buttons(check)))
         if len(changes) == 1:
             found = f"Программа открыла сайт браузером ещё раз — и он открылся, когда {changes[0]}."
         else:
@@ -356,6 +533,15 @@ def apply_check_message(host: str, check: ApplyCheck) -> tuple[str, str, str] | 
             "Найдено, почему браузер не открывал сайт",
             f"{host}: {probe}, а {browser} без окна — нет{why}. {found} Что сделать: {'; '.join(steps)}. "
             "Затем откройте сайт в своём браузере.",
+        )
+    if code == CHECK_BROWSER_QUIC:
+        step = _step_off("quic", check, with_buttons=with_buttons and bool(apply_check_buttons(check)))
+        return (
+            "warning",
+            "С QUIC сайт не открывается",
+            f"{host}: проба программы и {browser} без QUIC сайт открыли, а с QUIC (HTTP/3) {browser} — нет{why}. "
+            "Браузеры по умолчанию пробуют QUIC первым, поэтому у вас сайт может не открываться или долго грузиться. "
+            f"Что сделать: {step} — браузер пойдёт обычным соединением, которое работает. Затем откройте сайт в своём браузере.",
         )
     if code == CHECK_BROWSER_PARTS:
         names = ", ".join(check.hosts[:3]) + (" и другие" if len(check.hosts) > 3 else "")

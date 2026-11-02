@@ -66,6 +66,7 @@ class WindowNotificationCenter(QObject):
             show_page=self._show_page,
             open_url=self._request_external_open_url,
             request_disable_proxy=self._request_disable_proxy,
+            request_browser_fix=self._request_browser_fix,
             request_disable_kaspersky_warning=self._request_disable_kaspersky_warning,
             request_disable_telega_warning=self._request_disable_telega_warning,
             request_windivert_autofix=self._request_windivert_autofix,
@@ -271,6 +272,14 @@ class WindowNotificationCenter(QObject):
             bar=bar,
         )
 
+    def _request_browser_fix(self, value: str, bar=None) -> None:
+        from blockcheck.browser_fixes import run_fix
+
+        text = str(value or "").strip()
+        if not text:
+            return
+        self._request_notification_action("browser_fix", lambda: run_fix(text), bar=bar, context={"value": text})
+
     def _request_disable_kaspersky_warning(self, bar=None) -> None:
         self._request_notification_action(
             "disable_kaspersky_warning",
@@ -375,6 +384,8 @@ class WindowNotificationCenter(QObject):
         bar = context.get("bar")
         if action == "disable_proxy":
             self._notify_disable_proxy_result(result, bar=bar)
+        elif action == "browser_fix":
+            self._notify_browser_fix_result(result, bar=bar)
         elif action == "disable_kaspersky_warning":
             self._notify_disable_warning_result(
                 bool(result),
@@ -414,6 +425,8 @@ class WindowNotificationCenter(QObject):
         bar = context.get("bar")
         if action == "disable_proxy":
             self._notify_disable_proxy_result((False, error), bar=bar)
+        elif action == "browser_fix":
+            self._notify_browser_fix_result((False, str(error or "действие не выполнено"), []), bar=bar)
         elif action == "disable_kaspersky_warning":
             self._notify_disable_warning_result(
                 False,
@@ -530,6 +543,28 @@ class WindowNotificationCenter(QObject):
                 queue="immediate",
                 duration=7000 if success else 10000,
                 dedupe_key="startup.proxy.action",
+            )
+        )
+
+    def _notify_browser_fix_result(self, result, *, bar=None) -> None:
+        """Итог кнопки «исправить» из проверки после «Применить»; у ECH — кнопка «Вернуть как было»."""
+        try:
+            success, text, buttons = result
+        except (TypeError, ValueError):
+            success, text, buttons = False, "действие не выполнено", []
+        if success:
+            self._close_bar(bar)
+        self.notify(
+            advisory_notification(
+                level="success" if success else "warning",
+                title="Готово" if success else "Не получилось",
+                content=str(text or ""),
+                source="blockcheck.browser_fix",
+                presentation="infobar",
+                queue="immediate",
+                duration=-1 if buttons else (10000 if success else 15000),
+                buttons=list(buttons or ()),
+                dedupe_key=f"blockcheck.browser_fix.{text}",
             )
         )
 
