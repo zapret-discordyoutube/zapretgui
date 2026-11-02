@@ -2090,10 +2090,9 @@ class ProfileSetupPageBase(BasePage):
                 if user_text_changed and not keep_user_edits:
                     self._list_file_text.setPlainText(visible_user_text)
                 set_read_only_if_changed(self._list_file_text, not editable)
-                if kind == "ipset":
-                    set_placeholder_text_if_changed(self._list_file_text, "IP или подсети по одному на строку:\n1.2.3.4\n10.0.0.0/8")
-                else:
-                    set_placeholder_text_if_changed(self._list_file_text, "Домены по одному на строку:\nexample.com\nsub.example.org")
+                list_tab = self.__dict__.get("_list_file_editor_tab")
+                if list_tab is not None:
+                    set_placeholder_text_if_changed(self._list_file_text, list_tab.user_placeholder(kind))
             finally:
                 self._list_file_text.blockSignals(False)
         language = self.__dict__.get("_list_file_language")

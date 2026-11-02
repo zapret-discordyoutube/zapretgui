@@ -42,18 +42,58 @@ from profile.winws2_language.model import (
 SOURCE_USER = "user"
 SOURCE_BASE = "base"
 
-# Короткая памятка о префиксах — её же показывает подпись над полем.
+# Короткая памятка над полем «Ваши записи»: правила видны и после того, как в
+# поле появились строки. Примеры с пояснениями — в подсказке внутри пустого
+# поля (*_PLACEHOLDER), подробно — кнопка «Что это?» (profile_help_texts).
 # «!» понимает только winws2 (Zapret 2); winws (Zapret 1) знает лишь «^»
 # (zapret nfq/hostlist.c, проверено 01.11.2026), а папка lists у режимов общая.
-HOSTLIST_PREFIX_HELP_ZAPRET1 = (
-    "Домен ловит и свои поддомены. «^домен» — только сам домен. "
-    "Исключения «!домен» работают только в режиме Zapret 2."
-)
 HOSTLIST_PREFIX_HELP = (
-    "Домен ловит и свои поддомены. «^домен» — только сам домен. "
-    "«!домен» — исключение: этот домен и его поддомены не считаются частью этого списка "
-    "(например, «ru» и «!torrents.ru» — все сайты .ru, кроме torrents.ru)."
+    "«^домен» — только сам домен, «!домен» — исключение из этого списка. "
+    "Подробно и с примерами — «Что это?» внизу."
 )
+HOSTLIST_PREFIX_HELP_ZAPRET1 = (
+    "«^домен» — только сам домен. Исключения «!домен» работают только в режиме Zapret 2. "
+    "Подробно — «Что это?» внизу."
+)
+
+# Подсказка внутри пустого поля: строки с # — комментарии и для движка, поэтому
+# пример можно скопировать в поле как есть.
+HOSTLIST_PLACEHOLDER = (
+    "# Домены по одному на строку, поддомены учитываются сами:\n"
+    "youtube.com\n"
+    "# ^ — только сам домен, без поддоменов:\n"
+    "^vk.com\n"
+    "# ! — исключение из этого списка: все сайты .ru, кроме torrents.ru:\n"
+    "ru\n"
+    "!torrents.ru\n"
+    "# Звёздочки не нужны. Ваши записи главнее встроенных справа."
+)
+HOSTLIST_PLACEHOLDER_ZAPRET1 = (
+    "# Домены по одному на строку, поддомены учитываются сами:\n"
+    "youtube.com\n"
+    "# ^ — только сам домен, без поддоменов:\n"
+    "^vk.com\n"
+    "# Исключения «!домен» работают только в режиме Zapret 2.\n"
+    "# Звёздочки не нужны. Ваши записи главнее встроенных справа."
+)
+IPSET_PLACEHOLDER = (
+    "# Адреса по одному на строку:\n"
+    "1.2.3.4\n"
+    "# Подсеть — все адреса от 10.0.0.0 до 10.255.255.255:\n"
+    "10.0.0.0/8\n"
+    "# /24 — последнее число любое (256 адресов):\n"
+    "203.0.113.0/24\n"
+    "# IPv6 можно писать в тот же список:\n"
+    "2a00:1450::/32\n"
+    "# Диапазоны через дефис и имена сайтов не работают."
+)
+
+
+def list_placeholder(kind: str, *, exceptions: bool = True) -> str:
+    """Подсказка внутри пустого поля «Ваши записи» для вида списка."""
+    if str(kind or "").strip().lower() == "ipset":
+        return IPSET_PLACEHOLDER
+    return HOSTLIST_PLACEHOLDER if exceptions else HOSTLIST_PLACEHOLDER_ZAPRET1
 
 
 def _remove_line_fix(line: int, title: str = "Удалить строку") -> QuickFix:
@@ -349,11 +389,15 @@ class HostlistEditorLanguage:
 
 
 __all__ = [
+    "HOSTLIST_PLACEHOLDER",
+    "HOSTLIST_PLACEHOLDER_ZAPRET1",
     "HOSTLIST_PREFIX_HELP",
     "HOSTLIST_PREFIX_HELP_ZAPRET1",
+    "IPSET_PLACEHOLDER",
     "HostlistEditorLanguage",
     "complete_hostlist",
     "describe_hostlist_line",
+    "list_placeholder",
     "diagnose_hostlist_text",
     "quick_actions_hostlist",
 ]

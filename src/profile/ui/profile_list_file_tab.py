@@ -16,7 +16,12 @@ from ui.code_editor.find_bar import FindReplaceBar
 from ui.code_editor.find_controller import FindController
 from ui.code_editor.syntax import ListFileSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
-from profile.list_file_language import HOSTLIST_PREFIX_HELP, HOSTLIST_PREFIX_HELP_ZAPRET1, HostlistEditorLanguage
+from profile.list_file_language import (
+    HOSTLIST_PREFIX_HELP,
+    HOSTLIST_PREFIX_HELP_ZAPRET1,
+    HostlistEditorLanguage,
+    list_placeholder,
+)
 from profile.profile_help_texts import list_file_help
 from profile.ui.profile_help_dialog import make_help_button, show_help
 
@@ -181,6 +186,10 @@ class ProfileListFileTab(QWidget):
         self._list_kind = kind
         set_tooltip(self.user_text, USER_TOOLTIP_IPSET if kind == "ipset" else USER_TOOLTIP_HOSTLIST)
         set_tooltip(self.base_text, BASE_TOOLTIP_IPSET if kind == "ipset" else BASE_TOOLTIP_HOSTLIST)
+
+    def user_placeholder(self, kind: str) -> str:
+        """Подсказка с примерами внутри пустого поля «Ваши записи»."""
+        return list_placeholder(kind, exceptions=self.language.exceptions)
 
     def _show_help(self) -> None:
         show_help(list_file_help(self._list_kind, exceptions=self.language.exceptions), self.window())

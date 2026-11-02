@@ -122,5 +122,34 @@ class HostlistHoverAndActionsTests(unittest.TestCase):
         self.assertTrue(language.diagnose("!a.ru"))
 
 
+class ListPlaceholderTests(unittest.TestCase):
+    """Подсказка внутри пустого поля «Ваши записи»: примеры можно вставить как есть."""
+
+    def test_examples_are_valid_list_text(self) -> None:
+        from profile.list_file_editor import validate_profile_list_file_text
+        from profile.list_file_language import (
+            HOSTLIST_PLACEHOLDER,
+            HOSTLIST_PLACEHOLDER_ZAPRET1,
+            IPSET_PLACEHOLDER,
+        )
+
+        for text in (HOSTLIST_PLACEHOLDER, HOSTLIST_PLACEHOLDER_ZAPRET1):
+            with self.subTest(text=text[:20]):
+                self.assertEqual(validate_profile_list_file_text("hostlist", text), ())
+                problems = [d for d in diagnose_hostlist_text(text) if d.severity != "hint"]
+                self.assertEqual(problems, [])
+        self.assertEqual(validate_profile_list_file_text("ipset", IPSET_PLACEHOLDER), ())
+        for needle in ("^vk.com", "!torrents.ru", "\nru\n"):
+            self.assertIn(needle, HOSTLIST_PLACEHOLDER)
+        self.assertNotIn("\n!", HOSTLIST_PLACEHOLDER_ZAPRET1)
+        self.assertIn("10.0.0.0/8", IPSET_PLACEHOLDER)
+
+    def test_placeholder_follows_kind_and_mode(self) -> None:
+        from profile.list_file_language import HOSTLIST_PLACEHOLDER_ZAPRET1, IPSET_PLACEHOLDER, list_placeholder
+
+        self.assertEqual(list_placeholder("ipset"), IPSET_PLACEHOLDER)
+        self.assertEqual(list_placeholder("hostlist", exceptions=False), HOSTLIST_PLACEHOLDER_ZAPRET1)
+
+
 if __name__ == "__main__":
     unittest.main()
