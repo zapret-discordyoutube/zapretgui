@@ -194,6 +194,23 @@ def load_geo_services_for_site_list(text: str) -> tuple[str, ...]:
     return geo_services_for_site_list(load_geo_sites(), text)
 
 
+def service_icon(service_name: str) -> tuple[str, str] | None:
+    """Значок сервиса из каталога hosts — тот же, что на его плитке в «Редакторе hosts».
+
+    (имя значка, цвет) или None, если у каталога значка нет. Каталог к этому
+    моменту уже прочитан проверкой гео-сервисов, поэтому файл здесь не читается.
+    """
+    from hosts.proxy_domains import get_services_profile_index
+
+    try:
+        icon = (get_services_profile_index().get("icon_by_service") or {}).get(service_name)
+    except Exception:
+        return None
+    if not icon or not str(icon[0] or "").strip():
+        return None
+    return str(icon[0]), str(icon[1] or "")
+
+
 def load_geo_services_for_name(name: str) -> tuple[str, ...]:
     """Читает каталог hosts (файл) — звать вне UI-потока."""
     return load_geo_sites().services_for_name(name)
@@ -208,4 +225,5 @@ __all__ = [
     "load_geo_services_for_site_list",
     "load_geo_sites",
     "only_vpn_helps",
+    "service_icon",
 ]

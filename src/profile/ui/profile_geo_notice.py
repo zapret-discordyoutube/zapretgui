@@ -42,7 +42,7 @@ from qfluentwidgets import (
     isDarkTheme,
 )
 
-from hosts.geo_sites import only_vpn_helps
+from hosts.geo_sites import only_vpn_helps, service_icon
 from profile.icons import resolve_profile_icon
 from profile.ui.profile_icon import profile_icon_pixmap
 from ui.accessibility import set_control_accessibility
@@ -358,6 +358,19 @@ class ProfileGeoNoticeCard(FlyoutViewBase):
         self._shadow.sync_geometry()
 
 
+def _service_icon(services: tuple[str, ...]) -> tuple[str, str] | None:
+    """Значок первого сервиса: из каталога hosts, иначе из общего набора значков профилей; None — нет своего."""
+    for name in services:
+        icon = service_icon(name)
+        if icon is not None:
+            return icon
+    for name in services:
+        spec = resolve_profile_icon(name, ())
+        if not spec.icon_name.startswith("profile-initials:"):
+            return spec.icon_name, spec.color
+    return None
+
+
 # Сервис, на котором экскурсия показывает карточку.
 EXAMPLE_SERVICES = ("Gemini",)
 
@@ -468,6 +481,10 @@ class ProfileGeoNotice(QObject):
         if found != self._services:
             self._services = found
             self.card.set_services(found)
+        icon = _service_icon(found)
+        if icon is not None:
+            # Значок сервиса, как на его плитке в «Редакторе hosts», а не буквы набранного названия.
+            self.card.set_site_icon(*icon)
         # Настоящая карточка заняла место примера: экскурсия её уже не уберёт.
         self._example_shown = False
         self.card.popup()

@@ -472,6 +472,37 @@ class ProfileDialogGeoCardTests(unittest.TestCase):
         dialog.nameEdit.clear()
         self.assertFalse(notice.card.is_shown())
 
+    def test_card_shows_the_service_icon_not_letters_of_the_typed_name(self) -> None:
+        # Скриншот владельца 2026-11-02: на «джемини» карточка рисовала буквы «ДЖ» вместо значка Gemini.
+        import profile.ui.profile_geo_notice as notice_module
+        from unittest.mock import patch
+
+        drawn: list[str] = []
+        real = notice_module.profile_icon_pixmap
+
+        def record(name, **kwargs):
+            drawn.append(name)
+            return real(name, **kwargs)
+
+        dialog, notice = self._dialog()
+        with (
+            patch.object(notice_module, "profile_icon_pixmap", side_effect=record),
+            patch.object(notice_module, "service_icon", return_value=("simple:googlegemini:GE", "#4285f4")),
+        ):
+            dialog.nameEdit.setText("джемини")
+            self._check(notice, ("Gemini AI",))
+
+        self.assertEqual(drawn[-1], "simple:googlegemini:GE")
+        self.assertIs(notice.card._icon_stack.currentWidget(), notice.card.site_icon)
+
+    def test_service_without_a_catalog_icon_takes_the_common_one(self) -> None:
+        import profile.ui.profile_geo_notice as notice_module
+        from unittest.mock import patch
+
+        with patch.object(notice_module, "service_icon", return_value=None):
+            self.assertEqual(notice_module._service_icon(("TikTok",))[0], "simple:tiktok:TT")
+            self.assertIsNone(notice_module._service_icon(("Неизвестный сервис",)))
+
     def test_edit_dialog_checks_the_current_name_at_once(self) -> None:
         _dialog, notice = self._dialog(name="ChatGPT")
         self._check(notice, ("ChatGPT",))
