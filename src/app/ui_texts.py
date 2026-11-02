@@ -4386,27 +4386,10 @@ TEXTS: dict[str, dict[str, str]] = {
     },
     "page.winws1_user_presets.info.body": {
         "ru": (
-            "Пресет, или конфиг, — это один или несколько .txt-файлов со списком флагов Zapret. "
-            "Формат такой же, как у winws2.exe или winws.exe, поэтому GUI может быстро читать и менять настройки.\n\n"
-            "Пресеты доступны с Zapret2 v20.3 для режимов Zapret 1 и Zapret 2. "
-            "Они нужны, чтобы быстрее делать новые настройки, проще обмениваться ими и держать GUI и консольный Zapret в одном формате.\n\n"
-            "При запуске активный пресет передаётся в winws2.exe для Zapret 2 или в winws.exe для Zapret 1 через @<config_file>. "
-            "Это значит: прочитать параметры командной строки из файла. Остальные параметры командной строки при таком запуске не используются.\n\n"
-            "Файл %AppData%\\ZapretTwoDev\\preset-zapret2.txt хранит только активный пресет. "
-            "Сам по себе он не считается пользовательским пресетом. Ваши пресеты лежат в папке presets. "
-            "По умолчанию используется Default, также есть встроенный Gaming.\n\n"
-            "Пресетами можно обмениваться напрямую.\n\n"
-            "Почему пресеты иногда плохо подходят: в них стратегии часто заранее прописаны под разные фильтры и hostlist. "
-            "Из-за этого один сайт может заработать, а другой перестать. Для более точной настройки лучше использовать прямой запуск: "
-            "там стратегия подбирается отдельно для нужной категории и hostlist."
+            "Пресет — это один .txt-файл с настройками движка: общая шапка (библиотеки, перехват, заготовки фейков) и профили — по одному на сайт или вид трафика. Какой пресет выбран здесь, тот программа и запускает: текст пресета без комментариев передаётся движку winws (режим Zapret 1) отдельным файлом параметров (@<config_file>). Ничего скрытого программа не добавляет — работает ровно то, что написано в пресете.\n\nВстроенные пресеты приходят с программой и обновляются вместе с ней. Если вы меняете встроенный пресет, программа сохраняет вашу копию, и дальше работает она. Когда выходит новая версия этого встроенного пресета, копия заменяется ею, а прежняя сохраняется в папке presets\\replaced — об этом придёт уведомление.\n\nСвои пресеты лежат в папке программы, в presets\\winws1. Их можно создавать, дублировать, переименовывать, экспортировать в .zip вместе со списками и импортировать. Пресетами можно обмениваться напрямую.\n\nКак пользоваться: выберите пресет, на котором открывается больше всего нужных сайтов, а неработающий сайт настройте в его профиле на странице «Профили пресета». Это точнее, чем перебирать пресеты целиком."
         ),
         "en": (
-            "A preset, or config, is one or more .txt files with Zapret flags. "
-            "It uses the same format as winws2.exe or winws.exe, so the GUI can read and edit these settings.\n\n"
-            "The active preset is passed to winws2.exe for Zapret 2 or winws.exe for Zapret 1 through @<config_file>, "
-            "which means: read command-line options from a file. Other command-line options are not used in this launch mode.\n\n"
-            "%AppData%\\ZapretTwoDev\\preset-zapret2.txt only stores the active preset copy. "
-            "User presets are stored in the presets folder. More details are available from the button below."
+            "A preset is one .txt file with engine settings: a shared header (libraries, capture, fake templates) and profiles, one per site or kind of traffic. The preset chosen here is the one the program runs: its text without comments is passed to the winws (Zapret 1 mode) engine as a separate options file (@<config_file>). The program adds nothing hidden — exactly what the preset says is what runs.\n\nBuilt-in presets come with the program and are updated with it. If you change a built-in preset, the program keeps your copy and runs it from then on. When a new version of that built-in preset ships, the copy is replaced by it and the previous one is kept in presets\\replaced; you get a notification.\n\nYour own presets live in the program folder, in presets\\winws1. You can create, duplicate, rename, export them to .zip together with their lists, and import them. Presets can be shared directly.\n\nHow to use: pick the preset that opens the most of the sites you need, and fix a site that does not open in its profile on the \"Preset profiles\" page. That is more precise than trying whole presets one by one."
         ),
     },
     "page.winws1_user_presets.info.open_site.button": {
@@ -4955,27 +4938,10 @@ TEXTS: dict[str, dict[str, str]] = {
     },
     "page.winws2_user_presets.info.body": {
         "ru": (
-            "Пресет, или конфиг, — это один или несколько .txt-файлов со списком флагов Zapret. "
-            "Формат такой же, как у winws2.exe или winws.exe, поэтому GUI может быстро читать и менять настройки.\n\n"
-            "Пресеты доступны с Zapret2 v20.3 для режимов Zapret 1 и Zapret 2. "
-            "Они нужны, чтобы быстрее делать новые настройки, проще обмениваться ими и держать GUI и консольный Zapret в одном формате.\n\n"
-            "При запуске активный пресет передаётся в winws2.exe для Zapret 2 или в winws.exe для Zapret 1 через @<config_file>. "
-            "Это значит: прочитать параметры командной строки из файла. Остальные параметры командной строки при таком запуске не используются.\n\n"
-            "Файл %AppData%\\ZapretTwoDev\\preset-zapret2.txt хранит только активный пресет. "
-            "Сам по себе он не считается пользовательским пресетом. Ваши пресеты лежат в папке presets. "
-            "По умолчанию используется Default, также есть встроенный Gaming.\n\n"
-            "Пресетами можно обмениваться напрямую.\n\n"
-            "Почему пресеты иногда плохо подходят: в них стратегии часто заранее прописаны под разные фильтры и hostlist. "
-            "Из-за этого один сайт может заработать, а другой перестать. Для более точной настройки лучше использовать прямой запуск: "
-            "там стратегия подбирается отдельно для нужной категории и hostlist."
+            "Пресет — это один .txt-файл с настройками движка: общая шапка (библиотеки, перехват, заготовки фейков) и профили — по одному на сайт или вид трафика. Какой пресет выбран здесь, тот программа и запускает: текст пресета без комментариев передаётся движку winws2 отдельным файлом параметров (@<config_file>). Ничего скрытого программа не добавляет — работает ровно то, что написано в пресете.\n\nВстроенные пресеты приходят с программой и обновляются вместе с ней. Если вы меняете встроенный пресет, программа сохраняет вашу копию, и дальше работает она. Когда выходит новая версия этого встроенного пресета, копия заменяется ею, а прежняя сохраняется в папке presets\\replaced — об этом придёт уведомление.\n\nСвои пресеты лежат в папке программы, в presets\\winws2. Их можно создавать, дублировать, переименовывать, экспортировать в .zip вместе со списками и импортировать. Пресетами можно обмениваться напрямую.\n\nКак пользоваться: выберите пресет, на котором открывается больше всего нужных сайтов, а неработающий сайт настройте в его профиле на странице «Профили пресета». Это точнее, чем перебирать пресеты целиком."
         ),
         "en": (
-            "A preset, or config, is one or more .txt files with Zapret flags. "
-            "It uses the same format as winws2.exe or winws.exe, so the GUI can read and edit these settings.\n\n"
-            "The active preset is passed to winws2.exe for Zapret 2 or winws.exe for Zapret 1 through @<config_file>, "
-            "which means: read command-line options from a file. Other command-line options are not used in this launch mode.\n\n"
-            "%AppData%\\ZapretTwoDev\\preset-zapret2.txt only stores the active preset copy. "
-            "User presets are stored in the presets folder. More details are available from the button below."
+            "A preset is one .txt file with engine settings: a shared header (libraries, capture, fake templates) and profiles, one per site or kind of traffic. The preset chosen here is the one the program runs: its text without comments is passed to the winws2 engine as a separate options file (@<config_file>). The program adds nothing hidden — exactly what the preset says is what runs.\n\nBuilt-in presets come with the program and are updated with it. If you change a built-in preset, the program keeps your copy and runs it from then on. When a new version of that built-in preset ships, the copy is replaced by it and the previous one is kept in presets\\replaced; you get a notification.\n\nYour own presets live in the program folder, in presets\\winws2. You can create, duplicate, rename, export them to .zip together with their lists, and import them. Presets can be shared directly.\n\nHow to use: pick the preset that opens the most of the sites you need, and fix a site that does not open in its profile on the \"Preset profiles\" page. That is more precise than trying whole presets one by one."
         ),
     },
     "page.winws2_user_presets.info.open_site.button": {

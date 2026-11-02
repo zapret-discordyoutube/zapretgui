@@ -719,10 +719,15 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
 
                 self.assertIn(".txt", body)
                 self.assertIn("@<config_file>", body)
-                self.assertIn("%AppData%\\ZapretTwoDev\\preset-zapret2.txt", body)
                 self.assertIn("Пресетами можно обмениваться напрямую.", body)
                 self.assertNotIn("https://wiki.zapret.moe/Zapret2/preset", body)
-                self.assertIn("прямой запуск", body)
+                # Правда о хранении: папка программы, копия правки встроенного
+                # пресета и куда уходит прежняя копия при его обновлении.
+                # Файла %AppData%\ZapretTwoDev\preset-zapret2.txt больше нет.
+                self.assertIn("presets\\replaced", body)
+                self.assertIn("«Профили пресета»", body)
+                self.assertNotIn("preset-zapret2.txt", body)
+                self.assertNotIn("Gaming", body)
 
     def _assert_accessibility(self, widgets) -> None:
         expected = {
