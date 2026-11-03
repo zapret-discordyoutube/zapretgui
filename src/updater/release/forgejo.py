@@ -48,6 +48,11 @@ FORGEJO_REPOSITORY_API_URL = f"{FORGEJO_ORIGIN}/api/v1/repos/{FORGEJO_REPOSITORY
 FORGEJO_RELEASE_DOWNLOAD_PREFIX = f"/{FORGEJO_REPOSITORY}/releases/download/"
 FORGEJO_RELEASE_PAGE_PREFIX = f"{FORGEJO_ORIGIN}/{FORGEJO_REPOSITORY}/releases/tag/"
 FORGEJO_SOURCE = "Forgejo"
+# Те же файлы выпусков лежат и на GitHub (решение пользователя 2026-11-03: установщики качаются с
+# GitHub, Forgejo — запасной путь; выпуски туда копирует forgejo_releases_to_github.py на хосте).
+# Тот же тег и то же имя файла; подлинность всё равно проверяет подписанный список выпуска.
+GITHUB_RELEASE_DOWNLOAD_ORIGIN = "https://github.com/zapret-discordyoutube/zapretgui/releases/download/"
+GITHUB_SOURCE = "GitHub"
 # Основное имя git.zapret.moe режут по TLS; тот же Forgejo открывается под
 # зеркалами git2, git3, … (список имён отдаёт сам сервер). Обмен идёт под первым
 # открытым именем, ссылки для человека остаются на основном.
@@ -85,6 +90,20 @@ def _trusted_release_asset_url(url: str, *, tag_name: str, file_name: str) -> bo
         return False
     relative = decoded_path[len(expected_prefix) :]
     return relative == file_name and PurePosixPath(relative).name == relative
+
+
+def github_asset_url(update_url: str, file_name: str) -> str:
+    """Адрес того же файла выпуска на GitHub по адресу на Forgejo; пусто — адрес не с Forgejo."""
+    try:
+        path = unquote(urlsplit(str(update_url or "")).path)
+    except ValueError:
+        return ""
+    if not path.startswith(FORGEJO_RELEASE_DOWNLOAD_PREFIX):
+        return ""
+    tag_name, _, name = path[len(FORGEJO_RELEASE_DOWNLOAD_PREFIX) :].partition("/")
+    if not tag_name or name != file_name or PurePosixPath(name).name != name:
+        return ""
+    return f"{GITHUB_RELEASE_DOWNLOAD_ORIGIN}{quote(tag_name, safe='')}/{quote(file_name, safe='')}"
 
 
 def release_page_url(tag_name: str) -> str:
@@ -357,6 +376,8 @@ def probe_forgejo() -> float:
 __all__ = [
     "FORGEJO_API_URL",
     "FORGEJO_SOURCE",
+    "GITHUB_SOURCE",
+    "github_asset_url",
     "ForgejoReleaseError",
     "fetch_latest_release",
     "fetch_recent_release_history",

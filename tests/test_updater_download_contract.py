@@ -241,6 +241,26 @@ class DownloaderOnLocalServersTests(unittest.TestCase):
         with self.assertRaisesRegex(UpdatePipelineError, "пустой — сервер ответил HTTP 404"):
             self._download(missing.source("пустой"))
 
+    def test_github_alone_first_leaves_our_servers_untouched(self) -> None:
+        github, ours = self._server(), self._server()
+
+        self._download(github.source("GitHub"), ours.source("Forgejo"))
+
+        self.assertEqual(self.target.read_bytes(), PAYLOAD)
+        self.assertGreater(github.requests, 0)
+        self.assertEqual(ours.requests, 0)
+
+    def test_without_github_our_servers_take_over(self) -> None:
+        for broken in (self._server(None), self._server(bytes(len(PAYLOAD)))):
+            with self.subTest(github=broken):
+                ours = self._server()
+                self.target.write_bytes(b"")
+
+                self._download(broken.source("GitHub"), ours.source("Forgejo"))
+
+                self.assertEqual(self.target.read_bytes(), PAYLOAD)
+                self.assertGreater(ours.requests, 0)
+
     def test_server_without_ranges_is_downloaded_in_one_stream(self) -> None:
         plain = self._server(ranges=False)
 
@@ -296,6 +316,32 @@ class UpdaterDownloadContractTests(unittest.TestCase):
                 ("VPS 1", "https://a.example:888/download/file.exe", "http://a.example:887/download/file.exe"),
             ],
         )
+
+    def test_github_copy_of_a_forgejo_asset_goes_first(self) -> None:
+        url = "https://git2.zapret.moe/zapretdiscordyoutube/zapretgui/releases/download/22.0.0.0/Zapret2Setup_22_0_0_0.exe"
+        metadata = ReleaseArtifactMetadata.from_mapping(
+            {"version": "22.0.0.0", "update_url": url, "file_name": "Zapret2Setup_22_0_0_0.exe", "file_size": 10,
+             "sha256": "ab" * 32, "verify_ssl": True}
+        )
+
+        with patch.object(mirrors, "VPS_SERVERS", []):
+            sources = build_download_sources(metadata)
+
+        self.assertEqual(
+            [(source.name, source.url) for source in sources],
+            [
+                ("GitHub", "https://github.com/zapret-discordyoutube/zapretgui/releases/download/22.0.0.0/Zapret2Setup_22_0_0_0.exe"),
+                ("", url),
+            ],
+        )
+
+    def test_github_address_only_for_the_same_forgejo_file(self) -> None:
+        from updater.release.forgejo import github_asset_url
+
+        base = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/releases/download/22.0.0.0/"
+        self.assertEqual(github_asset_url(base + "a.exe", "b.exe"), "")
+        self.assertEqual(github_asset_url("https://a.example:888/download/a.exe", "a.exe"), "")
+        self.assertEqual(github_asset_url(base + "x/a.exe", "a.exe"), "")
 
     def test_sha256_requires_plain_64_character_hex(self) -> None:
         digest = "a" * 64

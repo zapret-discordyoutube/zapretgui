@@ -55,11 +55,14 @@ def _host(url: str) -> str:
 
 
 def build_download_sources(metadata: ReleaseArtifactMetadata) -> tuple[DownloadSource, ...]:
-    """Источник из ответа выпуска и зеркала того же проверенного файла.
+    """Источник из ответа выпуска и зеркала того же проверенного файла; первым — GitHub.
 
     Один сервер — один источник: зеркало, которое само дало ответ о выпуске,
-    второй раз в список не попадает.
+    второй раз в список не попадает. GitHub (тот же файл того же тега) стоит
+    первым: ``download_artifact`` сначала пробует его одного.
     """
+    from ..release.forgejo import GITHUB_SOURCE, github_asset_url
+
     primary_host = _host(metadata.update_url)
     sources = [DownloadSource(metadata.update_url, metadata.verify_ssl)]
     for mirror in mirrors.download_sources(metadata.file_name):
@@ -69,6 +72,9 @@ def build_download_sources(metadata: ReleaseArtifactMetadata) -> tuple[DownloadS
         sources.append(
             DownloadSource(mirror.https_url, mirror.verify_ssl, name=mirror.name, fallback_url=mirror.http_url)
         )
+    github = github_asset_url(metadata.update_url, metadata.file_name)
+    if github:
+        sources.insert(0, DownloadSource(github, True, name=GITHUB_SOURCE))
     return tuple(sources)
 
 
@@ -114,9 +120,24 @@ def download_artifact(
     token: CancellationToken,
     on_progress: Callable[[int, int, int], None] | None = None,
 ) -> None:
-    """Скачивает и проверяет установщик в ``path``."""
+    """Скачивает и проверяет установщик в ``path``: сначала с GitHub, не вышло — с наших серверов."""
+    from ..release.forgejo import GITHUB_SOURCE
+
     target = Path(path)
-    suspects = _download_and_verify(artifact.sources, target, artifact, token=token, on_progress=on_progress)
+    sources = tuple(artifact.sources)
+    if len(sources) > 1 and sources[0].name == GITHUB_SOURCE:
+        # GitHub — один: так весь установщик идёт с него, а наши серверы — запасной путь (2026-11-03).
+        try:
+            if not _download_and_verify(sources[:1], target, artifact, token=token, on_progress=on_progress):
+                log(f"✅ Установщик скачан с GitHub и проверен: {artifact.expected_sha256}", LOG_LEVEL)
+                return
+            log("Файл с GitHub не прошёл проверку SHA-256 — качаем с наших серверов", "WARNING")
+        except (UpdateCancelled, LocalWriteError):
+            raise
+        except UpdatePipelineError as exc:
+            log(f"GitHub не отдал установщик ({exc}) — качаем с наших серверов", "WARNING")
+        sources = sources[1:]
+    suspects = _download_and_verify(sources, target, artifact, token=token, on_progress=on_progress)
     if not suspects:
         log(f"✅ Установщик скачан и проверен: {artifact.expected_sha256}", LOG_LEVEL)
         return
@@ -125,7 +146,7 @@ def download_artifact(
     errors = ["SHA-256 установщика не совпадает с данными выпуска"]
     # Единственный участник неудачной попытки уже показал, что отдаёт не то.
     alone = next(iter(suspects)) if len(suspects) == 1 else None
-    for source in artifact.sources:
+    for source in sources:
         token.checkpoint()
         name = source.label
         if name == alone:
