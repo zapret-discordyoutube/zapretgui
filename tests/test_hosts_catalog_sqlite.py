@@ -19,11 +19,18 @@ if str(SRC_ROOT) not in sys.path:
 
 from config import zapret_dns  # noqa: E402
 
+RELAY = "5.6.7.8"
+
 
 class HostsCatalogSqliteTests(unittest.TestCase):
     def setUp(self) -> None:
+        from dns import zapret_dns_server
         from hosts import proxy_domains
 
+        # Профиль «Zapret DNS» пишется только с узнанным адресом посредника (его знает лишь сам сервер).
+        relay = patch.object(zapret_dns_server, "_ACTIVE_RELAY", (RELAY,))
+        relay.start()
+        self.addCleanup(relay.stop)
         proxy_domains.invalidate_hosts_catalog_cache()
         self.proxy_domains = proxy_domains
 

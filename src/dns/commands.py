@@ -19,19 +19,10 @@ def adopt_zapret_dns_server() -> tuple[str, ...]:
 
 
 def refresh_zapret_dns_server():
-    """Спрашивает адрес имени своего сервера; ходит в сеть — только с пропуском шлюза проб."""
+    """Спрашивает адрес имени своего сервера и его посредника; ходит в сеть — только с пропуском шлюза проб."""
     from dns.zapret_dns_server import refresh
 
     return refresh()
-
-
-def check_in_zapret_dns() -> bool | None:
-    """Отметка у посредника, если включён профиль hosts «Zapret DNS»; None — профиль не включён."""
-    from dns.zapret_dns_server import check_in, hosts_profile_in_use
-
-    if not hosts_profile_in_use():
-        return None
-    return check_in()
 
 
 def is_isp_dns_warning_shown() -> bool:

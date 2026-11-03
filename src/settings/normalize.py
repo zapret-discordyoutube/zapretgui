@@ -443,6 +443,7 @@ def _normalize_zapret_dns_server(data: object) -> dict[str, Any]:
         "ipv4": _global_ipv4_list(raw.get("ipv4"), 2),
         "former_ipv4": _global_ipv4_list(raw.get("former_ipv4"), 8),
         "checked_at": checked_at,
+        "relay_ipv4": _global_ipv4_list(raw.get("relay_ipv4"), 2),
     }
 
 

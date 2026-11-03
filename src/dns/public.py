@@ -3,7 +3,6 @@ from __future__ import annotations
 from dns.commands import (
     adopt_zapret_dns_server,
     apply_dns,
-    check_in_zapret_dns,
     check_dns_answering,
     consume_warmed_state,
     delete_custom_server,
@@ -33,7 +32,6 @@ __all__ = [
     "DnsState",
     "adopt_zapret_dns_server",
     "apply_dns",
-    "check_in_zapret_dns",
     "check_dns_answering",
     "consume_warmed_state",
     "delete_custom_server",

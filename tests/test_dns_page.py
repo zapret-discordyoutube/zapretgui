@@ -732,7 +732,7 @@ class DnsPageTests(unittest.TestCase):
         page.now_panel.measure_button.click()
         self.assertEqual(page._latency_lane.request.call_count, 1)
         self.assertNotIn("127.0.0.1", servers)
-        unmeasured = {"Wikimedia DNS", "DNS-AI"}
+        unmeasured = {"Wikimedia DNS", "DNS-AI", "Zapret DNS"}
         network_tiles = [
             tile for tile in self._provider_tiles(page) if tile.address != "127.0.0.1" and tile.key not in unmeasured
         ]

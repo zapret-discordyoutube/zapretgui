@@ -1516,8 +1516,9 @@ def get_zapret_dns_server() -> dict[str, Any]:
     return copy.deepcopy(value) if isinstance(value, dict) else {}
 
 
-def set_zapret_dns_server(*, ipv4: list[str], former_ipv4: list[str], checked_at: float) -> None:
-    value = {"ipv4": list(ipv4), "former_ipv4": list(former_ipv4), "checked_at": float(checked_at)}
+def set_zapret_dns_server(*, ipv4: list[str], former_ipv4: list[str], checked_at: float, relay_ipv4: list[str] = ()) -> None:
+    value = {"ipv4": list(ipv4), "former_ipv4": list(former_ipv4), "checked_at": float(checked_at),
+             "relay_ipv4": list(relay_ipv4)}
     _update_settings(lambda data: data["dns"].__setitem__("zapret_dns_server", value))
 
 

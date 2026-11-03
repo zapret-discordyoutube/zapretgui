@@ -271,25 +271,8 @@ def recheck_applied(names) -> HostsCommandResult:
 
     report = check_addresses(None, why=Why.USER, recheck=set(names or ()))
     changed = bool(report.changed) and bool(refresh_applied_selection().changed)
-    _check_in_zapret_dns(names)
     note = describe_address_check(report) if changed or report.silent else ""
     return HostsCommandResult(success=True, message=note, changed=changed)
-
-
-def _check_in_zapret_dns(names) -> None:
-    """Человек только что включил профиль «Zapret DNS»: сразу отметиться у посредника сервера."""
-    from config import zapret_dns
-    from log.log import log
-
-    selection = load_user_selection()
-    if not any(selection.get(name) == zapret_dns.CATALOG_PROFILE_ID for name in names or ()):
-        return
-    try:
-        from dns.zapret_dns_server import check_in
-
-        check_in()
-    except Exception as exc:
-        log(f"Zapret DNS: отметка для посредника не отправлена: {exc}", "WARNING")
 
 
 def load_hosts_text() -> HostsFileText:

@@ -232,20 +232,21 @@ def _append_entry(
 
 
 def _answer_address(profile_id: str, ip_address: str) -> str:
-    """Адрес ответа каталога; метка своего Zapret DNS — его нынешний адрес.
+    """Адрес ответа каталога; метка своего Zapret DNS — адрес его посредника.
 
-    Профиль «Zapret DNS» не хранит адрес сервера: сервер переезжает, а адрес
-    задан в одном месте (config.zapret_dns) и может быть узнан по имени
-    (dns.zapret_dns_server). Метка стоит только в строках этого профиля;
-    контрольная сумма каталога считается по самой метке.
+    Профиль «Zapret DNS» не хранит адрес посредника: он меняется и известен только
+    самому серверу (dns.zapret_dns_server.learn_relay). Пока он не узнан или
+    посредник выключен — пустой адрес, и строка в hosts не попадает. Метка стоит
+    только в строках этого профиля; контрольная сумма каталога считается по самой метке.
     """
     if ip_address != zapret_dns.CATALOG_ADDRESS_MARKER:
         return ip_address
     if profile_id != zapret_dns.CATALOG_PROFILE_ID:
         raise HostsCatalogError(f"метка адреса Zapret DNS в чужом профиле {profile_id}")
-    from dns.zapret_dns_server import active_ipv4
+    from dns.zapret_dns_server import active_relay_ipv4
 
-    return active_ipv4()[0]
+    relay = active_relay_ipv4()
+    return relay[0] if relay else ""
 
 
 def _load_snapshot(connection: sqlite3.Connection, meta: dict[str, str]) -> HostsCatalog:

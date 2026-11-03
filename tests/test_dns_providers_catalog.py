@@ -86,7 +86,8 @@ class DnsProvidersCatalogTests(unittest.TestCase):
 
         self.assertEqual(proxy_mode_for(zapret, doh_supported=True), "")
         self.assertEqual(proxy_mode_for(zapret, doh_supported=False), "doh")
-        self.assertEqual([item.name for item in proxy_upstreams(zapret)], ["doh-1"])
+        # По движку на каждый адрес плитки: с 2026-11-03 это адреса Cloudflare перед сервером.
+        self.assertEqual([item.name for item in proxy_upstreams(zapret)], [f"doh-{n}" for n in range(1, len(zapret["ipv4"]) + 1)])
         # Плитка-режим всегда идёт через движок, своим режимом.
         self.assertEqual(proxy_mode_for(dnscrypt, doh_supported=True), "dnscrypt")
         self.assertEqual(proxy_mode_for(dnscrypt, doh_supported=False), "dnscrypt")
@@ -109,10 +110,10 @@ class DnsProvidersCatalogTests(unittest.TestCase):
         self.assertEqual(marks["Quad9"], "")
 
     def test_servers_without_plain_dns_are_marked_and_must_have_doh(self) -> None:
-        """Wikimedia и DNS-AI порт 53 не открывают: спросить их можно только шифрованным запросом."""
+        """Wikimedia, DNS-AI и Zapret DNS (за Cloudflare с 2026-11-03) порт 53 не открывают: только шифрованный запрос."""
         marked = {name for _group, name, data in iter_providers() if is_encrypted_only(data)}
 
-        self.assertEqual(marked, {"Wikimedia DNS", "DNS-AI"})
+        self.assertEqual(marked, {"Wikimedia DNS", "DNS-AI", "Zapret DNS"})
         self.assertIn("Wikimedia DNS", DNS_PROVIDERS["Малоизвестные"])
         self.assertIn("DNS-AI", DNS_PROVIDERS["Для ИИ"])
 
