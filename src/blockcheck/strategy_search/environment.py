@@ -14,6 +14,7 @@ from blockcheck.strategy_search.probe_profile import (
 )
 import logging
 import os
+import shlex
 import time
 from collections.abc import Callable, Sequence
 
@@ -39,6 +40,25 @@ _STALE_PROBE_FILES = (PROBE_CONFIG_NAME, "blockcheck_probe_hosts.txt", "blockche
 # При активном Kaspersky частые циклы старт/стоп winws2 провоцируют гонку
 # драйверов (WinDivert против kl*.sys) в ядре — даём фильтрам время на разрядку.
 KASPERSKY_STRATEGY_COOLDOWN_SECONDS = 2.0
+
+
+def config_path_value(path: str, root: str) -> str:
+    """Путь в виде значения для ``@config``: winws2 разбирает файл через wordexp.
+
+    wordexp съедает обратные слеши и режет значение по пробелу, поэтому сырой
+    ``D:\\Programs\\Zapret\\lists\\ipset-all.txt`` winws2 не находит и не стартует.
+    winws2 запускается с cwd = корень установки: путь внутри корня пишется
+    относительно него прямым слешем (как ``lists/ipset-all.txt`` в пресетах),
+    остальные — абсолютными с прямыми слешами; значение берётся в кавычки при необходимости.
+    """
+    text = str(path or "")
+    try:
+        rel = os.path.relpath(os.path.abspath(text), os.path.abspath(root))
+    except ValueError:
+        rel = ""
+    if rel and not rel.startswith(".."):
+        text = rel
+    return shlex.quote(text.replace("\\", "/"))
 
 
 def strategy_pause_seconds() -> float:
@@ -152,7 +172,9 @@ class RealEnvironment:
         from blockcheck.strategy_scan_targeting import resolve_games_ipset_paths
 
         if udp_games_scope not in self._games_paths:
-            self._games_paths[udp_games_scope] = resolve_games_ipset_paths(udp_games_scope)
+            self._games_paths[udp_games_scope] = [
+                config_path_value(path, self._root) for path in resolve_games_ipset_paths(udp_games_scope)
+            ]
         return self._games_paths[udp_games_scope]
 
     # --- Запуск и чистка ----------------------------------------------------------
