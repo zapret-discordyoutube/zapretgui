@@ -69,8 +69,11 @@ class GeoServicesForNameTests(unittest.TestCase):
         self.assertEqual(sorted({word for word in _NAME_ALIASES.values() if word not in keys}), [])
         self.assertEqual(geo.services_for_name("джемини"), ("Gemini AI",))
         self.assertTrue(geo.services_for_name("чатжпт"))
-        for name in ("YouTube", "Discord", "Telegram", "Instagram", "Twitter", "Roblox", "Steam", "Мой профиль"):
+        for name in ("YouTube", "Discord", "Instagram", "Twitter", "Roblox", "Steam", "Мой профиль"):
             self.assertEqual(geo.services_for_name(name), (), name)
+        # Telegram закрыт по адресу: карточка говорит про прокси и ZaStoGram.
+        for name in ("Telegram", "телеграм", "ТГ", "tg"):
+            self.assertEqual(geo.services_for_name(name), ("Telegram",), name)
 
 
 class GeoNoticeTextTests(unittest.TestCase):

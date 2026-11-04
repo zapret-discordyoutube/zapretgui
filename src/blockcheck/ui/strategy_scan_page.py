@@ -351,13 +351,21 @@ class StrategyScanPage(BasePage):
             geo_site_question_text(service, self._target_input.text(), language=self._ui_language),
             self.window(),
         )
-        hosts_text = tr_catalog("page.strategy_scan.geo_site.open_hosts", default="Открыть «Редактор hosts»")
+        from hosts.geo_sites import only_proxy_helps, only_vpn_helps
+
+        # Telegram закрыт по адресу: первая кнопка ведёт не в hosts, а в «Telegram Proxy».
+        proxy_helps = only_proxy_helps((service,))
+        if proxy_helps:
+            hosts_text = tr_catalog("page.strategy_scan.geo_site.open_telegram_proxy", default="Открыть «Telegram Proxy»")
+        else:
+            hosts_text = tr_catalog("page.strategy_scan.geo_site.open_hosts", default="Открыть «Редактор hosts»")
         scan_text = tr_catalog("page.strategy_scan.geo_site.question_scan_anyway", default="Всё равно подобрать")
         box.yesButton.setText(hosts_text)
-        from hosts.geo_sites import only_vpn_helps
-
         # Сервису, которому помогает только VPN, «Редактор hosts» ничего не даст.
-        box.yesButton.setVisible(self._open_hosts_editor is not None and not only_vpn_helps((service,)))
+        if proxy_helps:
+            box.yesButton.setVisible(True)
+        else:
+            box.yesButton.setVisible(self._open_hosts_editor is not None and not only_vpn_helps((service,)))
         box.cancelButton.setText(tr_catalog("page.strategy_scan.resume_question_cancel", default="Отмена"))
         scan_button = PushButton(scan_text)
         choice = {"scan": False}
@@ -377,7 +385,11 @@ class StrategyScanPage(BasePage):
         set_message_box_button_accessibility(
             box,
             yes_name=hosts_text,
-            yes_description="Открывает «Редактор hosts», где сервису включается DNS-профиль. Подбор не запустится.",
+            yes_description=(
+                "Открывает раздел «Telegram Proxy». Подбор не запустится."
+                if proxy_helps
+                else "Открывает «Редактор hosts», где сервису включается DNS-профиль. Подбор не запустится."
+            ),
             cancel_name="Отменить запуск подбора",
             cancel_description="Подбор не запустится.",
         )
@@ -385,7 +397,12 @@ class StrategyScanPage(BasePage):
             return False
         if choice["scan"]:
             return True
-        self._open_hosts_editor_for_geo_site()
+        if proxy_helps:
+            from profile.ui.profile_geo_notice import show_telegram_proxy_page
+
+            show_telegram_proxy_page(self.window())
+        else:
+            self._open_hosts_editor_for_geo_site()
         return False
 
     def _refresh_mode_hint(self, *_args) -> None:

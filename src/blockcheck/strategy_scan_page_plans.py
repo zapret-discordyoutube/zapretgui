@@ -172,8 +172,18 @@ def geo_service_for_target(geo_sites, *, scan_protocol: str, target_input: str) 
 def geo_site_question_text(service: str, target_input: str, *, language: str | None = None) -> str:
     # Тот же адрес, с которым запустился бы подбор.
     target = normalize_target_input(target_input, PROTOCOL_TCP_HTTPS)
-    from hosts.geo_sites import only_vpn_helps
+    from hosts.geo_sites import only_proxy_helps, only_vpn_helps
 
+    if only_proxy_helps((service,)):
+        return tr_catalog(
+            "page.strategy_scan.geo_site.question_text_proxy",
+            language=language,
+            default=(
+                "{target} — это {service}. {service} закрыт в России по IP-адресам своих серверов: ни одна стратегия "
+                "Zapret этого не изменит, а подбор зря займёт время.\n\nhosts и DNS тоже не помогут. Нужен прокси — "
+                "он есть в программе, раздел «Telegram Proxy» — или приложение ZaStoGram (@zastogram)."
+            ),
+        ).format(service=service, target=target)
     if only_vpn_helps((service,)):
         return tr_catalog(
             "page.strategy_scan.geo_site.question_text_vpn",

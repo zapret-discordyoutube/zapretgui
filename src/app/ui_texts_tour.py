@@ -130,14 +130,18 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "пускает посетителей из России, — Gemini, ChatGPT, Claude и другим. Экскурсия показывает её "
             "на примере.\n\n"
             "Перебирать стратегии для такого сервиса бесполезно: блокирует не провайдер. Кнопки на карточке "
-            "ведут туда, где это решается, — на страницы «Редактор hosts» и «Настройка DNS»."
+            "ведут туда, где это решается, — на страницы «Редактор hosts» и «Настройка DNS».\n\n"
+            "Telegram закрыт по IP-адресам, и ему не помогают ни стратегия, ни hosts, ни DNS: для него карточка "
+            "предлагает прокси из раздела «Telegram Proxy» или приложение ZaStoGram."
         ),
         "en": (
             "Such a card pops up in the corner of the page when the profile belongs to a service that "
             "itself does not let visitors from Russia in — Gemini, ChatGPT, Claude and others. The tour "
             "shows it as an example.\n\n"
             "Trying strategies for such a service is useless: it is not your provider blocking it. The "
-            "buttons on the card lead to where it is solved — the Hosts editor and DNS settings."
+            "buttons on the card lead to where it is solved — the Hosts editor and DNS settings.\n\n"
+            "Telegram is blocked by IP address, and neither a strategy, hosts nor DNS helps it: for Telegram the "
+            "card suggests the proxy from the Telegram Proxy section or the ZaStoGram app."
         ),
     },
     # ── фейки ───────────────────────────────────────────────────────────

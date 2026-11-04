@@ -120,11 +120,25 @@ class CreateUserProfileDialog(MessageBoxBase):
             create_worker=create_geo_worker,
             open_hosts_editor=self._leave_for(open_hosts_editor) if open_hosts_editor is not None else None,
             open_dns_settings=self._leave_for(open_dns_settings) if open_dns_settings is not None else None,
+            open_telegram_proxy=self._leave_for(self._telegram_proxy_opener()),
         )
         self.nameEdit.textChanged.connect(self._check_geo_name)
         self._geo_notice = notice
         self._check_geo_name()
         return notice
+
+    def _telegram_proxy_opener(self):
+        """Раздел «Telegram Proxy» открывается в главном окне: само окно профиля закроется раньше."""
+        owner = self.parent()
+        main_window = owner.window() if owner is not None else None
+
+        def _open() -> None:
+            from profile.ui.profile_geo_notice import show_telegram_proxy_page
+
+            if main_window is not None:
+                show_telegram_proxy_page(main_window)
+
+        return _open
 
     def _leave_for(self, open_page):
         def _leave() -> None:

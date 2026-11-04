@@ -63,7 +63,7 @@ class BlockcheckWorker(QObject):
         if self._load_geo_sites is None:
             return None
         try:
-            return self._load_geo_sites().service_for
+            return self._load_geo_sites().service_for_diagnostics
         except Exception:
             logger.exception("Failed to load geo sites for blockcheck")
             return None

@@ -6,6 +6,10 @@ Zapret им не помогает. Помогает DNS-профиль в «Ре
 
 Есть и сервисы, которым не помогает даже это (IP_LOCKED_SERVICES): они узнают
 страну по адресу подключения, и выход один — подключение через другую страну.
+
+И Telegram (PROXY_SERVICES): его серверы закрыты по IP-адресам, поэтому не
+помогают ни стратегия, ни hosts, ни DNS. Выход — прокси (он есть в программе,
+раздел «Telegram Proxy») или клиент ZaStoGram (@zastogram).
 """
 
 from __future__ import annotations
@@ -33,6 +37,29 @@ IP_LOCKED_SERVICES: dict[str, tuple[str, ...]] = {
         "muscdn.com",
     ),
 }
+
+
+# Сервисы, чьи серверы закрыты по IP-адресам: стратегия, hosts и DNS не помогают,
+# нужен прокси или клиент, который сам обходит блокировку (ZaStoGram).
+PROXY_SERVICES: dict[str, tuple[str, ...]] = {
+    "Telegram": (
+        "telegram.org",
+        "t.me",
+        "telegram.me",
+        "telegram.dog",
+        "telegra.ph",
+        "telesco.pe",
+        "cdn-telegram.org",
+        "tdesktop.com",
+        "tg.dev",
+    ),
+}
+
+
+def only_proxy_helps(services) -> bool:
+    """Всем этим сервисам не помогут ни стратегия, ни hosts, ни DNS — только прокси или ZaStoGram."""
+    names = [str(name) for name in (services or ()) if str(name or "").strip()]
+    return bool(names) and all(name in PROXY_SERVICES for name in names)
 
 
 def only_vpn_helps(services) -> bool:
@@ -74,6 +101,11 @@ _NAME_ALIASES = {
     "клод": "claude",
     "клоуд": "claude",
     "тикток": "tiktok",
+    "телеграм": "telegram",
+    "телеграмм": "telegram",
+    "телега": "telegram",
+    "тг": "telegram",
+    "tg": "telegram",
     "клауд": "claude",
     "грок": "grok",
     "копилот": "copilot",
@@ -127,6 +159,16 @@ class GeoSites:
                 return service
         return ""
 
+    def service_for_diagnostics(self, host: str) -> str:
+        """Как ``service_for``, но без сервисов с блокировкой по адресу (Telegram).
+
+        Проверка сайтов сама решает по виду блокировки, помогает ли Telegram
+        стратегия: у блокировки по имени она помогает. Подсказка «стратегия
+        не поможет» решает по названию и цели, без измерения.
+        """
+        service = self.service_for(host)
+        return "" if service in PROXY_SERVICES else service
+
     def services_for_name(self, name: str) -> tuple[str, ...]:
         """Гео-сервисы, на которые похоже название нового профиля («gemini» → «Gemini AI»)."""
         words = _name_words(name)
@@ -151,6 +193,9 @@ def build_geo_sites(profile_index: Mapping[str, object]) -> GeoSites:
             if key:
                 service_by_site.setdefault(key, str(service_name))
     for service_name, sites in IP_LOCKED_SERVICES.items():
+        for site in sites:
+            service_by_site.setdefault(_site_key(site), service_name)
+    for service_name, sites in PROXY_SERVICES.items():
         for site in sites:
             service_by_site.setdefault(_site_key(site), service_name)
     return GeoSites(service_by_site)
@@ -219,11 +264,13 @@ def load_geo_services_for_name(name: str) -> tuple[str, ...]:
 __all__ = [
     "GeoSites",
     "IP_LOCKED_SERVICES",
+    "PROXY_SERVICES",
     "build_geo_sites",
     "geo_services_for_site_list",
     "load_geo_services_for_name",
     "load_geo_services_for_site_list",
     "load_geo_sites",
+    "only_proxy_helps",
     "only_vpn_helps",
     "service_icon",
 ]

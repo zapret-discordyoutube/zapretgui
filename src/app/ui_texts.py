@@ -5368,6 +5368,14 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "ru": "{target} — это {service}. Сервис сам ограничивает посетителей из России: он узнаёт страну по адресу вашего подключения, провайдер тут ни при чём. Ни одна стратегия Zapret этого не изменит, а подбор зря займёт время.\n\nhosts и DNS тоже не помогут — только подключение через другую страну (VPN).",
         "en": "{target} is {service}. The service itself limits visitors from Russia: it tells the country by the address of your connection, your provider has nothing to do with it. No Zapret strategy changes that, and the search would only waste time.\n\nhosts and DNS will not help either, only a connection through another country (VPN).",
     },
+    "page.strategy_scan.geo_site.open_telegram_proxy": {
+        "ru": "Открыть «Telegram Proxy»",
+        "en": "Open Telegram Proxy",
+    },
+    "page.strategy_scan.geo_site.question_text_proxy": {
+        "ru": "{target} — это {service}. {service} закрыт в России по IP-адресам своих серверов: ни одна стратегия Zapret этого не изменит, а подбор зря займёт время.\n\nhosts и DNS тоже не помогут. Нужен прокси — он есть в программе, раздел «Telegram Proxy» — или приложение ZaStoGram (@zastogram).",
+        "en": "{target} is {service}. {service} is blocked in Russia by the IP addresses of its servers: no Zapret strategy changes that, and the search would only waste time.\n\nhosts and DNS will not help either. You need a proxy (the program has one, in the Telegram Proxy section) or the ZaStoGram app (@zastogram).",
+    },
     "page.strategy_scan.geo_site.question_title": {
         "ru": "Стратегия здесь не поможет",
         "en": "A strategy will not help here",
