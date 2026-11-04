@@ -3200,6 +3200,14 @@ label = stock
 description = Приветствие TLS раскладывается на несколько TLS-записей в одном пакете, разрез посреди имени сайта. Из пресета tls records.
 --lua-desync=tlsrec:pos=midsld:oneseg
 
+[stock_builtin_coverage_tcp_025]
+name = Protocol Mask STUN (fake_stun_as_tls) · из «Default v1 (game filter)»
+author = builtin
+label = stock
+description = Подделка под другой протокол: перед приветствием уходит поддельный пакет STUN (blob fake_stun_as_tls), затем приветствие делится на части. Из пресета Default v1 (game filter): YouTube и бэкенд Google.
+--lua-desync=fake:blob=fake_stun_as_tls:tcp_ack=-66000:tcp_ts_up:repeats=3
+--lua-desync=multisplit:pos=1,midsld
+
 # --- Flowseal general EXP 1.10.0 ---
 
 [flowseal_exp_1100_google]
