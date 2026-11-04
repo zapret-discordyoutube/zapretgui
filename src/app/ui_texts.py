@@ -5224,6 +5224,18 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "ru": "Готовые адреса: Discord, YouTube, Telegram и другие",
         "en": "Ready addresses: Discord, YouTube, Telegram and more",
     },
+    "page.strategy_scan.one_site_hint": {
+        "ru": (
+            "Проверяйте сайты по одному. ТСПУ — сложные устройства, и сайты могут влиять друг на друга: "
+            "вы открыли YouTube — а ТСПУ заблокировал Discord. Если проверять несколько сайтов сразу, "
+            "они путают друг друга, и стратегию для небольшой блокировки найти не получится."
+        ),
+        "en": (
+            "Check sites one at a time. TSPU (the ISP's blocking equipment) is complex, and sites can affect "
+            "each other: you opened YouTube and TSPU blocked Discord. If you check several sites at once, "
+            "they confuse each other and you will not find a strategy for a small block."
+        ),
+    },
     "page.strategy_scan.start": {
         "ru": "Найти рабочую стратегию",
         "en": "Find a working strategy",

@@ -628,7 +628,10 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "известного сервиса — YouTube, Discord, Telegram и другие — или впишите свой сайт; есть и кнопка «Выбрать из списка». Задайте тщательность — «Быстро» перебирает 30 стратегий "
             "за пару минут — и нажмите «Найти рабочую стратегию».\n\n"
             "Пока идёт подбор, программа сама перезапускает движок с каждой стратегией. «Сайты и приложения» "
-            "сами поймут, если сайту нужен обычный HTTP без шифрования или быстрый протокол QUIC."
+            "сами поймут, если сайту нужен обычный HTTP без шифрования или быстрый протокол QUIC.\n\n"
+            "Проверяйте сайты по одному: ТСПУ связывает сайты между собой — вы открыли YouTube, а он заблокировал "
+            "Discord. Если проверять несколько сайтов сразу, они путают друг друга, и стратегию для небольшой "
+            "блокировки найти не получится."
         ),
         "en": (
             "Here the app itself looks for a strategy that opens the site you need. Choose what should "
@@ -636,7 +639,10 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "there is also a Choose from list button. Set the thoroughness — Quick tries 30 strategies in a couple of minutes — "
             "and press Find a working strategy.\n\n"
             "While the search runs, the app restarts the engine with each strategy by itself. Sites and apps "
-            "work out by themselves when a site needs plain HTTP without encryption or the fast QUIC protocol."
+            "work out by themselves when a site needs plain HTTP without encryption or the fast QUIC protocol.\n\n"
+            "Check sites one at a time: TSPU links sites together — you opened YouTube and it blocked "
+            "Discord. If you check several sites at once, they confuse each other and you will not find a "
+            "strategy for a small block."
         ),
     },
     "onboarding.step.strategy_scan_result.title": {"ru": "Итог подбора", "en": "Search result"},

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from PyQt6.QtWidgets import QHBoxLayout
 from qfluentwidgets import CaptionLabel, FluentIcon
 
-from blockcheck.strategy_scan_page_plans import MODE_ITEMS, PROTOCOL_ITEMS, PROTOCOL_TILE_DETAILS
+from blockcheck.strategy_scan_page_plans import MODE_ITEMS, ONE_SITE_HINT_RU, PROTOCOL_ITEMS, PROTOCOL_TILE_DETAILS
 from blockcheck.ui.quick_service_cards import QuickServiceCards
 from blockcheck.ui.strategy_scan_widgets import (
     ChoiceRadios,
@@ -43,6 +43,7 @@ class StrategyScanControlWidgets:
     quick_domain_btn: object
     quick_cards: object
     udp_scope_hint_label: object
+    one_site_hint_label: object
     start_btn: object
     stop_btn: object
 
@@ -152,6 +153,12 @@ def build_strategy_scan_control_section(
     quick_cards.picked.connect(on_pick_quick_service)
     control_card.add_widget(quick_cards)
 
+    # Под карточками сервисов: сайты проверяют по одному, ТСПУ связывает их между собой.
+    one_site_hint_label = CaptionLabel(tr_fn("page.strategy_scan.one_site_hint", ONE_SITE_HINT_RU))
+    one_site_hint_label.setWordWrap(True)
+    set_state_text(one_site_hint_label, f"Совет: {one_site_hint_label.text()}")
+    control_card.add_widget(one_site_hint_label)
+
     udp_scope_hint_label = CaptionLabel("")
     udp_scope_hint_label.setWordWrap(True)
     control_card.add_widget(udp_scope_hint_label)
@@ -208,6 +215,7 @@ def build_strategy_scan_control_section(
         quick_domain_btn=quick_domain_btn,
         quick_cards=quick_cards,
         udp_scope_hint_label=udp_scope_hint_label,
+        one_site_hint_label=one_site_hint_label,
         start_btn=start_btn,
         stop_btn=stop_btn,
     )

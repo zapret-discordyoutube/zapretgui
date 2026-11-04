@@ -133,6 +133,7 @@ class StrategyScanPage(BasePage):
         self._games_scope_label: QLabel | None = None
         self._games_scope_combo = None
         self._udp_scope_hint_label: QLabel | None = None
+        self._one_site_hint_label: QLabel | None = None
         # Подробный лог подбора; показывается в отдельном окне по кнопке.
         self._log_lines: deque[str] = deque(maxlen=BLOCKCHECK_LOG_VIEW_MAX_LINES)
         self._result_objects: list = []
@@ -242,6 +243,7 @@ class StrategyScanPage(BasePage):
         self._target_input.textChanged.connect(self._quick_cards.set_target)
         self._quick_cards.set_target(self._target_input.text())
         self._udp_scope_hint_label = control_widgets.udp_scope_hint_label
+        self._one_site_hint_label = control_widgets.one_site_hint_label
         self._start_btn = control_widgets.start_btn
         self._stop_btn = control_widgets.stop_btn
         self._mode_combo.currentIndexChanged.connect(self._update_control_accessibility)
@@ -457,6 +459,8 @@ class StrategyScanPage(BasePage):
         if self._quick_domain_btn is not None:
             self._quick_domain_btn.setVisible(plan.show_target_controls)
         self._quick_cards.setVisible(plan.show_target_controls)
+        if self._one_site_hint_label is not None:
+            self._one_site_hint_label.setVisible(plan.show_one_site_hint)
 
         self._target_input.setText(plan.normalized_target)
         self._target_input.setPlaceholderText(plan.placeholder_text)
@@ -659,6 +663,7 @@ class StrategyScanPage(BasePage):
             games_scope_label=self._games_scope_label,
             games_scope_combo=self._games_scope_combo,
             quick_domain_btn=self._quick_domain_btn,
+            one_site_hint_label=self._one_site_hint_label,
         )
 
     # ------------------------------------------------------------------

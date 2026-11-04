@@ -23,6 +23,7 @@ def apply_language_plan_ui(
     games_scope_label,
     games_scope_combo,
     quick_domain_btn,
+    one_site_hint_label=None,
 ) -> None:
     plan = blockcheck_feature.build_language_plan(language=language)
     log_btn.setText(plan.log_button_text)
@@ -73,6 +74,9 @@ def apply_language_plan_ui(
     if quick_domain_btn is not None:
         quick_domain_btn.setText(plan.quick_domains_text)
         set_tooltip(quick_domain_btn, plan.quick_domains_tooltip)
+    if one_site_hint_label is not None:
+        one_site_hint_label.setText(plan.one_site_hint)
+        set_state_text(one_site_hint_label, f"Совет: {plan.one_site_hint}")
 
 
 def set_support_status(label, text: str) -> None:

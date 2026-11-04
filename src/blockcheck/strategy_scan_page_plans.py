@@ -61,6 +61,7 @@ def build_protocol_ui_plan(*, scan_protocol: str, current_value: str) -> Strateg
         show_target_controls=show_target_controls,
         normalized_target=normalized,
         placeholder_text=default_target_for_protocol(scan_protocol),
+        show_one_site_hint=scan_protocol == PROTOCOL_TCP_HTTPS,
     )
 
 
@@ -205,6 +206,14 @@ def geo_site_question_text(service: str, target_input: str, *, language: str | N
     ).format(service=service, target=target)
 
 
+# Заметка под карточками сервисов: ТСПУ связывает сайты, поэтому сразу несколько сайтов проверять нельзя.
+ONE_SITE_HINT_RU = (
+    "Проверяйте сайты по одному. ТСПУ — сложные устройства, и сайты могут влиять друг на друга: "
+    "вы открыли YouTube — а ТСПУ заблокировал Discord. Если проверять несколько сайтов сразу, "
+    "они путают друг друга, и стратегию для небольшой блокировки найти не получится."
+)
+
+
 def build_language_plan(*, language: str) -> StrategyScanLanguagePlan:
     def _tr(key: str, default: str) -> str:
         return tr_catalog(key, language=language, default=default)
@@ -230,6 +239,7 @@ def build_language_plan(*, language: str) -> StrategyScanLanguagePlan:
             "page.strategy_scan.quick_domains_hint",
             "Готовые адреса: Discord, YouTube, Telegram и другие",
         ),
+        one_site_hint=_tr("page.strategy_scan.one_site_hint", ONE_SITE_HINT_RU),
     )
 
 

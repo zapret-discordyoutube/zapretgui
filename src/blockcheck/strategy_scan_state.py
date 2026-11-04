@@ -88,6 +88,8 @@ class StrategyScanProtocolUiPlan:
     show_target_controls: bool
     normalized_target: str
     placeholder_text: str
+    # Заметка «проверяйте сайты по одному» нужна только там, где проверяется сайт.
+    show_one_site_hint: bool
 
 
 @dataclass(slots=True)
@@ -130,6 +132,7 @@ class StrategyScanLanguagePlan:
     udp_scope_items: list[str]
     quick_domains_text: str
     quick_domains_tooltip: str
+    one_site_hint: str
 
 
 @dataclass(slots=True)
