@@ -387,14 +387,22 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
     "onboarding.step.telegram_settings.title": {"ru": "Основные настройки", "en": "Basic settings"},
     "onboarding.step.telegram_settings.body": {
         "ru": (
-            "Адрес и порт, на которых прокси ждёт подключений, — менять их обычно не нужно. Режим: SOCKS5 — "
+            "Адрес и порт, на которых прокси ждёт подключений, — менять их обычно не нужно. По умолчанию "
+            "прокси слушает всю домашнюю сеть (0.0.0.0): переключатель «Доступ с других устройств» "
+            "включает это или оставляет прокси только для этого компьютера, а строка «Подключить телефон» "
+            "копирует ссылку с адресом компьютера в сети — отправьте её себе в Telegram на телефоне и "
+            "нажмите. Режим: SOCKS5 — "
             "обычный прокси, он подходит почти всем; MTProxy — для опытных: соединение с ключом (secret), которое "
             "можно замаскировать под обычный сайт (Fake TLS). «Авто-настройка "
             "Telegram» сама открывает ссылку в Telegram при первом запуске прокси.\n\n"
             "Последняя строка ведёт в «Продвинутые настройки» — к ним зайдём через пару шагов."
         ),
         "en": (
-            "The address and port the proxy listens on — usually there is no need to change them. Mode: "
+            "The address and port the proxy listens on — usually there is no need to change them. By default "
+            "the proxy listens on your whole home network (0.0.0.0): the Access from other devices switch "
+            "turns that on or keeps the proxy for this computer only, and the Connect a phone row copies a "
+            "link with this computer's network address — send it to yourself in Telegram on the phone and "
+            "tap it. Mode: "
             "SOCKS5 is a plain proxy that suits almost everyone; MTProxy is for experienced users: a connection "
             "with a key (secret) that can be disguised as an ordinary site (Fake TLS). Telegram "
             "auto-setup opens the link in Telegram on the first proxy start.\n\n"

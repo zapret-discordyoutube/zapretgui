@@ -370,9 +370,15 @@ def normalize_telegram_proxy(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     defaults = schema.default_telegram_proxy()
     mode = as_str_in(raw.get("mode"), schema.VALID_TG_PROXY_MODES, defaults["mode"])
+    host = as_clean_str(raw.get("host"), defaults["host"]) or defaults["host"]
+    # Единый переход со старого значения по умолчанию 127.0.0.1 на 0.0.0.0 («вся сеть»).
+    # Флаг ставится при первом чтении, так что последующий выбор 127.0.0.1 сохраняется.
+    if not as_bool(raw.get("lan_default_applied"), False) and host == "127.0.0.1":
+        host = defaults["host"]
     return {
         "enabled": as_bool(raw.get("enabled"), defaults["enabled"]),
-        "host": as_clean_str(raw.get("host"), defaults["host"]) or defaults["host"],
+        "host": host,
+        "lan_default_applied": True,
         "port": as_int(raw.get("port"), defaults["port"], minimum=1024, maximum=65535),
         "mode": mode,
         "upstream_enabled": as_bool(raw.get("upstream_enabled"), defaults["upstream_enabled"]),

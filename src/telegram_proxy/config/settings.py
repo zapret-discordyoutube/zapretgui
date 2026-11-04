@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+import socket
 from dataclasses import dataclass
 
 from telegram_proxy.config.upstream_catalog import UpstreamCatalog, UpstreamPresetResolver
@@ -42,7 +44,9 @@ class TelegramProxyPageInitialStatePlan:
     settings: TelegramProxySettingsState
 
 
-DEFAULT_HOST = "127.0.0.1"
+WILDCARD_HOST = "0.0.0.0"
+LOOPBACK_HOST = "127.0.0.1"
+DEFAULT_HOST = WILDCARD_HOST
 DEFAULT_PORT = 1353
 DEFAULT_UPSTREAM_PORT = 1080
 
@@ -89,6 +93,56 @@ def normalize_host(host: str) -> str:
     if validate_host(text):
         return text
     return DEFAULT_HOST
+
+
+def is_open_to_network(host: str) -> bool:
+    """Слушает ли прокси не только этот компьютер (0.0.0.0 или адрес домашней сети)."""
+    return normalize_host(host) != LOOPBACK_HOST
+
+
+def local_link_host(host: str) -> str:
+    """Адрес для ссылки Telegram на этом же компьютере.
+
+    0.0.0.0 — адрес «слушать везде», подключаться к нему нельзя, поэтому в ссылку
+    для этого компьютера идёт 127.0.0.1. Конкретный IP остаётся как есть.
+    """
+    normalized = normalize_host(host)
+    return LOOPBACK_HOST if normalized == WILDCARD_HOST else normalized
+
+
+def detect_lan_address() -> str:
+    """IPv4 этого компьютера в домашней сети, например 192.168.1.5; пусто, если сети нет.
+
+    Сокет UDP «подключается» к внешнему адресу, но ничего не отправляет: система
+    лишь выбирает сетевую карту и подставляет её адрес. Без DNS, возвращается сразу.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            address = str(probe.getsockname()[0])
+    except OSError:
+        return ""
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return ""
+    if parsed.is_loopback or parsed.is_unspecified or parsed.is_link_local:
+        return ""
+    return address
+
+
+def device_link_host(host: str, *, lan_address: str | None = None) -> str:
+    """Адрес, который вводят на телефоне или другом устройстве; пусто, если его нет.
+
+    Прокси слушает только этот компьютер -> пусто. Слушает конкретный IP -> он же.
+    Слушает 0.0.0.0 -> адрес компьютера в домашней сети.
+    """
+    normalized = normalize_host(host)
+    if normalized == LOOPBACK_HOST:
+        return ""
+    if normalized != WILDCARD_HOST:
+        return normalized
+    return str(detect_lan_address() if lan_address is None else lan_address)
 
 def normalize_port(port: int | None) -> int:
     try:
@@ -139,7 +193,7 @@ def build_proxy_url(
     mtproxy_secret: str = "",
     fake_tls_domain: str = "",
 ) -> str:
-    normalized_host = normalize_host(host)
+    normalized_host = local_link_host(host)
     normalized_port = normalize_port(port)
     if normalize_proxy_mode(mode) == "mtproxy":
         return build_mtproxy_link(
@@ -149,6 +203,28 @@ def build_proxy_url(
             fake_tls_domain=normalize_fake_tls_domain(fake_tls_domain),
         )
     return f"tg://socks?server={normalized_host}&port={normalized_port}"
+
+
+def build_device_proxy_url(
+    host: str,
+    port: int,
+    *,
+    mode: object = "socks5",
+    mtproxy_secret: str = "",
+    fake_tls_domain: str = "",
+    lan_address: str | None = None,
+) -> str:
+    """Та же ссылка, но с адресом компьютера в сети — для телефона. Пусто, если адреса нет."""
+    address = device_link_host(host, lan_address=lan_address)
+    if not address:
+        return ""
+    return build_proxy_url(
+        address,
+        port,
+        mode=mode,
+        mtproxy_secret=mtproxy_secret,
+        fake_tls_domain=fake_tls_domain,
+    )
 
 
 def _settings_state_from_data(data: dict, upstream_catalog: UpstreamCatalog) -> TelegramProxySettingsState:

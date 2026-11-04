@@ -58,7 +58,7 @@ from telegram_proxy.ui.worker_state import (
     TelegramProxyPageQueuedWorkerState,
     TelegramProxyPageWorkerState,
 )
-from ui.fluent_widgets import enable_setting_card_group_auto_height
+from ui.fluent_widgets import enable_setting_card_group_auto_height, set_tooltip
 from log.log import log
 
 import telegram_proxy.ui.page_runtime as telegram_proxy_page_runtime
@@ -108,7 +108,7 @@ class _StatusDot(QWidget):
 # позже. Высоты — замер при окне 1280x720 в режиме SOCKS5.
 SETTINGS_BLOCK = "settings"
 HOSTS_BLOCK = "hosts"
-_SETTINGS_BLOCK_HEIGHT = 322
+_SETTINGS_BLOCK_HEIGHT = 458
 _HOSTS_BLOCK_HEIGHT = 106
 # Атрибуты страницы, которые создаёт каждый блок: обращение к ним до сборки
 # блока достраивает его на месте.
@@ -117,6 +117,9 @@ _SETTINGS_BLOCK_ATTRS = (
     "_host_port_row",
     "_host_edit",
     "_port_spin",
+    "_lan_toggle",
+    "_device_row",
+    "_device_btn",
     "_proxy_mode_row",
     "_mtproxy_secret_row",
     "_mtproxy_secret_edit",
@@ -406,12 +409,16 @@ class TelegramProxyPage(BasePage):
             on_generate_mtproxy_secret=self._on_generate_mtproxy_secret,
             on_copy_fake_tls_nginx_config=self._on_copy_fake_tls_nginx_config,
             on_open_advanced_settings=self._on_open_advanced_settings,
+            on_copy_device_link=self._on_copy_device_link,
         )
         self.add_widget(widgets.settings_card)
         self._settings_card = widgets.settings_card
         self._host_port_row = widgets.host_port_row
         self._host_edit = widgets.host_edit
         self._port_spin = widgets.port_spin
+        self._lan_toggle = widgets.lan_toggle
+        self._device_row = widgets.device_row
+        self._device_btn = widgets.device_btn
         self._proxy_mode_row = widgets.proxy_mode_row
         self._mtproxy_secret_row = widgets.mtproxy_secret_row
         self._mtproxy_secret_edit = widgets.mtproxy_secret_edit
@@ -559,6 +566,7 @@ class TelegramProxyPage(BasePage):
             btn_copy_diag=built("_btn_copy_diag"),
             btn_run_diag=built("_btn_run_diag"),
             host_edit=built("_host_edit"),
+            lan_toggle=built("_lan_toggle"),
             mtproxy_secret_edit=built("_mtproxy_secret_edit"),
             fake_tls_domain_edit=built("_fake_tls_domain_edit"),
             log_edit=built("_log_edit"),
@@ -601,6 +609,7 @@ class TelegramProxyPage(BasePage):
     def _connect_settings_signals(self) -> None:
         self._port_spin.valueChanged.connect(self._on_port_changed)
         self._host_edit.editingFinished.connect(self._on_host_changed)
+        self._lan_toggle.toggled.connect(self._on_lan_toggled)
         self._proxy_mode_row.currentIndexChanged.connect(self._on_proxy_mode_changed)
         self._mtproxy_secret_edit.editingFinished.connect(self._on_mtproxy_secret_changed)
         self._fake_tls_domain_edit.editingFinished.connect(self._on_fake_tls_domain_changed)
@@ -627,6 +636,7 @@ class TelegramProxyPage(BasePage):
         self._port_spin.setValue(state.port)
         self._port_spin.blockSignals(False)
         self._host_edit.setText(state.host)
+        self._sync_lan_controls()
         self._proxy_mode_row.setCurrentData(state.mode, block_signals=True)
         self._mtproxy_secret_edit.setText(state.mtproxy_secret)
         self._mtproxy_secret_edit.setCursorPosition(0)
@@ -644,6 +654,9 @@ class TelegramProxyPage(BasePage):
             return
         port_spin.setEnabled(plan.port_spin_enabled)
         host_edit.setEnabled(plan.host_edit_enabled)
+        lan_toggle = self.__dict__.get("_lan_toggle")
+        if lan_toggle is not None:
+            lan_toggle.setEnabled(plan.host_edit_enabled)
 
     def _apply_mtproxy_rows_visibility(self) -> None:
         """Строки MTProxy видны только в режиме MTProxy."""
@@ -1385,11 +1398,56 @@ class TelegramProxyPage(BasePage):
             self._port_spin.setValue(normalized)
             self._port_spin.blockSignals(False)
         self._request_settings_save("port", port=normalized)
+        self._sync_lan_controls()
 
     def _on_host_changed(self):
         host = telegram_proxy_settings.normalize_host(self._host_edit.text().strip())
         self._host_edit.setText(host)
         self._request_settings_save("host", host=host)
+        self._sync_lan_controls()
+
+    def _on_lan_toggled(self, checked: bool) -> None:
+        """Переключатель «другие устройства»: 0.0.0.0 — вся сеть, 127.0.0.1 — только этот компьютер."""
+        host = (
+            telegram_proxy_settings.WILDCARD_HOST
+            if checked
+            else telegram_proxy_settings.LOOPBACK_HOST
+        )
+        self._host_edit.setText(host)
+        self._request_settings_save("host", host=host)
+        self._sync_lan_controls()
+
+    def _sync_lan_controls(self) -> None:
+        """Переключатель и строка «Подключить телефон» следуют за адресом прослушивания."""
+        lan_toggle = self.__dict__.get("_lan_toggle")
+        device_row = self.__dict__.get("_device_row")
+        if lan_toggle is None or device_row is None:
+            return
+        host = telegram_proxy_settings.normalize_host(self._host_edit.text().strip())
+        is_open = telegram_proxy_settings.is_open_to_network(host)
+        lan_toggle.setChecked(is_open, block_signals=True)
+        device_row.setVisible(is_open)
+        if is_open:
+            self._refresh_device_row(host)
+        settings_card = self.__dict__.get("_settings_card")
+        if settings_card is not None:
+            enable_setting_card_group_auto_height(settings_card)
+
+    def _refresh_device_row(self, host: str) -> None:
+        text = TELEGRAM_PROXY_SETTINGS_TEXT
+        address = telegram_proxy_settings.device_link_host(host)
+        if not address:
+            description = text.device_description_no_network
+        else:
+            template = (
+                text.device_description_ready
+                if host == telegram_proxy_settings.WILDCARD_HOST
+                else text.device_description_custom
+            )
+            description = template.format(address=address, port=self._port_spin.value())
+        self._device_row.set_texts(text.device_title, description)
+        set_tooltip(self._device_row, description)
+        self._device_btn.setEnabled(bool(address))
 
     def _local_proxy_mode(self) -> str:
         row = getattr(self, "_proxy_mode_row", None)
@@ -1614,6 +1672,28 @@ class TelegramProxyPage(BasePage):
             mtproxy_secret=self._ensure_mtproxy_secret_if_needed(),
             fake_tls_domain=self._local_fake_tls_domain(),
         )
+        self._copy_link_to_clipboard(url)
+
+    def _on_copy_device_link(self):
+        """Скопировать ссылку с адресом компьютера в сети — её открывают на телефоне."""
+        host = self._host_edit.text().strip()
+        url = telegram_proxy_settings.build_device_proxy_url(
+            host,
+            self._port_spin.value(),
+            mode=self._local_proxy_mode(),
+            mtproxy_secret=self._ensure_mtproxy_secret_if_needed(),
+            fake_tls_domain=self._local_fake_tls_domain(),
+        )
+        if not url:
+            self._refresh_device_row(telegram_proxy_settings.normalize_host(host))
+            self._show_warning_message(
+                TELEGRAM_PROXY_SETTINGS_TEXT.device_title,
+                TELEGRAM_PROXY_SETTINGS_TEXT.device_description_no_network,
+            )
+            return
+        self._copy_link_to_clipboard(url)
+
+    def _copy_link_to_clipboard(self, url: str) -> None:
         plan = self._telegram_proxy.copy_text(
             url,
             success_title="Скопировано",

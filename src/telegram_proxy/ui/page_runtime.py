@@ -116,6 +116,12 @@ def build_hosts_row_plan(status, *, busy: bool, error: str = "") -> TelegramHost
     )
 
 
+def listen_address_text(host: str, port: int) -> str:
+    """«127.0.0.1:1353» или «0.0.0.0:1353 (вся сеть)»: что именно слушает прокси."""
+    suffix = " (вся сеть)" if str(host or "").strip() == "0.0.0.0" else ""
+    return f"{host}:{port}{suffix}"
+
+
 def build_status_plan(*, running: bool, restarting: bool, starting: bool, host: str, port: int) -> TelegramProxyStatusPlan:
     if restarting:
         return TelegramProxyStatusPlan(
@@ -141,7 +147,7 @@ def build_status_plan(*, running: bool, restarting: bool, starting: bool, host: 
         )
     if running:
         return TelegramProxyStatusPlan(
-            status_text=f"Работает на {host}:{port}",
+            status_text=f"Работает на {listen_address_text(host, port)}",
             toggle_text="Остановить",
             dot_active=True,
             host_edit_enabled=False,
@@ -207,7 +213,7 @@ def build_finish_start_plan(start_ok: bool) -> TelegramProxyFinishStartPlan:
 def build_relay_start_plan(*, current_generation: int, host: str, port: int) -> TelegramProxyRelayStartPlan:
     return TelegramProxyRelayStartPlan(
         generation=int(current_generation) + 1,
-        status_text=f"Работает на {host}:{port} — проверка relay...",
+        status_text=f"Работает на {listen_address_text(host, port)} — проверка relay...",
     )
 
 def build_relay_result_plan(
@@ -220,7 +226,7 @@ def build_relay_result_plan(
     zapret_running: bool = False,
     traffic_seen: bool = False,
 ) -> TelegramProxyRelayResultPlan:
-    base = f"Работает на {host}:{port}"
+    base = f"Работает на {listen_address_text(host, port)}"
 
     if status == "ok":
         return TelegramProxyRelayResultPlan(

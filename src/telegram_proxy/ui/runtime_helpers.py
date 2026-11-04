@@ -174,6 +174,7 @@ def apply_ui_texts(
     auto_deeplink_toggle,
     proxy_mode_row,
     proxy_protocol_toggle,
+    lan_toggle=None,
 ) -> None:
     try:
         text = TELEGRAM_PROXY_SETTINGS_TEXT
@@ -224,7 +225,7 @@ def apply_ui_texts(
             btn_run_diag.setText("Запустить диагностику")
 
         if host_edit is not None:
-            host_edit.setPlaceholderText("127.0.0.1")
+            host_edit.setPlaceholderText("0.0.0.0")
         if mtproxy_secret_edit is not None:
             mtproxy_secret_edit.setPlaceholderText("32 символа: 0-9 и a-f")
         if fake_tls_domain_edit is not None:
@@ -244,6 +245,8 @@ def apply_ui_texts(
                 text.proxy_mode_title,
                 text.proxy_mode_description,
             )
+        if lan_toggle is not None:
+            lan_toggle.set_texts(text.lan_title, text.lan_description)
         if proxy_protocol_toggle is not None:
             proxy_protocol_toggle.set_texts(
                 text.proxy_protocol_title,

@@ -299,6 +299,7 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             on_generate_mtproxy_secret=lambda: None,
             on_copy_fake_tls_nginx_config=lambda: None,
             on_open_advanced_settings=lambda: None,
+            on_copy_device_link=lambda: None,
         )
         layout.addWidget(widgets.settings_card)
         self.assertEqual(widgets.mtproxy_secret_edit.accessibleName(), "Secret MTProxy")
@@ -354,6 +355,7 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             on_generate_mtproxy_secret=lambda: None,
             on_copy_fake_tls_nginx_config=lambda: None,
             on_open_advanced_settings=lambda: None,
+            on_copy_device_link=lambda: None,
         )
         layout.addWidget(main_widgets.settings_card)
         advanced_widgets = _advanced_widgets(layout, parent)

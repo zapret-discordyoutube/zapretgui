@@ -17,7 +17,7 @@ SETTINGS_VERSION = 1
 DEFAULT_WINDOW_OPACITY = 100
 DEFAULT_TINTED_INTENSITY = 15
 MAX_TINTED_INTENSITY = 100
-DEFAULT_TG_PROXY_HOST = "127.0.0.1"
+DEFAULT_TG_PROXY_HOST = "0.0.0.0"
 DEFAULT_TG_PROXY_PORT = 1353
 DEFAULT_TG_PROXY_UPSTREAM_PORT = 1080
 
@@ -135,6 +135,9 @@ def default_telegram_proxy() -> dict[str, Any]:
     return {
         "enabled": True,
         "host": DEFAULT_TG_PROXY_HOST,
+        # Старые установки хранили 127.0.0.1 как значение по умолчанию; один раз (2026-11-04)
+        # их переводят на 0.0.0.0, дальше выбор пользователя не трогают.
+        "lan_default_applied": True,
         "port": DEFAULT_TG_PROXY_PORT,
         "mode": "mtproxy",
         "upstream_enabled": True,

@@ -17,6 +17,7 @@
 
 import asyncio
 import errno
+import ipaddress
 import logging
 import time
 from pathlib import Path
@@ -78,6 +79,18 @@ def _is_address_in_use_error(exc: OSError) -> bool:
     if isinstance(exc, OSError) and exc.errno == errno.EADDRINUSE:
         return True
     return getattr(exc, "winerror", None) in _ADDRESS_IN_USE_WINERRORS
+
+
+def is_local_network_peer(peer_host: object) -> bool:
+    """Свой ли это клиент: этот компьютер, домашняя сеть, link-local или CGNAT (Tailscale).
+
+    У прокси нет пароля, поэтому при 0.0.0.0 пускаем только не-интернетовские адреса.
+    Так прокси не станет открытым для всего мира, даже если порт пробросили на роутере.
+    """
+    try:
+        return not ipaddress.ip_address(str(peer_host)).is_global
+    except ValueError:
+        return False
 
 
 def _is_domain(host: str) -> bool:
@@ -405,7 +418,7 @@ class TelegramWSProxy:
 
     # ---- UDP (звонки) через внешний SOCKS5 ----
 
-    async def _open_udp_relay(self, label: str) -> _Socks5UdpRelay:
+    async def _open_udp_relay(self, label: str, client_facing_host: str = "") -> _Socks5UdpRelay:
         if not self._upstream.enabled or not self._upstream.udp_enabled:
             raise socks5.Socks5Error("SOCKS5 UDP relay is disabled")
 
@@ -432,7 +445,12 @@ class TelegramWSProxy:
         upstream_protocol.peer = local_protocol
         upstream_protocol.fixed_target = (upstream_session.relay_host, upstream_session.relay_port)
 
-        local_bind_host = self._host if self._host != "0.0.0.0" else "127.0.0.1"
+        # При 0.0.0.0 relay должен слушать тот адрес, на который клиент пришёл по TCP:
+        # 127.0.0.1 для Telegram на этом компьютере, адрес из домашней сети для телефона.
+        if self._host != "0.0.0.0":
+            local_bind_host = self._host
+        else:
+            local_bind_host = client_facing_host or "127.0.0.1"
         local_transport = None
         try:
             local_transport, _ = await loop.create_datagram_endpoint(
@@ -585,6 +603,11 @@ class TelegramWSProxy:
         self.stats.active_connections += 1
         return task
 
+    def _peer_allowed(self, peer) -> bool:
+        if self._host == "127.0.0.1":
+            return True  # слушаем только этот компьютер, чужих здесь быть не может
+        return is_local_network_peer(peer[0] if peer else "")
+
     async def _finish_connection(self, task: asyncio.Task | None, writer) -> None:
         self.stats.active_connections -= 1
         try:
@@ -602,10 +625,15 @@ class TelegramWSProxy:
         udp_relay: _Socks5UdpRelay | None = None
 
         try:
+            if not self._peer_allowed(peer):
+                self.log(f"[{label}] rejected: client is outside the local network")
+                return
+
             async def create_udp_relay() -> tuple[str, int]:
                 nonlocal udp_relay
                 try:
-                    udp_relay = await self._open_udp_relay(label)
+                    sock = writer.get_extra_info("sockname")
+                    udp_relay = await self._open_udp_relay(label, str(sock[0]) if sock else "")
                     return udp_relay.local_host, udp_relay.local_port
                 except Exception as exc:
                     self.log(f"[{label}] UDP relay failed: {type(exc).__name__}: {exc}")
@@ -729,6 +757,10 @@ class TelegramWSProxy:
         client_writer = writer
 
         try:
+            if not self._peer_allowed(peer):
+                self.log(f"[{label}] rejected: client is outside the local network")
+                return
+
             if not self._mtproxy_secret:
                 self.stats.failed_connections += 1
                 self.log(f"[{label}] MTProxy secret is not configured")

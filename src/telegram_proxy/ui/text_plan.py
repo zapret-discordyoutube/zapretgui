@@ -15,6 +15,13 @@ class TelegramProxySettingsText:
     settings_title: str
     host_port_title: str
     host_port_description: str
+    lan_title: str
+    lan_description: str
+    device_title: str
+    device_description_ready: str
+    device_description_no_network: str
+    device_description_custom: str
+    device_button: str
     proxy_mode_title: str
     proxy_mode_description: str
     mtproxy_secret_title: str
@@ -99,6 +106,21 @@ TELEGRAM_PROXY_SETTINGS_TEXT = TelegramProxySettingsText(
     settings_title="Основные настройки",
     host_port_title="Адрес и порт",
     host_port_description="127.0.0.1 — только этот компьютер, 0.0.0.0 — вся сеть",
+    lan_title="Доступ с других устройств",
+    lan_description=(
+        "Телефон или другой компьютер из вашей домашней сети сможет пользоваться этим прокси. "
+        "Выключите, чтобы прокси слышал только этот компьютер."
+    ),
+    device_title="Подключить телефон",
+    device_description_ready=(
+        "Адрес в вашей сети: {address}:{port}. Телефон должен быть в той же сети Wi-Fi. "
+        "Скопируйте ссылку, отправьте её себе в Telegram на телефоне и нажмите на неё."
+    ),
+    device_description_no_network=(
+        "Не нашли адрес этого компьютера в сети. Подключитесь к Wi-Fi или кабелю."
+    ),
+    device_description_custom="Адрес в вашей сети: {address}:{port}.",
+    device_button="Копировать",
     proxy_mode_title="Режим прокси",
     proxy_mode_description=(
         "SOCKS5 — обычный прокси, выбирайте его. MTProxy — для опытных: соединение с ключом (secret), "
