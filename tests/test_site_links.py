@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -13,10 +15,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from utils import site_links  # noqa: E402
 
 
+def _lists(names: dict[str, str | None]):
+    """Подмена общих списков: у каждого семейства ``link()`` отдаёт заданное имя (``None`` — имени нет)."""
+    return patch.object(
+        site_links, "mirror_list", side_effect=lambda family="git": SimpleNamespace(link=lambda: names[family])
+    )
+
+
 class ResolveTests(unittest.TestCase):
     def test_project_links_get_the_chosen_name_of_their_own_family(self) -> None:
         names = {"git": "git2.zapret.moe", "wiki": "wiki3.zapret.moe"}
-        with patch.object(site_links, "best_host", side_effect=lambda family="git": names[family]):
+        with _lists(names):
             self.assertEqual(
                 site_links.resolve("https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues"),
                 "https://git2.zapret.moe/zapretdiscordyoutube/zapretgui/issues",
@@ -27,7 +36,7 @@ class ResolveTests(unittest.TestCase):
             )
 
     def test_other_addresses_are_untouched_and_ask_nothing(self) -> None:
-        with patch.object(site_links, "best_host", side_effect=AssertionError("имя не нужно")), patch.object(
+        with patch.object(site_links, "mirror_list", side_effect=AssertionError("имя не нужно")), patch.object(
             site_links, "chosen_host", side_effect=AssertionError("сеть не нужна")
         ):
             for url in (
@@ -54,7 +63,7 @@ class ResolveTests(unittest.TestCase):
 class OpenInBrowserTests(unittest.TestCase):
     def test_opens_the_best_name_at_once_without_any_network(self) -> None:
         opened: list[str] = []
-        with patch.object(site_links, "best_host", return_value="wiki2.zapret.moe"), patch.object(
+        with _lists({"git": "git2.zapret.moe", "wiki": "wiki2.zapret.moe"}), patch.object(
             site_links, "chosen_host", side_effect=AssertionError("кнопка не должна ждать пробу")
         ), patch.object(site_links.webbrowser, "open", side_effect=opened.append):
             site_links.open_in_browser("https://wiki.zapret.moe/Zapret/home")
@@ -82,7 +91,8 @@ class OpenInBrowserTests(unittest.TestCase):
         finally:
             release.set()
         self.assertLess(elapsed, 0.3)
-        self.assertEqual(url, "https://wiki2.zapret.moe/Zapret/home")
+        # Гонка ещё не дала ни имени, ни списка: ссылка ведёт на входную страницу, а не на имя из прошивки.
+        self.assertEqual(url, mirrors.entry_page_url("Zapret/home", "wiki"))
 
     def test_a_failed_open_never_raises_into_the_window(self) -> None:
         with patch.object(site_links, "resolve", side_effect=RuntimeError("сбой")), patch.object(
@@ -90,6 +100,70 @@ class OpenInBrowserTests(unittest.TestCase):
         ) as log:
             site_links.open_in_browser("https://git.zapret.moe/")
         self.assertTrue(log.called)
+
+
+def _document(family: str, names: list[tuple[str, bool]]) -> bytes:
+    """Список сервера схемы 1: (имя, закрыто ли)."""
+    return json.dumps(
+        {"schema": 1, "families": {family: {"names": [{"name": name, "blocked": blocked} for name, blocked in names]}}}
+    ).encode()
+
+
+class EntryPageFallbackTests(unittest.TestCase):
+    """Нет открывающегося имени — ссылка идёт на входную страницу, а не на имя из прошивки (git2, wiki2)."""
+
+    def _resolve(self, names, url="https://wiki.zapret.moe/Zapret/home"):
+        with patch.object(site_links, "mirror_list", return_value=names):
+            return site_links.resolve(url)
+
+    def _loaded(self, family, listed):
+        from zapret_update import mirrors
+
+        body = _document(family, listed)
+        names = mirrors.MirrorList(lambda url: body, family=family)
+        names.choose()
+        return names
+
+    def test_no_list_yet_goes_to_the_entry_page(self) -> None:
+        from zapret_update import mirrors
+
+        names = mirrors.MirrorList(lambda url: None, family="wiki")
+        self.assertIsNone(names.link())
+        url = self._resolve(names)
+        self.assertEqual(url, mirrors.entry_page_url("Zapret/home", "wiki"))
+        self.assertTrue(url.startswith(mirrors.ENTRY_PAGE + "?s=wiki&p="))
+        self.assertNotIn("wiki2.zapret.moe", url)
+
+    def test_all_names_flagged_blocked_goes_to_the_entry_page(self) -> None:
+        from zapret_update import mirrors
+
+        names = self._loaded("wiki", [("wiki.zapret.moe", True), ("wiki2.zapret.moe", True)])
+        names._good = None
+        self.assertIsNone(names.link())
+        self.assertTrue(self._resolve(names).startswith(mirrors.ENTRY_PAGE))
+
+    def test_first_open_name_of_the_server_list_is_handed_out(self) -> None:
+        names = self._loaded("wiki", [("wiki.zapret.moe", True), ("wiki2.zapret.moe", True), ("wiki3.zapret.moe", False)])
+        names._good = None
+        self.assertEqual(names.link(), "wiki3.zapret.moe")
+        self.assertEqual(self._resolve(names), "https://wiki3.zapret.moe/Zapret/home")
+
+    def test_a_name_that_answered_from_this_computer_wins(self) -> None:
+        from zapret_update import mirrors
+
+        names = mirrors.MirrorList(lambda url: None, family="wiki")
+        names.remember("wiki4.zapret.moe")
+        self.assertTrue(names.proven())
+        self.assertEqual(self._resolve(names), "https://wiki4.zapret.moe/Zapret/home")
+
+    def test_entry_page_carries_family_path_and_query(self) -> None:
+        from zapret_update import mirrors
+
+        self.assertEqual(
+            mirrors.entry_page_for("https://git.zapret.moe/zapretkvn/zapret-kvn/issues/new?x=1"),
+            mirrors.ENTRY_PAGE + "?s=git&p=zapretkvn/zapret-kvn/issues/new%3Fx%3D1",
+        )
+        self.assertEqual(mirrors.entry_page_for("https://t.me/x"), "https://t.me/x")
 
 
 class ProbedNameTests(unittest.TestCase):
@@ -109,9 +183,7 @@ class ButtonsGoThroughTheModuleTests(unittest.TestCase):
     """«Справка», «Исходный код», «Документация», форма заявки: адрес уходит в браузер под открытым именем."""
 
     def _opened_through(self, call):
-        with patch.object(site_links, "best_host", side_effect=lambda family="git": f"{family}2.zapret.moe"), patch(
-            "webbrowser.open"
-        ) as browser:
+        with _lists({"git": "git2.zapret.moe", "wiki": "wiki2.zapret.moe"}), patch("webbrowser.open") as browser:
             call()
         return browser.call_args.args[0]
 

@@ -38,7 +38,7 @@ import threading
 import time
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 CANONICAL_HOST = "git.zapret.moe"
 FAMILIES = ("git", "wiki")
@@ -61,8 +61,11 @@ RACE_STAGGER_S = 0.25
 MAX_RACERS = 8
 # Входные страницы (pve-admin servers.md «Entry pages»): их пишет zapret-beacon при каждой смене
 # зеркал, адреса постоянные. Схема 1: {"families": {"git": {"hosts": [...]}, "wiki": {...}}}.
+# Постоянный адрес входной страницы (``stable`` в zapret-links, не меняется): в браузере человека она сама
+# находит открывающееся зеркало, поэтому это последний запас для ссылок (``entry_page_url``).
+ENTRY_PAGE = "https://script.google.com/macros/s/AKfycbzcEPk67WW6fYC0vPVm397QyDFHd4m-SrfKDBnfvG8jAD-n_HXVv8AqQnEHZ6A42oIh/exec"
 ENTRY_LISTS = (
-    "https://script.google.com/macros/s/AKfycbzcEPk67WW6fYC0vPVm397QyDFHd4m-SrfKDBnfvG8jAD-n_HXVv8AqQnEHZ6A42oIh/exec?format=json",
+    f"{ENTRY_PAGE}?format=json",
     "https://gist.githubusercontent.com/fuckyourkn/ecb9b6a03f53bddcdd47023ebc12d4f9/raw/targets.json",
 )
 
@@ -204,6 +207,39 @@ def ordered_hosts(document: Any, family: str = "git") -> list[str]:
     return ordered
 
 
+def entry_page_url(path: str = "", family: str = "git") -> str:
+    """Входная страница Zapret Links с путём нашего сайта (``?s=<семейство>&p=<путь>``).
+
+    Страница открывается в браузере человека, проверяет зеркала там, где их будет открывать он, и
+    ведёт на то, что грузится (фильтр провайдера видит только script.google.com). Ссылка отдаётся,
+    когда программа сама не знает открывающегося имени: список сервера не получен или все имена в нём
+    помечены закрытыми. Запасное имя из списка прошивки (git2, wiki2) в таком случае не отдаётся:
+    его могли закрыть, а человек получил бы пустую страницу.
+    """
+    family = family if family in FAMILIES else "git"
+    return f"{ENTRY_PAGE}?s={family}&p={quote(str(path or '').strip().lstrip('/'), safe='/')}"
+
+
+def entry_page_for(url: str) -> str:
+    """Входная страница для адреса сайта проекта (семейство и путь берутся из адреса); чужой адрес как есть."""
+    if not is_rewritable(url):
+        return str(url)
+    parsed = urlsplit(str(url))
+    path = parsed.path + (f"?{parsed.query}" if parsed.query else "") + (f"#{parsed.fragment}" if parsed.fragment else "")
+    return entry_page_url(path, family_of(parsed.hostname))
+
+
+def blocked_hosts(document: Any, family: str = "git") -> frozenset[str]:
+    """Имена семейства, которые список сервера помечает закрытыми (измерено из российских сетей)."""
+    try:
+        items = [item for item in document["families"][family]["names"] if isinstance(item, dict)]
+    except (KeyError, TypeError, AttributeError):
+        return frozenset()
+    return frozenset(
+        str(item.get("name") or "").strip().lower() for item in items if item.get("blocked") is True
+    )
+
+
 def entry_hosts(document: Any, family: str = "git") -> list[str]:
     """Имена семейства со входной страницы (схема 1, ``families.<семейство>.hosts``) в её порядке."""
     try:
@@ -272,6 +308,9 @@ class MirrorList:
         self._report = report
         self._lock = threading.RLock()
         self._hosts: list[str] | None = None
+        # Имена из списка сервера (а не из прошивки), помеченные закрытыми: их не отдают человеку.
+        self._listed = False
+        self._blocked: frozenset[str] = frozenset()
         self._expires_at = 0.0
         self._good: str | None = None
         self._good_until = 0.0
@@ -288,6 +327,7 @@ class MirrorList:
     def forget(self) -> None:
         with self._lock:
             self._hosts = None
+            self._listed, self._blocked = False, frozenset()
             self._good = None
             self._failed_until = 0.0
 
@@ -340,6 +380,26 @@ class MirrorList:
         hosts = self._hosts or bootstrap_hosts(self._family)
         return hosts[0] if hosts else canonical_host(self._family)
 
+    def proven(self) -> bool:
+        """Под одним из имён с этого компьютера недавно отвечали (имя не взято наугад из списка)."""
+        return self._good is not None and self._clock() < self._good_until
+
+    def link(self) -> str | None:
+        """Имя для ссылки, которую откроет браузер, или ``None``, если открывающегося имени не известно.
+
+        Мгновенно и без сети. Имя отдаётся, только когда за ним что-то стоит: оно уже отвечало с этого
+        компьютера (``remember``, победитель гонки) или стоит первым среди не закрытых в списке сервера.
+        Нет списка (запуск, нет сети) или все имена закрыты — ``None``, и хозяин ведёт человека на
+        входную страницу (``entry_page_for``): запасной список прошивки не угадывает живое имя.
+        """
+        good = self._good
+        if good is not None and self._clock() < self._good_until:
+            return good
+        if not self._listed:
+            return None
+        hosts = self._hosts or []
+        return next((host for host in hosts if host not in self._blocked), None)
+
     def note_failure(self, host: str, exc: BaseException) -> None:
         """Журнал: под этим именем сервер не ответил (причина — для разбора на компьютере пользователя)."""
         self._say(f"{host}: {type(exc).__name__}: {str(exc)[:160]}")
@@ -368,6 +428,7 @@ class MirrorList:
         now = self._clock()
         if winner is None:
             self._hosts, self._expires_at = list(bootstrap_hosts(self._family)), now + FALLBACK_TTL_S
+            self._listed, self._blocked = False, frozenset()
             self._failed_until = now + FALLBACK_TTL_S
             self._say("ни одно имя сервера не ответило, берётся запасной список; " + "; ".join(failures))
             return
@@ -377,8 +438,10 @@ class MirrorList:
         self._failed_until = 0.0
         if ordered:
             self._hosts, self._expires_at = ordered, now + LIST_TTL_S
+            self._listed = True
         else:
             self._hosts, self._expires_at = list(bootstrap_hosts(self._family)), now + FALLBACK_TTL_S
+            self._listed, self._blocked = False, frozenset()
         self._say(
             f"{winner} ответило за {time.monotonic() - started:.1f} с"
             + (f"; список имён: {', '.join(ordered)}" if ordered else "; списка имён нет, берётся запасной")
@@ -479,6 +542,7 @@ class MirrorList:
                 if failure:
                     failures.append(failure)
                 elif document is not None:
+                    self._blocked = blocked_hosts(document, self._family)
                     return host, ordered_hosts(document, self._family), failures
             silent = [host for host in names if host not in answered]
             failures.extend(f"{host}: нет ответа за {RACE_DEADLINE_S:.0f} с" for host in silent)
@@ -497,7 +561,11 @@ __all__ = [
     "bootstrap_hosts",
     "canonical_host",
     "ENTRY_LISTS",
+    "ENTRY_PAGE",
+    "blocked_hosts",
     "canonical_url",
+    "entry_page_for",
+    "entry_page_url",
     "entry_hosts",
     "family_of",
     "host_of",

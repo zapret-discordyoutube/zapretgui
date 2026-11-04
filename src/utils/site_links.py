@@ -12,7 +12,8 @@
 * ссылка для браузера (кнопки): ``resolve`` / ``open_in_browser`` — мгновенно, без
   сети. Проба из самой программы не показывает, что откроет браузер (фильтр
   провайдера может сбрасывать рукопожатие Python и пускать браузер), поэтому
-  берётся имя, уже доказавшее себя, иначе лучшее из списка сервера;
+  берётся имя, уже доказавшее себя, иначе первое не закрытое в списке сервера,
+  а если и такого нет — входная страница Zapret Links (``entry_page_for``);
 * запрос самой программы (очередь обновлений, хранилище файлов): ``chosen_host`` /
   ``resolve_probed`` — гонка по именам тем же сетевым путём, не дольше срока.
 
@@ -75,11 +76,6 @@ def chosen_host(family: str = "git") -> str:
     return mirror_list(family).choose()
 
 
-def best_host(family: str = "git") -> str:
-    """Имя для ссылки, которую откроет браузер: мгновенно, без сети."""
-    return mirror_list(family).best()
-
-
 def warm_up() -> None:
     """Выбрать имена git и вики заранее, в фоне: узнать список сервера и рабочие имена.
 
@@ -91,13 +87,18 @@ def warm_up() -> None:
 
 
 def resolve(url: str) -> str:
-    """Тот же адрес под лучшим именем для браузера. Адрес не сайта проекта — как есть.
+    """Тот же адрес под открывающимся именем для браузера. Адрес не сайта проекта — как есть.
 
-    Мгновенно и без сети: можно из любого потока, в том числе из окна.
+    Мгновенно и без сети: можно из любого потока, в том числе из окна. Имя берётся то, что уже
+    отвечало с этого компьютера или стоит первым среди не закрытых в списке сервера (``link``).
+    Если такого имени нет (запуск, нет сети, закрыты все), ссылка ведёт на входную страницу
+    Zapret Links: она в браузере человека сама находит рабочее зеркало. Запасное имя из прошивки
+    (git2, wiki2) не угадывается: его могли закрыть.
     """
     if not mirrors.is_rewritable(url):
         return str(url)
-    return mirrors.with_host(url, best_host(mirrors.family_of(mirrors.host_of(url))))
+    host = mirror_list(mirrors.family_of(mirrors.host_of(url))).link()
+    return mirrors.with_host(url, host) if host else mirrors.entry_page_for(url)
 
 
 def resolve_probed(url: str) -> str:
@@ -121,4 +122,4 @@ def open_in_browser(url: str) -> None:
         log(f"Не удалось открыть {target}: {type(exc).__name__}: {exc}", "WARNING")
 
 
-__all__ = ["best_host", "chosen_host", "mirror_list", "open_in_browser", "resolve", "resolve_probed", "warm_up"]
+__all__ = ["chosen_host", "mirror_list", "open_in_browser", "resolve", "resolve_probed", "warm_up"]
