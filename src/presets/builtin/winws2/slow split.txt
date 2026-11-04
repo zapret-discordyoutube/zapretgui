@@ -1,5 +1,5 @@
 # Preset: slow split
-# BuiltinVersion: 2.45
+# BuiltinVersion: 2.46
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -25,38 +25,6 @@
 --blob=tls_google:@bin/tls_clienthello_www_google_com.bin
 --blob=quic_google:@bin/quic_initial_www_google_com.bin
 --blob=fake_default_udp:0x00000000000000000000000000000000
-
---name=zapret.moe
---filter-tcp=443
---hostlist=lists/zapret-moe.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
-
---name=Signal
---filter-tcp=443
---hostlist=lists/signal.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
-
---name=Matrix
---filter-tcp=443
---hostlist=lists/matrix.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
-
---name=SimpleX
---filter-tcp=443
---hostlist=lists/simplex.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
 
 --name=Исключения домены (RU сайты)
 --filter-tcp=80,443-65535

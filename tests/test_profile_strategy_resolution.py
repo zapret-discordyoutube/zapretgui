@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
 
 from core.paths import AppPaths
@@ -255,6 +256,9 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                     source_name=path.name,
                 )
                 matches = [profile for profile in preset.profiles if profile.display_name == "zapret.moe"]
+                if _has_all_sites_tcp_profile(preset):
+                    self.assertEqual(matches, [])
+                    continue
                 self.assertEqual(len(matches), 1)
                 profile = matches[0]
                 self.assertIs(profile, preset.profiles[0])
@@ -290,6 +294,9 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                     source_name=path.name,
                 )
                 matches = [profile for profile in preset.profiles if profile.display_name == "Signal"]
+                if _has_all_sites_tcp_profile(preset):
+                    self.assertEqual(matches, [])
+                    continue
                 self.assertEqual(len(matches), 1)
                 profile = matches[0]
                 self.assertIs(profile, preset.profiles[1])
@@ -321,6 +328,9 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
             for position, (name, hostlist_lines, ipset_lines) in enumerate(expected_profiles, start=2):
                 with self.subTest(preset=path.name, profile=name):
                     matches = [profile for profile in preset.profiles if profile.display_name == name]
+                    if _has_all_sites_tcp_profile(preset):
+                        self.assertEqual(matches, [])
+                        continue
                     self.assertEqual(len(matches), 1)
                     profile = matches[0]
                     self.assertIs(profile, preset.profiles[position])
@@ -482,6 +492,30 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
 
     def _profile_by_name(self, display_name: str):
         return next(profile for profile in self.preset.profiles if profile.display_name == display_name)
+
+
+_SITE_LIST_LINE = re.compile(r"^--(hostlist=|ipset=|hostlist-domains=)")
+
+
+def _has_all_sites_tcp_profile(preset) -> bool:
+    """Есть ли в пресете профиль на все сайты TCP: порт 443 и ни одного списка (``--hostlist=``/``--ipset=``).
+
+    Решение пользователя от 2026-11-04: в таких пресетах профили отдельных сайтов (zapret.moe, Signal, Matrix,
+    SimpleX) не нужны, они только мешают «Все сайты (айпи)» и кругу подбора. Список исключений (``--hostlist-exclude``)
+    списком не считается.
+    """
+    for profile in preset.profiles:
+        lines = [str(line).strip() for line in profile.match.all_lines()]
+        if any(_SITE_LIST_LINE.match(line) for line in lines):
+            continue
+        for line in lines:
+            if not line.startswith("--filter-tcp="):
+                continue
+            for part in line.split("=", 1)[1].split(","):
+                found = re.fullmatch(r"(\d+)(?:-(\d+))?", part.strip().lstrip("~"))
+                if found and int(found.group(1)) <= 443 <= int(found.group(2) or found.group(1)):
+                    return True
+    return False
 
 
 def _builtin_version(text: str) -> tuple[int, ...]:

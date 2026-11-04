@@ -1,20 +1,10 @@
 # Preset: alt6_190b_allsites
-# BuiltinVersion: 1.0
+# BuiltinVersion: 1.1
 # IconColor: #60cdff
 # Description: Imported from bat/alt6_190b_allsites.txt
 
 --wf-tcp=80,443,444-65535
 --wf-udp=443,444-65535
-
---comment=zapret.moe
---filter-tcp=443
---hostlist=lists/zapret-moe.txt
---dpi-desync=hostfakesplit
---dpi-desync-repeats=4
---dpi-desync-fooling=ts,md5sig
---dpi-desync-hostfakesplit-mod=host=ozon.ru
-
---new
 
 --filter-udp=443
 --hostlist=lists/list-general.txt

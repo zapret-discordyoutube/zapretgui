@@ -1,21 +1,10 @@
 # Preset: Ufanet_2025_03_31
-# BuiltinVersion: 1.0
+# BuiltinVersion: 1.1
 # IconColor: #60cdff
 # Description: Imported from bat/Ufanet_2025_03_31.txt
 
 --wf-tcp=80,443
 --wf-udp=443,50000-65535
-
-# === zapret.moe ===
---comment=zapret.moe
---filter-tcp=443
---hostlist=lists/zapret-moe.txt
---dpi-desync=hostfakesplit
---dpi-desync-repeats=4
---dpi-desync-fooling=ts,md5sig
---dpi-desync-hostfakesplit-mod=host=ozon.ru
-
---new
 
 # === HTTP (порт 80) ===
 --filter-tcp=80

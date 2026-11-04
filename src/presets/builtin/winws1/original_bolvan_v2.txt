@@ -1,27 +1,10 @@
 # Preset: original_bolvan_v2
-# BuiltinVersion: 1.0
+# BuiltinVersion: 1.1
 # IconColor: #60cdff
 # Description: Imported from bat/original_bolvan_v2.txt
 
 --wf-tcp=80,443,6695-6705
 --wf-udp=443,50000-50099
-
-# NAME: Оригинальная bol-van v2 (07.04.2025)
-# VERSION: 3.8
-# DESCRIPTION: Оригинальная стратегия для большинства провайдеров
-# LABEL: recommended
-# AUTHOR: bol-van
-# DATE: 2025-04-10
-# === zapret.moe ===
---comment=zapret.moe
---filter-tcp=443
---hostlist=lists/zapret-moe.txt
---dpi-desync=hostfakesplit
---dpi-desync-repeats=4
---dpi-desync-fooling=ts,md5sig
---dpi-desync-hostfakesplit-mod=host=ozon.ru
-
---new
 
 # === HTTP (порт 80) ===
 --filter-tcp=80

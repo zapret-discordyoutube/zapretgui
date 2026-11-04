@@ -1,5 +1,5 @@
 # Preset: general ALT10
-# BuiltinVersion: 2.44
+# BuiltinVersion: 2.45
 # IconColor: #e6c300ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -81,38 +81,6 @@
 --wf-raw-part=@windivert.filter/windivert_part.discord_media.txt
 --wf-raw-part=@windivert.filter/windivert_part.stun.txt
 --wf-raw-part=@windivert.filter/windivert_part.wireguard.txt
-
---name=zapret.moe
---filter-tcp=443
---hostlist=lists/zapret-moe.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
-
---name=Signal
---filter-tcp=443
---hostlist=lists/signal.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
-
---name=Matrix
---filter-tcp=443
---hostlist=lists/matrix.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
-
---name=SimpleX
---filter-tcp=443
---hostlist=lists/simplex.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
 
 --name=YouTube · видео (googlevideo.com)
 --filter-tcp=80,443

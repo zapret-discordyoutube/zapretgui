@@ -1,21 +1,10 @@
 # Preset: valorant
-# BuiltinVersion: 1.0
+# BuiltinVersion: 1.1
 # IconColor: #60cdff
 # Description: Imported from bat/valorant.txt
 
 --wf-tcp=80,443
 --wf-udp=443,50000-50100
-
-# === zapret.moe ===
---comment=zapret.moe
---filter-tcp=443
---hostlist=lists/zapret-moe.txt
---dpi-desync=hostfakesplit
---dpi-desync-repeats=4
---dpi-desync-fooling=ts,md5sig
---dpi-desync-hostfakesplit-mod=host=ozon.ru
-
---new
 
 # === QUIC ===
 --filter-udp=443

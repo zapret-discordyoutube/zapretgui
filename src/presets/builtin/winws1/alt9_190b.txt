@@ -1,20 +1,10 @@
 # Preset: alt9_190b
-# BuiltinVersion: 1.0
+# BuiltinVersion: 1.1
 # IconColor: #60cdff
 # Description: Imported from bat/alt9_190b.txt
 
 --wf-tcp=80,443,444-65535,2053,2083,2087,2096,8443
 --wf-udp=443,444-65535,19294-19344,50000-50100
-
---comment=zapret.moe
---filter-tcp=443
---hostlist=lists/zapret-moe.txt
---dpi-desync=hostfakesplit
---dpi-desync-repeats=4
---dpi-desync-fooling=ts,md5sig
---dpi-desync-hostfakesplit-mod=host=ozon.ru
-
---new
 
 --filter-udp=443
 --hostlist=lists/list-general.txt

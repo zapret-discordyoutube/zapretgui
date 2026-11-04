@@ -1,21 +1,10 @@
 # Preset: ultimatealt
-# BuiltinVersion: 1.4
+# BuiltinVersion: 1.5
 # IconColor: #60cdff
 # Description: Imported from bat/ultimatealt.txt
 
 --wf-tcp=80,443
 --wf-udp=443,50000-65535
-
-# === zapret.moe ===
---comment=zapret.moe
---filter-tcp=443
---hostlist=lists/zapret-moe.txt
---dpi-desync=hostfakesplit
---dpi-desync-repeats=4
---dpi-desync-fooling=ts,md5sig
---dpi-desync-hostfakesplit-mod=host=ozon.ru
-
---new
 
 # === QUIC Discord ===
 --filter-udp=443
