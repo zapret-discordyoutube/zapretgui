@@ -389,7 +389,13 @@ class RecheckLanesTests(unittest.TestCase):
             with lock:
                 now[kind] -= 1
 
+        full_done_hosts = set()
+
         def light(_run, host, ip, _path, **_kwargs):
+            if host in full_done_hosts:
+                # Третья попытка после полной проверки идёт из тяжёлой очереди, а не из лёгкой:
+                # в пик лёгких запросов она не входит.
+                return _ok(ip)
             busy("light")
             # Половина сайтов на лёгкий запрос открывается — их ждёт полная проверка.
             return _ok(ip) if int(host[1:].split(".")[0]) % 2 else _dead(ip)
@@ -399,6 +405,7 @@ class RecheckLanesTests(unittest.TestCase):
             probe = engine._Probe(target=target, service=key, host=target.host)
             probe.reach = _ok("203.0.113.9")
             probe.reach_state = ReachState.OK
+            full_done_hosts.add(target.host)
             return probe
 
         run = engine._Run(None, workers=64, deadline=60)

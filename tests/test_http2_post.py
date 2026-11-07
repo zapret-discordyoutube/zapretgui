@@ -96,6 +96,8 @@ class ExchangeTests(unittest.TestCase):
         return result, seen
 
     def test_request_is_sent_and_answer_is_read(self) -> None:
+        replied = threading.Event()
+
         def serve(sock) -> None:
             sock.sendall(
                 _frame(4, 0, 0)  # настройки сервера
@@ -105,6 +107,7 @@ class ExchangeTests(unittest.TestCase):
                 + _frame(0, 0x1, 1, b"WER")
             )
             self.replies = _read_exact(sock, 9 + 9 + 8)
+            replied.set()
 
         (status, body), seen = self._exchange(serve)
 
@@ -117,6 +120,8 @@ class ExchangeTests(unittest.TestCase):
             self.assertIn(part, headers)
         self.assertEqual(seen["frames"][2][3], b"QUERY")
         # Клиент подтвердил настройки сервера и ответил на проверку связи.
+        # Сервер дочитывает ответы в своём потоке уже после конца обмена, поэтому ждём его.
+        self.assertTrue(replied.wait(3.0))
         self.assertEqual(self.replies, _frame(4, 0x1, 0) + _frame(6, 0x1, 0, b"12345678"))
 
     def test_padded_data_and_error_status(self) -> None:
