@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FlowLayout
 
@@ -218,6 +218,8 @@ class KindTile(QWidget):
         # Под мышью плитка подсвечивается, а в подсказке — все её сайты и пояснение.
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Плитку можно достать клавишей Tab и открыть Enter или Пробелом.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._anim = QVariantAnimation(self)
         self._anim.setStartValue(0.0)
         self._anim.setEndValue(float(group.count))
@@ -276,6 +278,21 @@ class KindTile(QWidget):
             self.opened.emit(self._group.key)
         super().mouseReleaseEvent(event)
 
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.opened.emit(self._group.key)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
         painter = QPainter(self)
@@ -284,6 +301,12 @@ class KindTile(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self._surface_hover if self._hover else self._surface)
         painter.drawRoundedRect(rect, 6, 6)
+        if self.hasFocus():
+            # Рамка цвета вида показывает, где стоит клавиатура.
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(self._color, 1.5))
+            painter.drawRoundedRect(rect, 6, 6)
+            painter.setPen(Qt.PenStyle.NoPen)
 
         number_font = QFont(self.font())
         number_font.setPixelSize(24)

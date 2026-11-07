@@ -299,7 +299,7 @@ class _PlaceCard(CardWidget):
         texts = QVBoxLayout()
         texts.setSpacing(0)
         name = BodyLabel(place.name)
-        name.setToolTip(place.name)
+        set_tooltip(name, place.name)
         texts.addWidget(name)
         caption = presets_text(place.presets)
         if place.profile_key:

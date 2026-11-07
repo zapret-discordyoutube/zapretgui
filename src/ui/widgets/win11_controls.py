@@ -7,6 +7,7 @@ import qtawesome as qta
 
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.combo_accessibility import set_combo_items_accessibility
+from ui.fluent_widgets import set_tooltip
 from ui.theme import (
     get_cached_qta_pixmap,
     get_theme_tokens,
@@ -117,7 +118,7 @@ def _fit_row_texts(row, control) -> None:
             label.setText(fitted)
         tooltip = full if fitted != full else ""
         if label.toolTip() != tooltip:
-            label.setToolTip(tooltip)
+            set_tooltip(label, tooltip)
 
 
 class _FittingRowTextsMixin:

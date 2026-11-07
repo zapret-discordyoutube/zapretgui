@@ -84,7 +84,13 @@ class UpdateReleaseResolutionTests(unittest.TestCase):
         self.assertEqual(artifact.version, release["version"])
         self.assertEqual(artifact.expected_sha256, release["sha256"])
         self.assertEqual(artifact.expected_size, release["file_size"])
-        self.assertEqual(artifact.sources[0].url, release["update_url"])
+        # Установщик качается с GitHub (решение 2026-11-03, 4206b0a4), адрес Forgejo из выпуска остаётся запасным.
+        self.assertEqual(
+            artifact.sources[0].url,
+            "https://github.com/zapret-discordyoutube/zapretgui/releases/download/99.1.2.3/Zapret2Setup_DEV_99_1_2_3.exe",
+        )
+        self.assertTrue(artifact.sources[0].url.startswith("https://github.com/"))
+        self.assertIn(release["update_url"], [source.url for source in artifact.sources[1:]])
 
     def test_install_does_not_mix_telegram_version_with_forgejo_hash(self) -> None:
         announcement = _release()

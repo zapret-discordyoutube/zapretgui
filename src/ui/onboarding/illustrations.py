@@ -46,6 +46,7 @@ from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QLinearGradient, QP
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import FluentIcon, TransparentToolButton, isDarkTheme, themeColor
 
+from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
 
@@ -526,7 +527,7 @@ class TechniqueIllustration(QWidget):
         else:
             icon, text = FluentIcon.PAUSE, self._tr("onboarding.scene.pause", "Остановить анимацию")
         self.pause_button.setIcon(icon)
-        self.pause_button.setAccessibleName(text)
+        set_control_accessibility(self.pause_button, name=text)
         set_tooltip(self.pause_button, text)
 
     # ── отрисовка ─────────────────────────────────────────────────────

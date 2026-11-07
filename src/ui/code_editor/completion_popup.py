@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ui.accessibility import set_control_accessibility, set_state_text
+from ui.accessibility import set_control_accessibility, set_item_accessible_text, set_state_text
 from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips, set_fluent_item_tooltip
 
 MAX_VISIBLE_ROWS = 7
@@ -153,6 +153,7 @@ class CompletionPopup(QFrame):
                 item = QListWidgetItem(str(label))
                 item.setData(_DETAIL_ROLE, str(detail or ""))
                 set_fluent_item_tooltip(item, str(detail or ""))
+                set_item_accessible_text(item, str(label), description=str(detail or "") or None)
                 self.list_widget.addItem(item)
             if self.list_widget.count():
                 self.list_widget.setCurrentRow(0)

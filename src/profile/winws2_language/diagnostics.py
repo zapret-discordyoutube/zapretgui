@@ -41,7 +41,7 @@ from .model import (
     SEVERITY_WARNING,
     Diagnostic,
     QuickFix,
-    TextEdit,
+    SourceEdit,
     replace_in_line,
 )
 from .options import (
@@ -86,17 +86,17 @@ class _Collector:
         finish = option.value_end if end is None else end
         self.add(option.value_line, begin, finish, severity, message, fixes)
 
-    def line_end_insert(self, line: int, text: str) -> TextEdit:
+    def line_end_insert(self, line: int, text: str) -> SourceEdit:
         column = len(self.lines[line]) if 0 <= line < len(self.lines) else 0
-        return TextEdit(line, column, line, column, f"\n{text}")
+        return SourceEdit(line, column, line, column, f"\n{text}")
 
     def remove_line_fix(self, token: Token, title: str = "Удалить строку") -> QuickFix:
         line = token.line
         if line + 1 < len(self.lines):
-            return QuickFix(title, (TextEdit(line, 0, line + 1, 0, ""),))
+            return QuickFix(title, (SourceEdit(line, 0, line + 1, 0, ""),))
         if line > 0:
-            return QuickFix(title, (TextEdit(line - 1, len(self.lines[line - 1]), line, len(self.lines[line]), ""),))
-        return QuickFix(title, (TextEdit(line, 0, line, len(self.lines[line]), ""),))
+            return QuickFix(title, (SourceEdit(line - 1, len(self.lines[line - 1]), line, len(self.lines[line]), ""),))
+        return QuickFix(title, (SourceEdit(line, 0, line, len(self.lines[line]), ""),))
 
 
 def _closest(word: str, candidates, *, n: int = 3, cutoff: float = 0.6) -> list[str]:
@@ -137,7 +137,7 @@ def _check_syntax(c: _Collector) -> None:
         )
 
     for option, lost in analysis.lost_values:
-        join = TextEdit(option.token.line, option.token.end, lost.line, lost.start, "=")
+        join = SourceEdit(option.token.line, option.token.end, lost.line, lost.start, "=")
         c.on_token(
             lost,
             SEVERITY_ERROR,
@@ -184,7 +184,7 @@ def _check_option_syntax(c: _Collector, option: ParsedOption) -> None:
             head_spec = OPTIONS_BY_NAME.get(head)
             if head_spec is not None and head_spec.available_on_windows:
                 space_at = token.start + option.dashes + len(head)
-                fixed = TextEdit(token.line, space_at, token.line,
+                fixed = SourceEdit(token.line, space_at, token.line,
                                  space_at + len(name) - len(head) - len(name[len(head):].lstrip()), "=")
                 c.on_name(
                     option,
@@ -241,7 +241,7 @@ def _check_option_syntax(c: _Collector, option: ParsedOption) -> None:
         )
     elif option.value_token is not None:
         following = option.value_token
-        join = TextEdit(token.line, token.end, following.line, following.start, "=")
+        join = SourceEdit(token.line, token.end, following.line, following.start, "=")
         if following.text.startswith("-"):
             c.on_name(
                 option,
@@ -373,18 +373,18 @@ def _lua_init_insert_fix(c: _Collector, file_name: str) -> QuickFix:
         edit = c.line_end_insert(lua_inits[-1].token.line, line_text)
     else:
         first_line = c.analysis.tokens[0].line if c.analysis.tokens else 0
-        edit = TextEdit(first_line, 0, first_line, 0, f"{line_text}\n")
+        edit = SourceEdit(first_line, 0, first_line, 0, f"{line_text}\n")
     return QuickFix(f"Подключить {line_text}", (edit,))
 
 
-def blob_insert_edit(analysis: PresetAnalysis, block_text: str) -> TextEdit:
+def blob_insert_edit(analysis: PresetAnalysis, block_text: str) -> SourceEdit:
     """Куда вставить новые строки ``--blob=``: после последнего фейка, иначе
     после блока ``--lua-init``, иначе в начало."""
     lines = document_lines(analysis.text)
 
-    def after(line: int) -> TextEdit:
+    def after(line: int) -> SourceEdit:
         column = len(lines[line]) if 0 <= line < len(lines) else 0
-        return TextEdit(line, column, line, column, f"\n{block_text}")
+        return SourceEdit(line, column, line, column, f"\n{block_text}")
 
     blobs = analysis.options_named("blob")
     if blobs:
@@ -393,7 +393,7 @@ def blob_insert_edit(analysis: PresetAnalysis, block_text: str) -> TextEdit:
     if anchors:
         return after(anchors[-1].token.line)
     first_line = analysis.tokens[0].line if analysis.tokens else 0
-    return TextEdit(first_line, 0, first_line, 0, f"{block_text}\n")
+    return SourceEdit(first_line, 0, first_line, 0, f"{block_text}\n")
 
 
 def blob_declaration_fix(c: _Collector, name: str, value: str) -> QuickFix:
@@ -590,7 +590,7 @@ def _check_structure(c: _Collector, circular: bool) -> None:
               "Нет фильтра перехвата: программа не запустит пресет без --wf-tcp-out, --wf-udp-out "
               "или --wf-raw-part.",
               (QuickFix("Добавить --wf-tcp-out=80,443 и --wf-udp-out=443",
-                        (TextEdit(first, 0, first, 0, "--wf-tcp-out=80,443\n--wf-udp-out=443\n"),)),))
+                        (SourceEdit(first, 0, first, 0, "--wf-tcp-out=80,443\n--wf-udp-out=443\n"),)),))
 
     enabled = [
         profile for profile in analysis.profiles

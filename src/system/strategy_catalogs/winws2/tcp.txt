@@ -3201,7 +3201,7 @@ description = Приветствие TLS раскладывается на не�
 --lua-desync=tlsrec:pos=midsld:oneseg
 
 [stock_builtin_coverage_tcp_025]
-name = Protocol Mask STUN (fake_stun_as_tls) · из «Default v1 (game filter)»
+name = Protocol Mask STUN (fake_stun_as_tls) · из «Default v1»
 author = builtin
 label = stock
 description = Подделка под другой протокол: перед приветствием уходит поддельный пакет STUN (blob fake_stun_as_tls), затем приветствие делится на части. Из пресета Default v1 (game filter): YouTube и бэкенд Google.

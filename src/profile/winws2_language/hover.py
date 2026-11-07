@@ -11,7 +11,7 @@ from .analysis import analyze_winws2_text
 from .context import EMPTY_CONTEXT, LanguageContext
 from .diagnostics import blob_insert_edit, known_blob_names
 from .lua_catalog import LUA_ARGS, LUA_FUNCTIONS_BY_NAME, STD_SET_TITLES, function_arg_names, std_set_of
-from .model import QuickFix, TextEdit
+from .model import QuickFix, SourceEdit
 from .options import platform_note, resolve_windows_option
 from .tokens import document_lines, line_tokens
 from . import values as V
@@ -149,7 +149,7 @@ def quick_actions_winws2(
         column_end = len(lines[line])
         actions.append(QuickFix(
             "Вставить новый профиль ниже",
-            (TextEdit(line, column_end, line, column_end,
+            (SourceEdit(line, column_end, line, column_end,
                       "\n\n--new\n\n--name=Новый профиль\n--filter-tcp=443\n--lua-desync=pass"),),
         ))
     return tuple(actions)

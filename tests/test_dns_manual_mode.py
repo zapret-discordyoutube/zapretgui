@@ -16,7 +16,15 @@ class DnsManualModeTests(unittest.TestCase):
     def test_force_dns_settings_are_gone(self) -> None:
         from settings import schema, store
 
-        self.assertEqual(schema.default_dns(), {"custom_servers": []})
+        # В разделе dns остались свои серверы и запись о собственном сервере Zapret DNS
+        # (dns.zapret_dns_server); ничего про принудительный DNS и счётчик сбоев там нет.
+        self.assertEqual(
+            schema.default_dns(),
+            {
+                "custom_servers": [],
+                "zapret_dns_server": {"ipv4": [], "former_ipv4": [], "checked_at": 0.0, "relay_ipv4": []},
+            },
+        )
         for name in ("get_force_dns_enabled", "set_force_dns_enabled", "get_dns_crash_count", "increment_dns_crash_count"):
             self.assertFalse(hasattr(store, name), name)
 

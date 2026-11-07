@@ -39,6 +39,10 @@ class AtomicWriteTextTests(unittest.TestCase):
         self.assertEqual(target.read_text(encoding="utf-8"), "--old\n")
         self.assertEqual(self._leftover_tmp_files(), [])
 
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0,
+        "root игнорирует режим «только чтение», запись разрешена",
+    )
     def test_read_only_file_is_not_replaced(self) -> None:
         import stat
 

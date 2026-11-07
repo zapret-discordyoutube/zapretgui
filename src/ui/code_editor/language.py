@@ -17,7 +17,7 @@ SEVERITY_HINT = "hint"
 SEVERITY_ORDER = {SEVERITY_ERROR: 0, SEVERITY_WARNING: 1, SEVERITY_HINT: 2}
 
 
-class EditorTextEdit(Protocol):
+class EditorSourceEdit(Protocol):
     start_line: int
     start_column: int
     end_line: int
@@ -27,7 +27,7 @@ class EditorTextEdit(Protocol):
 
 class EditorQuickFix(Protocol):
     title: str
-    edits: Sequence[EditorTextEdit]
+    edits: Sequence[EditorSourceEdit]
 
 
 class EditorDiagnostic(Protocol):
@@ -78,7 +78,7 @@ __all__ = [
     "EditorDiagnostic",
     "EditorLanguageSupport",
     "EditorQuickFix",
-    "EditorTextEdit",
+    "EditorSourceEdit",
     "SEVERITY_ERROR",
     "SEVERITY_HINT",
     "SEVERITY_ORDER",

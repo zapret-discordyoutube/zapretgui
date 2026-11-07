@@ -7,6 +7,8 @@ from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import QSizePolicy
 from qfluentwidgets import CaptionLabel
 
+from ui.fluent_widgets import set_tooltip
+
 
 class ElidedLabel(CaptionLabel):
     """Одна строка: что не помещается, уходит в многоточие и в подсказку."""
@@ -47,7 +49,7 @@ class ElidedLabel(CaptionLabel):
         metrics = QFontMetrics(self.font())
         shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, max(8, self.width()))
         super().setText(shown)
-        self.setToolTip(self._full if shown != self._full else "")
+        set_tooltip(self, self._full if shown != self._full else "")
 
 
 __all__ = ["ElidedLabel"]

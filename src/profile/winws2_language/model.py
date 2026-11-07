@@ -16,7 +16,7 @@ SEVERITY_HINT = "hint"
 
 
 @dataclass(frozen=True, slots=True)
-class TextEdit:
+class SourceEdit:
     start_line: int
     start_column: int
     end_line: int
@@ -27,7 +27,7 @@ class TextEdit:
 @dataclass(frozen=True, slots=True)
 class QuickFix:
     title: str
-    edits: tuple[TextEdit, ...]
+    edits: tuple[SourceEdit, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,17 +58,17 @@ class CompletionResult:
     items: tuple[CompletionItem, ...]
 
 
-def replace_in_line(line: int, start: int, end: int, text: str) -> TextEdit:
-    return TextEdit(line, int(start), line, int(end), str(text))
+def replace_in_line(line: int, start: int, end: int, text: str) -> SourceEdit:
+    return SourceEdit(line, int(start), line, int(end), str(text))
 
 
-def remove_whole_line(line: int) -> TextEdit:
+def remove_whole_line(line: int) -> SourceEdit:
     """Удаляет строку целиком вместе с переводом строки."""
-    return TextEdit(line, 0, line + 1, 0, "")
+    return SourceEdit(line, 0, line + 1, 0, "")
 
 
-def insert_line_before(line: int, text: str) -> TextEdit:
-    return TextEdit(line, 0, line, 0, f"{text}\n")
+def insert_line_before(line: int, text: str) -> SourceEdit:
+    return SourceEdit(line, 0, line, 0, f"{text}\n")
 
 
 __all__ = [
@@ -79,7 +79,7 @@ __all__ = [
     "SEVERITY_ERROR",
     "SEVERITY_HINT",
     "SEVERITY_WARNING",
-    "TextEdit",
+    "SourceEdit",
     "insert_line_before",
     "remove_whole_line",
     "replace_in_line",

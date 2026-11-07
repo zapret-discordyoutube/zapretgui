@@ -113,7 +113,7 @@ class JitterBusyThreadsTests(unittest.TestCase):
 
         self.assertNotIn("Занятые фоновые потоки", messages[0])
 
-    def test_real_freeze_report_stays_without_thread_list(self) -> None:
+    def test_real_freeze_report_also_lists_busy_threads(self) -> None:
         messages: list[str] = []
         watchdog = UiFreezeWatchdog(
             log_fn=lambda message, _level: messages.append(message),
@@ -124,8 +124,10 @@ class JitterBusyThreadsTests(unittest.TestCase):
 
         watchdog._report_freeze_started(2.5)
 
-        # Для настоящих зависаний есть отдельный файл со стеками всех потоков.
-        self.assertNotIn("Занятые фоновые потоки", messages[0])
+        # Список занятых потоков пишется при любой заморозке (0048dccb): полный дамп потоков
+        # снимается лишь с пяти секунд, а первое сообщение приходит раньше.
+        self.assertIn("Занятые фоновые потоки", messages[0])
+        self.assertIn("worker: file.py:1 run", messages[0])
 
     def test_busy_thread_listing_shows_working_thread_and_skips_sleeping_one(self) -> None:
         import threading

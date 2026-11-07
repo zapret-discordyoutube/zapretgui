@@ -19,7 +19,7 @@ from .model import (
     CompletionResult,
     Diagnostic,
     QuickFix,
-    TextEdit,
+    SourceEdit,
 )
 
 __all__ = [
@@ -33,7 +33,7 @@ __all__ = [
     "SEVERITY_ERROR",
     "SEVERITY_HINT",
     "SEVERITY_WARNING",
-    "TextEdit",
+    "SourceEdit",
     "collect_winws2_file_facts",
     "complete_winws2",
     "count_by_severity",

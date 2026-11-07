@@ -126,13 +126,17 @@ class ServerMatrix(QWidget):
         self._columns = list(columns)
         self._services = summarize_servers(rows, len(columns))
         self._hover = -1
+        # Строка под клавиатурой: стрелки двигают её, Enter и Пробел открывают сервис.
+        self._current = -1
         self._hint = HoverHint(self)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(self.HEADER + self.ROW * len(self._services))
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
-        set_state_text(self, f"DNS-серверы по способам связи: сервисов {len(self._services)}, адресов {len(rows)}")
+        self._summary_text = f"DNS-серверы по способам связи: сервисов {len(self._services)}, адресов {len(rows)}"
+        set_state_text(self, self._summary_text)
 
     def services(self) -> list[ServiceSummary]:
         return list(self._services)
@@ -172,6 +176,53 @@ class ServerMatrix(QWidget):
             self.opened.emit(index)
         super().mouseReleaseEvent(event)
 
+    def current_row(self) -> int:
+        return self._current
+
+    def _set_current(self, index: int) -> None:
+        if index == self._current:
+            return
+        self._current = index
+        if 0 <= index < len(self._services):
+            service = self._services[index]
+            set_state_text(
+                self,
+                f"{self._summary_text}. {service.name}: адресов {len(service.rows)}. Enter открывает страницу сервиса",
+            )
+        else:
+            set_state_text(self, self._summary_text)
+        self.update()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        key = event.key()
+        count = len(self._services)
+        if count and key in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_Home, Qt.Key.Key_End):
+            if key == Qt.Key.Key_Home:
+                target = 0
+            elif key == Qt.Key.Key_End:
+                target = count - 1
+            else:
+                step = 1 if key == Qt.Key.Key_Down else -1
+                target = max(0, min(count - 1, self._current + step)) if self._current >= 0 else 0
+            self._set_current(target)
+            event.accept()
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space) and 0 <= self._current < count:
+            self.opened.emit(self._current)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        if self._current < 0 and self._services:
+            self._set_current(0)
+        self.update()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self.update()
+
     def columns(self) -> list[str]:
         return list(self._columns)
 
@@ -209,7 +260,7 @@ class ServerMatrix(QWidget):
         for index, service in enumerate(self._services):
             top = self.HEADER + index * self.ROW
             painter.setPen(Qt.PenStyle.NoPen)
-            if index == self._hover:
+            if index == self._hover or (index == self._current and self.hasFocus()):
                 painter.setBrush(hover)
                 painter.drawRoundedRect(QRectF(0, top + 1, self.width(), self.ROW - 1), 5, 5)
             else:

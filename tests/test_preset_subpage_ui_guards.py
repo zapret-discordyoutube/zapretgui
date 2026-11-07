@@ -425,7 +425,12 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
         ):
             PresetRawEditorPage._on_raw_preset_text_loaded(page, 4, result)
 
-        callbacks[0]()
+        # Подпись пути здесь — заглушка без QObject, фильтр подсказки на неё не встанет.
+        with patch(
+            "presets.ui.common.preset_subpage_base.set_tooltip",
+            side_effect=lambda widget, text: widget.setToolTip(text),
+        ):
+            callbacks[0]()
 
         self.assertEqual(page._active_preset_file_name, "Default.txt")
         self.assertEqual(page._active_preset_name, "Default")

@@ -1234,7 +1234,7 @@ class PresetRawEditorPage(BasePage):
         self.metaGroup.setVisible(bool(meta_text))
         path_text = str(self._preset_path or "")
         if set_text_if_changed(self.pathLabel, path_text):
-            self.pathLabel.setToolTip(path_text)
+            set_tooltip(self.pathLabel, path_text)
 
     def _remote_preset_binding(self):
         file_name = str(self._preset_file_name or "").strip()

@@ -19,7 +19,7 @@ from qfluentwidgets.components.navigation.navigation_widget import NavigationToo
 
 from app.ui_texts import tr as tr_catalog
 from log.log import log
-from ui.accessibility import set_control_accessibility
+from ui.accessibility import enable_keyboard_click, set_control_accessibility
 from ui.fluent_widgets import set_tooltip
 from ui.navigation.history import HistoryEntry
 from ui.popup_menu import exec_popup_menu
@@ -39,6 +39,11 @@ class TitleBarHistoryButton(NavigationToolButton):
     нажатием разворачивает его. Кнопка забирает свои события, иначе нажатие на неё
     с малейшим сдвигом мыши начинало бы перетаскивание окна.
     """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Мышь здесь только не пускает перетаскивание окна; нажатие с клавиатуры — Enter и Пробел.
+        enable_keyboard_click(self)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().mousePressEvent(event)
@@ -185,7 +190,7 @@ class HistoryButtons(QObject):
         if self.back_button.isHidden() == can_go_back:
             self.back_button.setVisible(can_go_back)
         back_text = self._text("nav.history.back.tooltip", "Назад. Удерживайте, чтобы увидеть историю")
-        self.back_button.setToolTip(back_text)
+        set_tooltip(self.back_button, back_text)
         set_control_accessibility(self.back_button, name=back_text)
         button = self.forward_button
         if button is None:

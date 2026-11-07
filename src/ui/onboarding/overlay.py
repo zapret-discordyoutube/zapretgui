@@ -46,6 +46,7 @@ from qfluentwidgets import (
 
 from app.ui_texts import tr as tr_catalog
 from log.log import log
+from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.onboarding.blur import blur_pixmap
 from ui.onboarding.illustrations import TechniqueIllustration
@@ -875,9 +876,13 @@ class OnboardingOverlay(QWidget):
         card.set_progress((self._index + 1) / max(1, total), animate=self._animated)
 
         card.back_button.setVisible(self._index > 0)
-        card.back_button.setText(self._tr("onboarding.button.back", "Назад"))
+        back_text = self._tr("onboarding.button.back", "Назад")
+        card.back_button.setText(back_text)
+        set_control_accessibility(card.back_button, name=back_text)
         card.skip_button.setVisible(not is_last)
-        card.skip_button.setText(self._tr("onboarding.button.skip", "Пропустить"))
+        skip_text = self._tr("onboarding.button.skip", "Пропустить")
+        card.skip_button.setText(skip_text)
+        set_control_accessibility(card.skip_button, name=skip_text)
         if is_last:
             next_text = self._tr("onboarding.button.done", "Готово")
         elif self._index == 0:
@@ -885,7 +890,7 @@ class OnboardingOverlay(QWidget):
         else:
             next_text = self._tr("onboarding.button.next", "Далее")
         card.next_button.setText(next_text)
-        card.next_button.setAccessibleDescription(body)
+        set_control_accessibility(card.next_button, name=next_text, description=body)
 
         width = HERO_CARD_WIDTH if (step.hero or step.illustration) else CARD_WIDTH
         width = int(max(260, min(width, self.width() - 2 * CARD_MARGIN)))

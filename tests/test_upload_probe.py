@@ -290,7 +290,8 @@ class FreezeCheckUploadTests(unittest.TestCase):
         self.assertTrue(fine.text.endswith("; отправка тоже проходит"))
 
         unknown, _ = self._check(self._download(64 * 1024), up.UploadVerdict(up.UPLOAD_UNKNOWN, "не на чем"))
-        self.assertEqual((unknown.state, unknown.text), (FreezeState.OK, "получено 64 КБ без обрыва"))
+        # Счёт — как у фильтра (cut_window.result_bytes): к 64 КБ тела добавляются рукопожатие и заголовки.
+        self.assertEqual((unknown.state, unknown.text), (FreezeState.OK, "получено ~67 КБ без обрыва"))
 
         none, _ = self._check(self._download(64 * 1024), None)
         self.assertEqual(none.state, FreezeState.OK)

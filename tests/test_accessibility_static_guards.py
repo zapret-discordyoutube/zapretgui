@@ -75,7 +75,24 @@ CUSTOM_KEYBOARD_ACTION_MARKERS = (
     "enable_keyboard_toggle",
 )
 
+# Источники, где обработчики мыши ничего не открывают и не нажимают:
+# - button_motion.py лишь рисует лёгкое «нажатие» и передаёт событие настоящей кнопке,
+#   а Enter и Пробел обрабатывает она сама;
+# - mascot.py — талисман, по клику он просто крутится «для настроения»,
+#   ничто на его сигнал не подписано.
+ALLOWED_MOUSE_ONLY_SOURCES = {
+    "src/ui/button_motion.py",
+    "src/ui/widgets/fun/mascot.py",
+}
+
+# Виджеты без фокуса: либо картинка, через которую проходят мышь и клавиатура
+# (тень, снимок карточки, праздничный слой), либо список подсказок редактора,
+# у которого фокус остаётся в самом редакторе (стрелки, Enter и Esc приходят оттуда).
 ALLOWED_NO_FOCUS_SOURCES = {
+    "src/profile/ui/profile_geo_notice.py",
+    "src/ui/code_editor/completion_popup.py",
+    "src/ui/dialog_static_shadow.py",
+    "src/ui/holiday_effects.py",
     "src/ui/accessibility.py",
     "src/ui/segmented_accessibility.py",
     "src/ui/window_preset_file_drop.py",
@@ -130,6 +147,8 @@ def test_custom_mouse_actions_keep_keyboard_activation() -> None:
         if not any(marker in source for marker in CUSTOM_MOUSE_ACTION_MARKERS):
             continue
         if any(marker in source for marker in CUSTOM_KEYBOARD_ACTION_MARKERS):
+            continue
+        if rel_path in ALLOWED_MOUSE_ONLY_SOURCES:
             continue
         missing.append(rel_path)
 
