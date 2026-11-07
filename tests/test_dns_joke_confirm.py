@@ -103,7 +103,7 @@ class JokePageTests(unittest.TestCase):
         box.exec.return_value = answer
         with patch("ui.fluent_dialog.MessageBox", return_value=box) as box_cls, patch(
             "ui.message_box_accessibility.set_message_box_button_accessibility"
-        ):
+        ), patch("dns.ui.page.joke_effects.play") as self.play:
             page.grid.activated.emit(name)
         return box_cls
 

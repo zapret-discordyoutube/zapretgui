@@ -36,7 +36,7 @@ from config import zapret_dns
 from diagnostics.history import format_time
 from dns import page_plans as dns_page_plans
 from dns import custom_servers
-from dns import doh_switch, joke_confirm
+from dns import doh_switch, joke_confirm, joke_effects
 from dns.custom_servers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
 from dns.dns_providers import (
     DNS_PROVIDERS,
@@ -1021,7 +1021,8 @@ class NetworkPage(BasePage):
 
         self._last_joke = joke_confirm.pick(self._last_joke)
         title_key, content_key = joke_confirm.phrase_keys(self._last_joke)
-        box = MessageBox(self._t(title_key, ""), self._t(content_key, ""), self.window())
+        title = self._t(title_key, "")
+        box = MessageBox(f"{joke_effects.title_emoji(self._last_joke)} {title}", self._t(content_key, ""), self.window())
         yes_text = self._t("page.network.joke.yes", "Да, я уверен")
         no_text = self._t("page.network.joke.no", "Нет, передумал")
         box.yesButton.setText(yes_text)
@@ -1036,6 +1037,7 @@ class NetworkPage(BasePage):
             cancel_name=no_text,
             cancel_description=self._t("page.network.joke.no.description", "DNS не изменится."),
         )
+        joke_effects.play(box, index=self._last_joke, title=title)
         return bool(box.exec())
 
     def _set_doh_toggle(self, checked: bool) -> None:
