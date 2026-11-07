@@ -18,7 +18,7 @@ PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
-ZAPRET2_NFQWS = Path("/home/codex-pve/zapret2/nfq2/nfqws.c")
+ZAPRET2_NFQWS = Path.home() / "zapret2" / "nfq2" / "nfqws.c"
 
 _OPTION_RE = re.compile(r'\{"([a-z0-9-]+)",\s*(no_argument|required_argument|optional_argument)')
 _ARG_KIND = {"no_argument": "none", "required_argument": "required", "optional_argument": "optional"}
