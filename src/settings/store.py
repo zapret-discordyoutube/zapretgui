@@ -1494,6 +1494,14 @@ def get_custom_dns_servers() -> list[dict[str, Any]]:
     return value if isinstance(value, list) else []
 
 
+def get_dns_doh_enabled() -> bool:
+    return _get_bool(("dns", "doh_enabled"), True)
+
+
+def set_dns_doh_enabled(value: bool) -> bool:
+    return _set_bool(("dns", "doh_enabled"), value)
+
+
 def update_custom_dns_servers(mutator) -> list[dict[str, Any]]:
     """Меняет список своих DNS в одной транзакции: mutator(текущий список) → новый.
 
@@ -2099,6 +2107,7 @@ __all__ = [
     "get_discord_restart_enabled",
     "get_display_mode",
     "get_custom_dns_servers",
+    "get_dns_doh_enabled",
     "get_dpi_autostart",
     "get_editor_smooth_scroll_enabled",
     "get_live_animations_enabled",
@@ -2207,6 +2216,7 @@ __all__ = [
     "set_gui_autostart_enabled",
     "set_hosts_engine",
     "set_hosts_selection",
+    "set_dns_doh_enabled",
     "set_isp_dns_info_shown",
     "set_onboarding_tour_done",
     "set_profile_display_order_hint_shown",

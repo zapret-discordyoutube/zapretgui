@@ -36,6 +36,7 @@ from config import zapret_dns
 from diagnostics.history import format_time
 from dns import page_plans as dns_page_plans
 from dns import custom_servers
+from dns import doh_switch
 from dns.custom_servers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
 from dns.dns_providers import (
     DNS_PROVIDERS,
@@ -45,7 +46,6 @@ from dns.dns_providers import (
     ZAPRET_DNS_GROUP,
     ZAPRET_DNS_PROVIDER_NAME,
     is_encrypted_only,
-    proxy_mode_for,
     zapret_dns_provider,
 )
 from dns.server_check_plans import CARD_NETWORK, CARD_OK, CARD_SILENT, CARD_TITLES
@@ -54,10 +54,12 @@ from dns.ui.now_panel import AdapterChip, DnsNowPanel, NowState
 from dns.ui.provider_grid import ADD_TILE_KEY, PROMO_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts
 from log.log import log
 from ui.accessibility import set_control_accessibility
+from ui.fluent_widgets import set_tooltip
 from ui.latest_worker_lane import LatestWorkerLane
 from ui.pages.base_page import BasePage
 from ui.popup_menu import exec_popup_menu
 from ui.presets_menu.common import fluent_icon, make_menu_action
+from ui.widgets.aligned_switch import AlignedSwitchButton
 
 
 AUTO_CHOICE = "__auto__"
@@ -148,6 +150,8 @@ class NetworkPage(BasePage):
         self._adapters: tuple = ()
         self._ipv6_available = False
         self._doh_supported = False
+        # Переключатель «Шифровать DNS (DoH)» (dns.doh_switch).
+        self._doh_enabled = True
         # Прошлая проверка «DNS-серверов» на этой линии (dns.state.LineCheck) или None.
         self._line_check = None
         # Режим работающего шифрованного DNS; по нему находится его плитка.
@@ -298,6 +302,12 @@ class NetworkPage(BasePage):
         self.latency_summary = CaptionLabel("", self.filter_row)
         self.latency_summary.hide()
         filter_layout.addWidget(self.latency_summary, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.doh_label = CaptionLabel("", self.filter_row)
+        filter_layout.addWidget(self.doh_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.doh_toggle = AlignedSwitchButton(self.filter_row)
+        self.doh_toggle.setChecked(True)
+        self.doh_toggle.checkedChanged.connect(self._on_doh_toggled)
+        filter_layout.addWidget(self.doh_toggle, 0, Qt.AlignmentFlag.AlignVCenter)
         self.add_widget(self.filter_row)
         self.add_spacing(6)
 
@@ -353,6 +363,17 @@ class NetworkPage(BasePage):
             ),
         )
         self.grid.set_texts(self._grid_texts())
+        doh_title = self._t("page.network.doh.switch", "Шифровать DNS (DoH)")
+        doh_hint = self._t(
+            "page.network.doh.switch.tooltip",
+            "Включено: серверы с меткой DoH спрашиваются шифрованно (в Windows 10 — через встроенный "
+            "dnscrypt-proxy). Выключено: те же серверы ставятся обычными адресами, и провайдер видит запросы. "
+            "Группа «Шифрованные» от переключателя не зависит.",
+        )
+        self.doh_label.setText(doh_title)
+        set_tooltip(self.doh_label, doh_hint)
+        set_tooltip(self.doh_toggle, doh_hint)
+        set_control_accessibility(self.doh_toggle, name=doh_title, description=doh_hint)
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -479,6 +500,8 @@ class NetworkPage(BasePage):
         self._adapters = tuple(getattr(state, "adapters", ()) or ())
         self._ipv6_available = bool(getattr(state, "ipv6_available", False))
         self._doh_supported = bool(getattr(state, "doh_supported", False))
+        self._doh_enabled = bool(getattr(state, "doh_enabled", True))
+        self._set_doh_toggle(self._doh_enabled)
         self._local_proxy_mode = str(getattr(state, "local_proxy_mode", "") or "")
         self._local_proxy_server = str(getattr(state, "local_proxy_server", "") or "")
         line_check = getattr(state, "line_check", None)
@@ -688,7 +711,9 @@ class NetworkPage(BasePage):
                 encrypted_only = is_encrypted_only(data)
                 # Обычная плитка, которую программа поставит через встроенный шифрованный DNS:
                 # Windows сама шифровать не умеет, а у сервера есть шифрованный адрес.
-                via_proxy = not local_proxy and bool(proxy_mode_for(data, doh_supported=self._doh_supported))
+                via_proxy = not local_proxy and bool(
+                    doh_switch.proxy_mode(data, doh_supported=self._doh_supported, doh_enabled=self._doh_enabled)
+                )
                 if local_proxy or encrypted_only:
                     latency, latency_ms = "", 0.0
                 elif self._measuring and address not in self._latency:
@@ -725,7 +750,15 @@ class NetworkPage(BasePage):
                             "программа об этом скажет.",
                         )
                     )
-                if encrypted_only and not via_proxy:
+                if encrypted_only and not local_proxy and not self._doh_enabled:
+                    tooltip_lines.append(
+                        self._t(
+                            "page.network.tile.encrypted_only.switch_off",
+                            "Принимает только шифрованные запросы: включите «Шифровать DNS (DoH)», "
+                            "иначе этот сервер не поставить.",
+                        )
+                    )
+                if encrypted_only and not via_proxy and self._doh_enabled:
                     tooltip_lines.append(
                         self._t(
                             "page.network.tile.encrypted_only",
@@ -770,7 +803,9 @@ class NetworkPage(BasePage):
                         selected=(name == chosen) if chosen else (name == current and self._pending_choice is None),
                         pending=name == chosen,
                         has_ipv6=bool(ipv6),
-                        has_doh=bool(data.get("doh")) and (self._doh_supported or via_proxy),
+                        has_doh=doh_switch.tile_encrypts(
+                            data, doh_supported=self._doh_supported, doh_enabled=self._doh_enabled
+                        ),
                         has_dnssec=bool(data.get("dnssec")),
                         custom=custom,
                         latency=latency,
@@ -933,8 +968,20 @@ class NetworkPage(BasePage):
         adapters = self._ready_adapters()
         if adapters is None:
             return
-        proxy_mode = proxy_mode_for(data, doh_supported=self._doh_supported)
-        if is_encrypted_only(data) and not self._doh_supported and not proxy_mode:
+        proxy_mode = doh_switch.proxy_mode(data, doh_supported=self._doh_supported, doh_enabled=self._doh_enabled)
+        refusal = doh_switch.refusal(data, doh_supported=self._doh_supported, doh_enabled=self._doh_enabled)
+        if refusal == doh_switch.REFUSE_SWITCH_OFF:
+            self._info(
+                "warning",
+                self._t("page.network.doh.refused.title", "{name} работает только с шифрованием", name=name),
+                self._t(
+                    "page.network.doh.refused.content",
+                    "Сервер принимает только шифрованные запросы, а переключатель «Шифровать DNS (DoH)» выключен. "
+                    "DNS не изменён. Включите переключатель, чтобы поставить этот сервер.",
+                ),
+            )
+            return
+        if refusal == doh_switch.REFUSE_WINDOWS:
             # Обычный DNS такой сервер не принимает: с ним не открылся бы ни один сайт.
             self._info(
                 "warning",
@@ -960,6 +1007,65 @@ class NetworkPage(BasePage):
             }
         )
 
+    def _set_doh_toggle(self, checked: bool) -> None:
+        """Ставит переключатель DoH, не вызывая его обработчик (состояние пришло от программы, а не от человека)."""
+        was_blocked = self.doh_toggle.blockSignals(True)
+        self.doh_toggle.setChecked(bool(checked))
+        self.doh_toggle.blockSignals(was_blocked)
+
+    def _on_doh_toggled(self, checked: bool) -> None:
+        """Переключатель DoH: запоминает выбор и сразу ставит выбранный сейчас сервер заново.
+
+        Заново ставится только обычный сервер с DoH: плитки «Шифрованные» и сервер
+        без DoH от переключателя не зависят, для них выбор лишь запоминается.
+        """
+        checked = bool(checked)
+        if self._closed or checked == self._doh_enabled:
+            return
+        plan = self._current_plan() if self._loaded else dns_page_plans.CurrentDnsPlan(kind="none")
+        name = plan.provider if plan.kind == "provider" else None
+        data = self._provider(name) if name else None
+        if (
+            data is not None
+            and doh_switch.refusal(data, doh_supported=self._doh_supported, doh_enabled=checked)
+            == doh_switch.REFUSE_SWITCH_OFF
+        ):
+            # Сейчас стоит сервер только с шифрованием: без DoH компьютер остался бы без DNS.
+            self._set_doh_toggle(True)
+            self._info(
+                "warning",
+                self._t("page.network.doh.keep_on.title", "DoH остаётся включённым"),
+                self._t(
+                    "page.network.doh.keep_on.content",
+                    "Сейчас стоит {name}: он принимает только шифрованные запросы и без DoH не заработает. "
+                    "Выберите другой сервер — тогда DoH можно выключить.",
+                    name=name,
+                ),
+            )
+            return
+        self._doh_enabled = checked
+        adapters = self._selected_adapters()
+        if data is not None and adapters and not data.get("local_proxy") and data.get("doh"):
+            self._pending_choice = name
+            self.grid.flash(name)
+            self._render()
+            self._apply_lane.request(
+                {
+                    "action": "provider",
+                    "adapters": adapters,
+                    "name": name,
+                    "data": dict(data),
+                    "ipv6_available": self._ipv6_available,
+                    "proxy_mode": doh_switch.proxy_mode(
+                        data, doh_supported=self._doh_supported, doh_enabled=checked
+                    ),
+                    "doh_enabled": checked,
+                }
+            )
+            return
+        self._render()
+        self._apply_lane.request({"action": "doh_setting", "adapters": [], "doh_enabled": checked})
+
     def _reset_to_auto(self) -> None:
         """Плитка «Автоматически»: как и любой сервер, применяется сразу, без вопроса."""
         adapters = self._ready_adapters()
@@ -979,6 +1085,7 @@ class NetworkPage(BasePage):
             data=payload.get("data") or {},
             ipv6_available=bool(payload.get("ipv6_available", False)),
             proxy_mode=str(payload.get("proxy_mode") or ""),
+            doh_enabled=payload.get("doh_enabled"),
             parent=self,
         )
 

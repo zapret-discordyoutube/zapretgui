@@ -28,6 +28,8 @@ class DnsState:
     adapters: tuple[DnsAdapter, ...] = ()
     ipv6_available: bool = False
     doh_supported: bool = False
+    # Переключатель «Шифровать DNS (DoH)» включён (dns.doh_switch).
+    doh_enabled: bool = True
     # Режим работающего шифрованного DNS (dns.local_proxy) или пустая строка.
     local_proxy_mode: str = ""
     # Название плитки, чей сервер работает через шифрованный DNS в режиме DoH; иначе пусто.

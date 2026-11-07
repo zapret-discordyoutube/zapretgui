@@ -37,6 +37,12 @@ def mark_isp_dns_warning_shown() -> bool:
     return bool(set_isp_dns_info_shown(True))
 
 
+def set_doh_enabled(value: bool) -> bool:
+    from dns import doh_switch
+
+    return doh_switch.set_enabled(value)
+
+
 def run_dns_poisoning_check(*, log_callback=None, should_stop=None) -> dict:
     from diagnostics.engine import run_dns_check
 

@@ -51,6 +51,7 @@ def build_dns_feature() -> DnsFeature:
     reset_to_auto = lambda *args, **kwargs: _public().reset_to_auto(*args, **kwargs)
     start_local_proxy = lambda *args, **kwargs: _public().start_local_proxy(*args, **kwargs)
     stop_local_proxy_if_unused = lambda *args, **kwargs: _public().stop_local_proxy_if_unused(*args, **kwargs)
+    set_doh_enabled = lambda *args, **kwargs: _public().set_doh_enabled(*args, **kwargs)
     is_isp_dns_warning_shown = lambda *args, **kwargs: _public().is_isp_dns_warning_shown(*args, **kwargs)
     mark_isp_dns_warning_shown = lambda *args, **kwargs: _public().mark_isp_dns_warning_shown(*args, **kwargs)
     flush_dns_cache = lambda *args, **kwargs: _public().flush_dns_cache(*args, **kwargs)
@@ -92,6 +93,7 @@ def build_dns_feature() -> DnsFeature:
         data=None,
         ipv6_available: bool = False,
         proxy_mode: str = "",
+        doh_enabled: bool | None = None,
         parent=None,
     ):
         from dns.page_workers import DnsApplyWorker
@@ -104,6 +106,8 @@ def build_dns_feature() -> DnsFeature:
             data=data,
             ipv6_available=ipv6_available,
             proxy_mode=proxy_mode,
+            doh_enabled=doh_enabled,
+            set_doh_enabled=set_doh_enabled,
             apply_dns=apply_dns,
             reset_to_auto=reset_to_auto,
             load_state=load_state,

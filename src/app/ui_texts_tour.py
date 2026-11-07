@@ -236,7 +236,10 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "Вкладки над плитками делят серверы на группы. «Шифрованные» — запросы шифрует встроенный "
             "dnscrypt-proxy, их не подменить. «Популярные» и «Безопасные» — известные публичные серверы. "
             "«Малоизвестные» реже попадают под блокировки. Не знаете, что выбрать, — возьмите Quad9 из "
-            "группы «Безопасные»."
+            "группы «Безопасные».\n\n"
+            "Справа над плитками стоит переключатель «Шифровать DNS (DoH)». Он включён: серверы с меткой DoH "
+            "спрашиваются шифрованно. Выключите его — те же серверы встанут обычными адресами, и провайдер "
+            "будет видеть запросы. Выбранный сейчас сервер переставится сразу."
         ),
         "en": (
             "Click a tile and that DNS is set on the marked adapters right away. Automatic brings back "
@@ -244,7 +247,10 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "own server: it changes nothing and opens the server's site. You turn it on in the For AI group.\n\n"
             "The tabs above the tiles split servers into groups. Encrypted — requests are encrypted by "
             "the built-in dnscrypt-proxy and cannot be spoofed. Popular and Secure are well-known public "
-            "servers. Lesser-known ones are blocked less often. If unsure, take Quad9 from Secure."
+            "servers. Lesser-known ones are blocked less often. If unsure, take Quad9 from Secure.\n\n"
+            "At the top right of the tiles there is the Encrypt DNS (DoH) switch. It is on: servers with the "
+            "DoH badge are asked over an encrypted connection. Turn it off and the same servers are set by "
+            "plain addresses, so your provider sees the queries. The server set now is re-applied at once."
         ),
     },
     "onboarding.step.dns_ai.title": {"ru": "DNS для ИИ-сервисов", "en": "DNS for AI services"},

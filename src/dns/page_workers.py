@@ -203,6 +203,8 @@ class DnsApplyWorker(QThread):
         data=None,
         ipv6_available: bool = False,
         proxy_mode: str = "",
+        doh_enabled: bool | None = None,
+        set_doh_enabled: Callable[[bool], Any] | None = None,
         apply_dns: Callable[..., Any],
         reset_to_auto: Callable[[list], Any],
         load_state: Callable[[], Any],
@@ -221,6 +223,10 @@ class DnsApplyWorker(QThread):
         self._ipv6_available = bool(ipv6_available)
         # Режим встроенного шифрованного DNS, через который ставится плитка (dns_providers.proxy_mode_for).
         self._proxy_mode = str(proxy_mode or self._data.get("local_proxy") or "")
+        # Новое положение переключателя «Шифровать DNS (DoH)»: записывается раньше применения,
+        # потому что apply_dns читает его при записи адаптерам. None — переключатель не менялся.
+        self._doh_enabled = None if doh_enabled is None else bool(doh_enabled)
+        self._set_doh_enabled = set_doh_enabled
         self._apply_dns = apply_dns
         self._reset_to_auto = reset_to_auto
         self._load_state = load_state
@@ -244,6 +250,12 @@ class DnsApplyWorker(QThread):
         from dns.dns_providers import is_encrypted_only, proxy_upstreams
         from dns.step_log import timed_step
 
+        if self._doh_enabled is not None and self._set_doh_enabled is not None:
+            with timed_step("запись переключателя DoH"):
+                self._set_doh_enabled(self._doh_enabled)
+        if self._action == "doh_setting":
+            # Только запомнить выбор: серверу на адаптерах нечего менять.
+            return {"plan": None, "state": self._load_state()}
         if not self._adapters:
             return {"plan": None, "state": None}
         # Поставлен ли DNS через встроенный шифрованный DNS: тогда его службу убирать нельзя.

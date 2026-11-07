@@ -14,6 +14,7 @@ from threading import RLock
 
 from dns import winapi
 from dns.adapters import DnsAdapter, build_dns_adapters, is_dns_adapter
+from dns import doh_switch
 from dns.custom_servers import custom_doh_templates
 from dns.dns_providers import doh_templates
 from dns.reachability import check_servers
@@ -44,6 +45,7 @@ def load_state() -> DnsState:
         adapters=build_dns_adapters(interfaces, route, static),
         ipv6_available=route.has_ipv6,
         doh_supported=winapi.is_doh_supported(),
+        doh_enabled=doh_switch.is_enabled(),
         local_proxy_mode=_local_proxy_mode(),
         local_proxy_server=_local_proxy_server(),
         custom_servers=tuple(load_custom_servers()),
@@ -66,9 +68,15 @@ def write_doh_templates() -> dict[str, str] | None:
 
     Шаблоны серверов программы и своих серверов пользователя; при совпадении
     адреса главнее сервер программы.
+
+    Переключатель «Шифровать DNS (DoH)» выключен: пустой словарь. Windows при
+    записи тогда снимает с адаптера прежние ссылки DoH, а не оставляет их
+    (None этого не делает: поля DoH в запись не попадают).
     """
     if not winapi.is_doh_supported():
         return None
+    if not doh_switch.is_enabled():
+        return {}
     return {**custom_doh_templates(load_custom_servers()), **doh_templates()}
 
 

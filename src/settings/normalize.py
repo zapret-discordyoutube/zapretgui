@@ -422,6 +422,7 @@ def normalize_dns(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     return {
         "custom_servers": normalize_custom_dns_servers(raw.get("custom_servers")),
+        "doh_enabled": as_bool(raw.get("doh_enabled"), True),
         "zapret_dns_server": _normalize_zapret_dns_server(raw.get("zapret_dns_server")),
     }
 

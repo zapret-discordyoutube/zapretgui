@@ -2210,6 +2210,34 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Шифрованный путь (DoH) до этого сервера из вашей сети закрыт, поэтому компьютер спрашивает его обычными запросами — провайдер их видит и может подменить. Нужно шифрование — выберите сервер из группы «Шифрованные».",
         "en": "The encrypted path (DoH) to this server is closed on your network, so Windows asks it with plain queries — your provider sees them and can replace them. If you need encryption, pick a server from the “Encrypted” group.",
     },
+    "page.network.doh.switch": {
+        "ru": "Шифровать DNS (DoH)",
+        "en": "Encrypt DNS (DoH)",
+    },
+    "page.network.doh.switch.tooltip": {
+        "ru": "Включено: серверы с меткой DoH спрашиваются шифрованно (в Windows 10 — через встроенный dnscrypt-proxy). Выключено: те же серверы ставятся обычными адресами, и провайдер видит запросы. Группа «Шифрованные» от переключателя не зависит.",
+        "en": "On: servers with the DoH badge are asked over an encrypted connection (on Windows 10 through the built-in dnscrypt-proxy). Off: the same servers are set by plain addresses and your provider sees the queries. The “Encrypted” group does not depend on this switch.",
+    },
+    "page.network.doh.refused.title": {
+        "ru": "{name} работает только с шифрованием",
+        "en": "{name} works only with encryption",
+    },
+    "page.network.doh.refused.content": {
+        "ru": "Сервер принимает только шифрованные запросы, а переключатель «Шифровать DNS (DoH)» выключен. DNS не изменён. Включите переключатель, чтобы поставить этот сервер.",
+        "en": "The server accepts only encrypted queries, and the “Encrypt DNS (DoH)” switch is off. DNS is not changed. Turn the switch on to set this server.",
+    },
+    "page.network.doh.keep_on.title": {
+        "ru": "DoH остаётся включённым",
+        "en": "DoH stays on",
+    },
+    "page.network.doh.keep_on.content": {
+        "ru": "Сейчас стоит {name}: он принимает только шифрованные запросы и без DoH не заработает. Выберите другой сервер — тогда DoH можно выключить.",
+        "en": "{name} is set now: it accepts only encrypted queries and will not work without DoH. Pick another server first, then you can turn DoH off.",
+    },
+    "page.network.tile.encrypted_only.switch_off": {
+        "ru": "Принимает только шифрованные запросы: включите «Шифровать DNS (DoH)», иначе этот сервер не поставить.",
+        "en": "Accepts encrypted queries only: turn on “Encrypt DNS (DoH)”, otherwise this server cannot be set.",
+    },
     "page.network.tile.line_check": {
         "ru": "Проверка {time} на вашей линии: {verdict}",
         "en": "Check of {time} on your line: {verdict}",

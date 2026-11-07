@@ -165,6 +165,8 @@ def default_telegram_proxy() -> dict[str, Any]:
 def default_dns() -> dict[str, Any]:
     return {
         "custom_servers": [],
+        # Переключатель «Шифровать DNS (DoH)» (dns.doh_switch): включён — серверы с DoH ставятся шифрованно.
+        "doh_enabled": True,
         # Адрес своего сервера Zapret DNS, узнанный по имени и проверенный (dns.zapret_dns_server):
         # ipv4 — нынешний (пусто — встроенный из config.zapret_dns), former_ipv4 — прежние узнанные,
         # с них переводятся адаптеры; checked_at — время UNIX прошлого удачного вопроса;
