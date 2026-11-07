@@ -160,6 +160,39 @@ class PresetLaunchService:
             log(message, "ERROR")
             return self._fail(message)
 
+    def _recover_replaced_preset_path(self, preset_path: str) -> str:
+        """Выбранный пресет мог переехать между его выбором и запуском: путь выбирается заново.
+
+        После обновления программа заменяет копию встроенного пресета новой версией
+        (``presets.file_service.refresh_outdated_builtin_overrides``): копия пользователя
+        уходит в ``presets/replaced`` и удаляется, дальше работает встроенный пресет.
+        Автозапуск мог взять путь к копии до замены — тогда файла уже нет, и запуск
+        падал на чтении. Путь запрашивается заново один раз, и подменяется он только
+        тем же пресетом (по имени файла): подставлять человеку другой пресет нельзя.
+        Любая неудача оставляет прежний путь, и запуск идёт как раньше.
+        """
+        path = str(preset_path or "").strip()
+        if not path or os.path.exists(path):
+            return path
+        try:
+            snapshot = self._runtime_feature.dependencies.presets_feature.get_launch_snapshot(
+                self.launch_method,
+                require_filters=False,
+            )
+            new_path = str(snapshot.preset_path)
+            same_preset = (
+                str(snapshot.preset_file_name or "").strip().casefold() == os.path.basename(path).casefold()
+            )
+        except Exception as exc:
+            log(f"Пресет не найден по прежнему пути, заново выбрать его не удалось: {exc}", "WARNING")
+            return path
+        if not same_preset or not os.path.exists(new_path):
+            return path
+        log(f"Пресет переехал (замена встроенным): {path} -> {new_path}", "INFO")
+        if isinstance(self.selected_mode, dict):
+            self.selected_mode = {**self.selected_mode, "preset_path": new_path}
+        return new_path
+
     def _validate_preset_before_stop(self, *, is_preset_file: bool, preset_path: str, skip_stop: bool) -> bool:
         if not is_preset_file or not preset_path or skip_stop:
             return True
@@ -293,6 +326,7 @@ class PresetLaunchService:
             self._progress("❌ Ошибка: не указан путь к preset файлу")
             return None
 
+        preset_path = self._recover_replaced_preset_path(preset_path)
         if not os.path.exists(preset_path):
             log(f"Preset файл не найден: {preset_path}", "❌ ERROR")
             self.last_error_message = f"Preset файл не найден: {preset_path}"
@@ -463,6 +497,8 @@ class PresetLaunchService:
                 return deferred_result
 
             is_preset_file, preset_path = self._extract_preset_launch_input()
+            if is_preset_file:
+                preset_path = self._recover_replaced_preset_path(preset_path)
             skip_stop = False
             previous_process_running = self._has_previous_process()
 

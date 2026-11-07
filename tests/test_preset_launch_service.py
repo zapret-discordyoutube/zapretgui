@@ -230,5 +230,91 @@ class PresetLaunchServiceTests(unittest.TestCase):
         runner.start_from_preset_file.assert_called_once()
 
 
+class PresetReplacedDuringLaunchTests(unittest.TestCase):
+    """Первый запуск после обновления: копия встроенного пресета заменяется, пока автозапуск уже взял её путь."""
+
+    NAME = "Default v1 (game filter).txt"
+
+    def _service(self, tmp: Path, *, snapshot=None, snapshot_error=None, selected_name=None):
+        from winws_runtime.runtime.preset_launch_service import PresetLaunchService
+
+        stale = tmp / "winws2" / self.NAME  # файла нет: копию заменили встроенным и удалили
+        presets_feature = SimpleNamespace(
+            get_launch_snapshot=Mock(side_effect=snapshot_error) if snapshot_error else Mock(return_value=snapshot)
+        )
+        service = PresetLaunchService(
+            selected_mode={"is_preset_file": True, "preset_path": str(stale), "name": selected_name or "Default v1"},
+            launch_method="zapret2_mode",
+            runtime_feature=SimpleNamespace(dependencies=SimpleNamespace(presets_feature=presets_feature)),
+            runtime_api=SimpleNamespace(expected_exe_path="winws2.exe", has_residual_processes=Mock(return_value=True)),
+        )
+        return service, stale, presets_feature
+
+    def _snapshot(self, tmp: Path, file_name: str):
+        builtin = tmp / "winws2_builtin" / file_name
+        builtin.parent.mkdir(parents=True, exist_ok=True)
+        builtin.write_text("--new\n--wf-tcp-out=443\n--filter-tcp=443\n--hostlist=lists/a.txt\n", encoding="utf-8")
+        mode = {"is_preset_file": True, "name": "Default v1", "preset_path": str(builtin)}
+        return SimpleNamespace(preset_file_name=file_name, preset_path=builtin, to_selected_mode=lambda: dict(mode)), builtin
+
+    def test_missing_copy_is_replaced_by_the_same_builtin_preset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot, builtin = self._snapshot(Path(tmp), self.NAME)
+            service, stale, feature = self._service(Path(tmp), snapshot=snapshot)
+
+            recovered = service._recover_replaced_preset_path(str(stale))
+
+            self.assertEqual(recovered, str(builtin))
+            self.assertEqual(service.selected_mode["preset_path"], str(builtin))
+            self.assertEqual(service.selected_mode["name"], "Default v1")
+            feature.get_launch_snapshot.assert_called_once()
+
+    def test_another_selected_preset_is_never_substituted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot, _builtin = self._snapshot(Path(tmp), "Other preset.txt")
+            service, stale, _feature = self._service(Path(tmp), snapshot=snapshot)
+
+            self.assertEqual(service._recover_replaced_preset_path(str(stale)), str(stale))
+            self.assertEqual(service.selected_mode["preset_path"], str(stale))
+
+    def test_failure_to_select_again_keeps_the_old_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service, stale, _feature = self._service(Path(tmp), snapshot_error=RuntimeError("нет выбора"))
+
+            with patch("winws_runtime.runtime.preset_launch_service.log"):
+                self.assertEqual(service._recover_replaced_preset_path(str(stale)), str(stale))
+
+    def test_existing_file_is_not_looked_up_again(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot, builtin = self._snapshot(Path(tmp), self.NAME)
+            service, _stale, feature = self._service(Path(tmp), snapshot=snapshot)
+
+            self.assertEqual(service._recover_replaced_preset_path(str(builtin)), str(builtin))
+            feature.get_launch_snapshot.assert_not_called()
+
+    def test_launch_with_running_engine_survives_the_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot, builtin = self._snapshot(Path(tmp), self.NAME)
+            service, _stale, _feature = self._service(Path(tmp), snapshot=snapshot)
+            runner = SimpleNamespace(
+                validate_preset_file=Mock(return_value=(True, "")),
+                start_from_preset_file=Mock(return_value=True),
+            )
+
+            with (
+                patch("winws_runtime.runtime.preset_launch_service.ensure_required_files_fast", return_value=True),
+                patch("winws_runtime.runners.runner_factory.get_strategy_runner", return_value=runner),
+                patch(
+                    "winws_runtime.runtime.preset_launch_service.shutdown_runtime_sync",
+                    return_value=SimpleNamespace(still_running=False),
+                ),
+            ):
+                result = service.run()
+
+        self.assertTrue(result.success, result.error_message)
+        self.assertEqual(runner.start_from_preset_file.call_args.args[0], str(builtin))
+        self.assertEqual(result.selected_mode["preset_path"], str(builtin))
+
+
 if __name__ == "__main__":
     unittest.main()
