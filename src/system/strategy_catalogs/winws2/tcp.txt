@@ -3202,6 +3202,7 @@ description = Приветствие TLS раскладывается на не�
 
 [stock_builtin_coverage_tcp_025]
 name = Protocol Mask STUN (fake_stun_as_tls) · из «Default v1»
+old_name = Protocol Mask STUN (fake_stun_as_tls) · из «Default v1 (game filter)»
 author = builtin
 label = stock
 description = Подделка под другой протокол: перед приветствием уходит поддельный пакет STUN (blob fake_stun_as_tls), затем приветствие делится на части. Из пресета Default v1 (game filter): YouTube и бэкенд Google.

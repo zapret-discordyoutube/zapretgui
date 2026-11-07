@@ -422,10 +422,12 @@ class BuildResourceLayoutTests(unittest.TestCase):
     def test_cli_plan_does_not_load_gui_or_release_pipeline(self) -> None:
         environment = os.environ.copy()
         environment.pop("PYTHONPATH", None)
+        # Без --skip-forgejo/--skip-ssh план сверяет автоматический номер с живым Forgejo (d33b717),
+        # и тест зависел бы от сети и от выпусков, опубликованных в этот момент.
         command = (
             "import sys; "
             "from build_zapret.build_release_cli import main; "
-            "result=main(['--show-plan','--no-run-installer','--changes','test']); "
+            "result=main(['--show-plan','--no-run-installer','--skip-forgejo','--skip-ssh','--changes','test']); "
             "assert result == 0; "
             "assert 'build_zapret.build_release_gui' not in sys.modules; "
             "assert 'build_zapret.release_pipeline' not in sys.modules; "
