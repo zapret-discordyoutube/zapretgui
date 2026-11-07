@@ -2238,6 +2238,126 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Принимает только шифрованные запросы: включите «Шифровать DNS (DoH)», иначе этот сервер не поставить.",
         "en": "Accepts encrypted queries only: turn on “Encrypt DNS (DoH)”, otherwise this server cannot be set.",
     },
+    "page.network.joke.01.title": {
+        "ru": 'Вы точно уверены?',
+        "en": 'Are you really sure?',
+    },
+    "page.network.joke.01.content": {
+        "ru": 'Вы правда хотите включить этот DNS? Видите ли, им пользуется Роскомнадзор, чтобы блокировать разные сервисы. Раз вы точно хотите это сделать — дело ваше.',
+        "en": 'Do you really want to turn on this DNS? You see, Roskomnadzor uses it to block various services. Since you definitely want to do this, it is your call.',
+    },
+    "page.network.joke.02.title": {
+        "ru": 'А мама знает?',
+        "en": 'Does your mom know?',
+    },
+    "page.network.joke.02.content": {
+        "ru": 'Это DNS национальной системы доменных имён: через него Роскомнадзор блокирует разные сервисы. А вы хотите поставить его себе. Мама в курсе?',
+        "en": 'This is the DNS of the national domain name system: Roskomnadzor blocks various services through it. And you want to set it on your own computer. Is your mom aware?',
+    },
+    "page.network.joke.03.title": {
+        "ru": 'РКН-тян уже рада',
+        "en": 'RKN-chan is already happy',
+    },
+    "page.network.joke.03.content": {
+        "ru": 'РКН-тян уже потирает ручки: этим DNS Роскомнадзор блокирует разные сервисы, и она очень надеется, что вы его включите. Порадуем её?',
+        "en": 'RKN-chan is already rubbing her hands: Roskomnadzor blocks various services with this DNS, and she really hopes you turn it on. Shall we make her happy?',
+    },
+    "page.network.joke.04.title": {
+        "ru": 'Последнее китайское предупреждение',
+        "en": 'The final warning',
+    },
+    "page.network.joke.04.content": {
+        "ru": 'Последнее китайское предупреждение: этим DNS Роскомнадзор блокирует разные сервисы. Дальше мы за вас не отвечаем.',
+        "en": 'The final warning: Roskomnadzor blocks various services with this DNS. From here on we are not responsible for you.',
+    },
+    "page.network.joke.05.title": {
+        "ru": 'Вы понимаете, что делаете?',
+        "en": 'Do you know what you are doing?',
+    },
+    "page.network.joke.05.content": {
+        "ru": 'Сервисы, которые вы любите, Роскомнадзор блокирует именно через такой DNS. И вы хотите поставить его добровольно. Серьёзно?',
+        "en": 'Roskomnadzor blocks the services you love exactly through a DNS like this one. And you want to set it up voluntarily. Seriously?',
+    },
+    "page.network.joke.06.title": {
+        "ru": 'Мы вас предупреждали',
+        "en": 'We warned you',
+    },
+    "page.network.joke.06.content": {
+        "ru": 'Нажимая «Да, я уверен», вы подтверждаете, что вас предупредили: этим DNS Роскомнадзор блокирует разные сервисы. Жалобы не принимаются.',
+        "en": 'By pressing “Yes, I am sure” you confirm that you were warned: Roskomnadzor blocks various services with this DNS. Complaints are not accepted.',
+    },
+    "page.network.joke.07.title": {
+        "ru": 'Сапёр ошибается один раз',
+        "en": 'A sapper errs only once',
+    },
+    "page.network.joke.07.content": {
+        "ru": 'Сапёр ошибается один раз, а этот DNS блокирует разные сервисы каждый день: его для этого и держит Роскомнадзор. Рискнём?',
+        "en": 'A sapper errs only once, but this DNS blocks various services every day: Roskomnadzor keeps it for exactly that. Shall we risk it?',
+    },
+    "page.network.joke.08.title": {
+        "ru": 'Есть идея получше',
+        "en": 'There is a better idea',
+    },
+    "page.network.joke.08.content": {
+        "ru": 'Может, лучше Quad9? А этим DNS Роскомнадзор блокирует разные сервисы. Но если вы твёрдо решили — мы вас не остановим.',
+        "en": 'Maybe Quad9 instead? Roskomnadzor blocks various services with this DNS. But if you have firmly decided, we will not stop you.',
+    },
+    "page.network.joke.09.title": {
+        "ru": 'Ну всё, пишите письма',
+        "en": 'Well, that is it',
+    },
+    "page.network.joke.09.content": {
+        "ru": 'После включения сервисы, которые блокирует Роскомнадзор, перестанут открываться: этим DNS он их и блокирует. Вы точно этого хотите?',
+        "en": 'After you turn it on, the services that Roskomnadzor blocks will stop opening: this is the DNS it blocks them with. Is that really what you want?',
+    },
+    "page.network.joke.10.title": {
+        "ru": 'Это не баг, это фича',
+        "en": 'It is not a bug, it is a feature',
+    },
+    "page.network.joke.10.content": {
+        "ru": 'Блокировка сервисов — не баг, а фича этого DNS: им пользуется Роскомнадзор. Включать будем?',
+        "en": 'Blocking services is not a bug but a feature of this DNS: Roskomnadzor uses it. Shall we turn it on?',
+    },
+    "page.network.joke.11.title": {
+        "ru": 'Это обратимо, но…',
+        "en": 'It is reversible, but…',
+    },
+    "page.network.joke.11.content": {
+        "ru": 'Шутка не страшная: вернуть DNS можно плиткой «Автоматически». Но этим DNS Роскомнадзор блокирует разные сервисы. Продолжаем?',
+        "en": 'The joke is harmless: you can get your DNS back with the Automatic tile. But Roskomnadzor blocks various services with this DNS. Continue?',
+    },
+    "page.network.joke.12.title": {
+        "ru": 'Подумайте дважды',
+        "en": 'Think twice',
+    },
+    "page.network.joke.12.content": {
+        "ru": 'Подумайте дважды, а лучше трижды: этим DNS Роскомнадзор блокирует разные сервисы. Если всё равно хотите — нажмите «Да».',
+        "en": 'Think twice, or better three times: Roskomnadzor blocks various services with this DNS. If you still want it, press Yes.',
+    },
+    "page.network.joke.yes": {
+        "ru": "Да, я уверен",
+        "en": "Yes, I am sure",
+    },
+    "page.network.joke.yes.description": {
+        "ru": "Ставит DNS «НСДИ» на отмеченные адаптеры. Вернуть прежний можно плиткой «Автоматически».",
+        "en": "Sets the NSDI DNS on the marked adapters. You can get the previous one back with the Automatic tile.",
+    },
+    "page.network.joke.no": {
+        "ru": "Нет, передумал",
+        "en": "No, I changed my mind",
+    },
+    "page.network.joke.no.description": {
+        "ru": "DNS не изменится.",
+        "en": "DNS stays as it is.",
+    },
+    "page.network.group.fun": {
+        "ru": "Для смеха",
+        "en": "For fun",
+    },
+    "page.network.group.fun.note": {
+        "ru": "шутка — ставить не стоит",
+        "en": "a joke — better not to set it",
+    },
     "page.network.tile.line_check": {
         "ru": "Проверка {time} на вашей линии: {verdict}",
         "en": "Check of {time} on your line: {verdict}",

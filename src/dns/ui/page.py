@@ -36,10 +36,11 @@ from config import zapret_dns
 from diagnostics.history import format_time
 from dns import page_plans as dns_page_plans
 from dns import custom_servers
-from dns import doh_switch
+from dns import doh_switch, joke_confirm
 from dns.custom_servers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
 from dns.dns_providers import (
     DNS_PROVIDERS,
+    FUN_GROUP,
     LOCAL_PROXY_GROUP,
     STATUS_AT_RISK,
     STATUS_BLOCKED,
@@ -88,6 +89,7 @@ GROUP_TEXT_KEYS = {
     "Безопасные": ("page.network.group.secure", "Безопасные"),
     "Малоизвестные": ("page.network.group.lesser_known", "Малоизвестные"),
     "Для ИИ": ("page.network.group.ai", "Для ИИ"),
+    FUN_GROUP: ("page.network.group.fun", "Для смеха"),
     CUSTOM_DNS_CATEGORY: ("page.network.group.custom", "Свои DNS"),
 }
 # Короткое пояснение справа от названия группы.
@@ -98,6 +100,7 @@ GROUP_NOTE_KEYS = {
     ),
     "Малоизвестные": ("page.network.group.lesser_known.note", "реже попадают под блокировки"),
     "Для ИИ": ("page.network.group.ai.note", "серверы сообщества — доверия к ним меньше"),
+    FUN_GROUP: ("page.network.group.fun.note", "шутка — ставить не стоит"),
 }
 # Пометка сервера → строка подсказки плитки.
 STATUS_TOOLTIP_KEYS = {
@@ -152,6 +155,8 @@ class NetworkPage(BasePage):
         self._doh_supported = False
         # Переключатель «Шифровать DNS (DoH)» (dns.doh_switch).
         self._doh_enabled = True
+        # Номер последней показанной шуточной фразы (dns.joke_confirm): та же подряд не выпадает.
+        self._last_joke = 0
         # Прошлая проверка «DNS-серверов» на этой линии (dns.state.LineCheck) или None.
         self._line_check = None
         # Режим работающего шифрованного DNS; по нему находится его плитка.
@@ -968,6 +973,8 @@ class NetworkPage(BasePage):
         adapters = self._ready_adapters()
         if adapters is None:
             return
+        if joke_confirm.needs_confirmation(data) and not self._confirm_joke():
+            return
         proxy_mode = doh_switch.proxy_mode(data, doh_supported=self._doh_supported, doh_enabled=self._doh_enabled)
         refusal = doh_switch.refusal(data, doh_supported=self._doh_supported, doh_enabled=self._doh_enabled)
         if refusal == doh_switch.REFUSE_SWITCH_OFF:
@@ -1006,6 +1013,30 @@ class NetworkPage(BasePage):
                 "proxy_mode": proxy_mode,
             }
         )
+
+    def _confirm_joke(self) -> bool:
+        """Шуточная плитка «НСДИ»: окно со случайной фразой. True — человек настаивает."""
+        from ui.fluent_dialog import MessageBox
+        from ui.message_box_accessibility import set_message_box_button_accessibility
+
+        self._last_joke = joke_confirm.pick(self._last_joke)
+        title_key, content_key = joke_confirm.phrase_keys(self._last_joke)
+        box = MessageBox(self._t(title_key, ""), self._t(content_key, ""), self.window())
+        yes_text = self._t("page.network.joke.yes", "Да, я уверен")
+        no_text = self._t("page.network.joke.no", "Нет, передумал")
+        box.yesButton.setText(yes_text)
+        box.cancelButton.setText(no_text)
+        set_message_box_button_accessibility(
+            box,
+            yes_name=yes_text,
+            yes_description=self._t(
+                "page.network.joke.yes.description",
+                "Ставит DNS «НСДИ» на отмеченные адаптеры. Вернуть прежний можно плиткой «Автоматически».",
+            ),
+            cancel_name=no_text,
+            cancel_description=self._t("page.network.joke.no.description", "DNS не изменится."),
+        )
+        return bool(box.exec())
 
     def _set_doh_toggle(self, checked: bool) -> None:
         """Ставит переключатель DoH, не вызывая его обработчик (состояние пришло от программы, а не от человека)."""
