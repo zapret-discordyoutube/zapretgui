@@ -285,6 +285,7 @@ def normalize_program(data: object) -> dict[str, Any]:
             defaults[SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS2],
         ),
         "auto_update_enabled": as_bool(raw.get("auto_update_enabled"), defaults["auto_update_enabled"]),
+        "share_updates_lan": as_bool(raw.get("share_updates_lan"), defaults["share_updates_lan"]),
         "discord_auto_restart": as_bool(raw.get("discord_auto_restart"), defaults["discord_auto_restart"]),
         "max_blocked": as_bool(raw.get("max_blocked"), defaults["max_blocked"]),
         "russian_state_media_blocked": as_bool(

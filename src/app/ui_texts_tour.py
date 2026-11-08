@@ -881,6 +881,30 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "after a release, updates are handed out in a queue, so yours may arrive a little later."
         ),
     },
+    "onboarding.step.updates_share.title": {
+        "ru": "Раздача обновлений по сети",
+        "en": "Sharing updates on your network",
+    },
+    "onboarding.step.updates_share.body": {
+        "ru": (
+            "Выключатель «Делиться обновлениями с компьютерами в моей сети» включён по умолчанию. Когда "
+            "выходит новая версия, другие компьютеры с этой программой в вашей домашней или рабочей сети "
+            "могут взять файлы у вас: это быстрее и не нагружает серверы.\n\n"
+            "Каждый файл проверяется по подписанному списку выпуска, поэтому подсунуть чужой нельзя. "
+            "Раздача работает только в частных сетях, в публичном Wi-Fi она выключена, а в интернет "
+            "ничего не отдаётся. Выключите её здесь, если не хотите, чтобы соседи по сети видели, что на "
+            "этом компьютере стоит программа."
+        ),
+        "en": (
+            "The Share updates with computers on my network switch is on by default. When a new version "
+            "comes out, other computers with this app on your home or work network can take the files "
+            "from you: it is faster and spares the servers.\n\n"
+            "Every file is checked against the signed release list, so a wrong one cannot be slipped in. "
+            "Sharing works only on private networks, it is off on public Wi-Fi, and nothing is given out "
+            "over the internet. Turn it off here if you do not want neighbours on the network to see that "
+            "this computer has the app."
+        ),
+    },
 }
 
 

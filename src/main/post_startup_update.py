@@ -658,3 +658,17 @@ def install_update_check(
         _schedule_startup_update_check_deferred,
         is_ready=lambda: bool(startup_host.startup_state.post_init_ready),
     )
+
+    def _start_update_sharing() -> None:
+        # Раздача файлов обновления соседям по сети (updater/share): включается,
+        # если человек не выключил её в настройках. Ошибки гасятся внутри.
+        from updater.share import runtime
+
+        runtime.refresh_default()
+
+    bind_startup_gate(
+        startup_host.startup_post_init_ready,
+        lambda: is_startup_host_alive(startup_host)
+        and enqueue_subsystem_task("update", "UpdateSharingStart", _start_update_sharing),
+        is_ready=lambda: bool(startup_host.startup_state.post_init_ready),
+    )

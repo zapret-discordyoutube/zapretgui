@@ -15,7 +15,16 @@ from updater.download import flow
 from updater.download.contracts import CancellationToken, UpdateArtifact, UpdateCancelled
 from updater.install import apply_mode, file_update
 from updater.install import handoff as install_handoff
+from updater.share import client as share_client
 from zapret_update import apply, manifest, swap
+
+
+@pytest.fixture(autouse=True)
+def _no_neighbour_search():
+    """Тесты обновления не шлют в сеть настоящий поисковый запрос соседям."""
+    quiet = lambda product, version, **_k: share_client.Search(product, version, enabled=False)  # noqa: E731
+    with patch.object(share_client, "start_search", quiet):
+        yield
 
 
 def _manifest(paths: dict[str, str], *, zsize: int = 1) -> manifest.Manifest:
@@ -402,3 +411,40 @@ def test_new_version_leaves_the_driver_of_a_surviving_engine_alone(tmp_path) -> 
         stop.assert_not_called()
         hooks.before_swap(SimpleNamespace(app_dir=str(tmp_path), keep_running=[]))
         stop.assert_called_once()
+
+
+def test_prepare_asks_neighbours_after_the_plan_and_before_the_servers(tmp_path) -> None:
+    """Порядок: поиск соседей стартует до плана, файлы берутся у соседей до сервера."""
+    from updater.release.signed import SignedRelease
+    from zapret_update import fetch, plan as plan_module
+
+    calls: list[str] = []
+    listed = manifest.parse({"schema": 1, "product": "zapret-gui", "channel": "dev", "version": "1.0.0.2", "created": 1,
+                             "key": "k", "files": [], "installer": {"name": "Z.exe", "size": 40, "sha256": "c" * 64}})
+    fake_plan = SimpleNamespace(download_size=0, want=[], keep=[], remove=[])
+
+    def search(product, version, **_k):
+        calls.append(f"search {product} {version}")
+        return share_client.Search(product, version, enabled=False)
+
+    def fill(planned, **kwargs):
+        calls.append("neighbours")
+        assert planned is fake_plan and kwargs["work_dir"] == tmp_path / ".update" / "1.0.0.2"
+
+    def servers(*_a, **_k):
+        calls.append("servers")
+        raise RuntimeError("stop here")
+
+    with (
+        patch.object(file_update, "install_root", return_value=tmp_path),
+        patch.object(share_client, "start_search", search),
+        patch.object(share_client, "fill_from_neighbours", fill),
+        patch.object(plan_module, "make_plan", lambda *_a, **_k: calls.append("plan") or fake_plan),
+        patch.object(fetch, "fetch_plan", servers),
+        patch.object(file_update, "store_sources", return_value=[]),
+        patch.object(file_update, "plan_summary", return_value=""),
+    ):
+        with pytest.raises(RuntimeError, match="stop here"):
+            file_update.prepare(SignedRelease(listed, b"{}", b"sig"), channel="dev", current_version="1.0.0.1", start_in_tray=False)
+
+    assert calls == ["search zapret-gui 1.0.0.2", "plan", "neighbours", "servers"]

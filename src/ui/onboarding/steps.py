@@ -410,6 +410,7 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
         TourStep("about_version", _page_target("version"), page="about", page_state="about"),
         TourStep("about_help", _page_target("help"), page="about", page_state="help"),
         TourStep("updates", _page_target("update"), page="updates"),
+        TourStep("updates_share", _page_target("share"), page="updates"),
     ),
     *_chapter(
         "finish",

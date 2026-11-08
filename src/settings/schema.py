@@ -72,6 +72,9 @@ def default_program() -> dict[str, Any]:
         SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS1: "",
         SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS2: "",
         "auto_update_enabled": True,
+        # Отдавать файлы обновления другим компьютерам в той же домашней/рабочей
+        # сети (updater/share). По интернету не раздаётся.
+        "share_updates_lan": True,
         "discord_auto_restart": True,
         "max_blocked": False,
         "russian_state_media_blocked": False,

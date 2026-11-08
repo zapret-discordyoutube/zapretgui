@@ -1,0 +1,300 @@
+"""Раздача обновлений на этом компьютере: когда включать, как открыть и закрыть.
+
+Раздаёт, пока выполнено всё из списка:
+
+1. человек не выключил «Делиться обновлениями с компьютерами в моей сети»;
+2. у программы есть подписанный список выпуска своей версии
+   (``system/update/installed-manifest.json``): без него неизвестно, какие файлы
+   можно отдавать. Он появляется после обновления по файлам;
+3. компьютер сейчас в частной или доменной сети, а не в публичном Wi-Fi;
+4. нашлись порты (сервер файлов — любой свободный, ответчик — свой).
+
+Брандмауэр Windows: правило «входящие» для этой программы только из своей
+подсети (``remoteip=localsubnet``) и только в частных и доменных сетях. Без
+него Windows при первой раздаче показал бы человеку окно с вопросом.
+
+Ничего здесь не бросает ошибок наружу: раздача — подарок соседям, программа
+без неё работает так же.
+"""
+
+from __future__ import annotations
+
+import sys
+import threading
+from collections.abc import Callable, Iterable
+from pathlib import Path
+
+from zapret_update.plan import HashCache
+
+from .discover import DISCOVERY_PORT_GUI, Responder
+from .serve import InstalledFiles, ShareServer
+
+FIREWALL_RULE_NAME = "Zapret: update sharing (local network)"
+PRIVATE_CATEGORIES = frozenset({"private", "domainauthenticated"})
+CREATE_NO_WINDOW = 0x08000000
+
+
+def lan_allowed(profile_lines: Iterable[str]) -> bool:
+    """Есть ли подключённая частная или доменная сеть.
+
+    Строки вида ``Private:Internet`` (категория сети : связь). Публичная сеть
+    сама по себе раздачу не включает; если есть и публичная, и частная, правило
+    брандмауэра всё равно пускает только частную.
+    """
+    for line in profile_lines:
+        category, _, connectivity = str(line).strip().partition(":")
+        if category.strip().lower() in PRIVATE_CATEGORIES and connectivity.strip().lower() not in {"", "disconnected"}:
+            return True
+    return False
+
+
+class SharingService:
+    def __init__(
+        self,
+        *,
+        root: Path | None,
+        enabled: Callable[[], bool],
+        load_installed: Callable[[], object | None],
+        product: str,
+        current_version: str | None = None,
+        adopt: Callable[[], object | None] | None = None,
+        exe_path: Path | None = None,
+        private_network: Callable[[], bool] = lambda: True,
+        open_firewall: Callable[[Path], bool] | None = None,
+        discovery_port: int = DISCOVERY_PORT_GUI,
+        host: str = "0.0.0.0",
+        allow_loopback: bool = False,
+        report: Callable[[str], None] = lambda _text: None,
+    ) -> None:
+        self._root, self._enabled, self._load_installed = root, enabled, load_installed
+        self._product, self._exe_path = product, exe_path
+        self._current_version, self._adopt = current_version, adopt
+        self._private_network, self._open_firewall = private_network, open_firewall
+        self._discovery_port, self._host, self._allow_loopback = discovery_port, host, allow_loopback
+        self._report = report
+        self._lock = threading.Lock()
+        self._server: ShareServer | None = None
+        self._responder: Responder | None = None
+
+    @property
+    def running(self) -> bool:
+        return self._server is not None
+
+    @property
+    def port(self) -> int | None:
+        return self._server.port if self._server is not None else None
+
+    @property
+    def discovery_port(self) -> int | None:
+        return self._responder.port if self._responder is not None else None
+
+    def refresh(self) -> bool:
+        """Приводит раздачу в соответствие с настройкой; ``True`` — раздаёт."""
+        with self._lock:
+            try:
+                wanted = bool(self._enabled())
+            except Exception as exc:  # noqa: BLE001
+                self._report(f"Раздача обновлений: настройка не прочиталась ({exc})")
+                wanted = False
+            if not wanted:
+                self._stop_locked("выключена в настройках" if self._server is not None else "")
+                return False
+            if self._server is not None:
+                return True
+        # Список версии берётся без замка: это поход в сеть, а замок нужен
+        # выключателю, который человек может щёлкнуть в это время.
+        try:
+            installed = self._installed_list()
+        except Exception as exc:  # noqa: BLE001
+            self._report(f"Раздача обновлений: список установленной версии не прочитался ({exc})")
+            return False
+        with self._lock:
+            if self._server is not None:
+                return True
+            if not self._enabled():  # человек выключил раздачу, пока шёл поход в сеть
+                return False
+            try:
+                return self._start_locked(installed)
+            except Exception as exc:  # noqa: BLE001 — раздача не должна ронять программу
+                self._stop_locked("")
+                self._report(f"Раздача обновлений не запустилась: {exc}")
+                return False
+
+    def _installed_list(self):
+        """Подписанный список запущенной версии: свой или взятый у источников."""
+        if self._root is None:
+            return None
+        installed = self._load_installed()
+        current = self._current_version
+        fits = installed is not None and (not current or installed.version == current)
+        if not fits and self._adopt is not None:
+            adopted = self._adopt()
+            if adopted is not None:
+                return adopted
+        return installed if fits else None
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stop_locked("")
+
+    def _start_locked(self, installed) -> bool:
+        if self._root is None:
+            return False
+        if installed is None:
+            self._report("Раздача обновлений: нет подписанного списка установленной версии — раздавать нечего")
+            return False
+        if not self._private_network():
+            self._report("Раздача обновлений: сеть не частная (публичный Wi-Fi или неизвестна) — не раздаём")
+            return False
+        if self._open_firewall is not None and self._exe_path is not None:
+            if not self._open_firewall(self._exe_path):
+                self._report("Раздача обновлений: правило брандмауэра не добавилось, работаем без него")
+        files = InstalledFiles(self._root, installed.files, HashCache(self._root / ".update" / "hashes.json"))
+        server = ShareServer(files, host=self._host, allow_loopback=self._allow_loopback)
+        try:
+            responder = Responder(
+                self._product, installed.version, server.port,
+                host=self._host, port=self._discovery_port, allow_loopback=self._allow_loopback,
+            )
+        except OSError:
+            server.server_close()
+            raise
+        server.start()
+        responder.start()
+        self._server, self._responder = server, responder
+        self._report(f"Раздача обновлений включена: версия {installed.version}, порт {server.port}")
+        return True
+
+    def _stop_locked(self, why: str) -> None:
+        server, responder = self._server, self._responder
+        self._server = self._responder = None
+        for part in (responder, server):
+            if part is not None:
+                try:
+                    part.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+        if why and server is not None:
+            self._report(f"Раздача обновлений остановлена: {why}")
+
+
+# ── Windows ────────────────────────────────────────────────────────────
+
+def _run_windows(cmd, *, timeout: float = 15):
+    """Запуск без окна с захватом вывода.
+
+    Свой запуск, а не ``utils.subproc.run_hidden``: тот ставит флаг
+    ``DETACHED_PROCESS``, и PowerShell с ним ничего не пишет в перехваченный
+    канал (найдено на win10: проверка сети всегда видела пустой вывод).
+    """
+    import subprocess
+
+    options: dict = {}
+    if sys.platform == "win32":
+        info = subprocess.STARTUPINFO()
+        info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        info.wShowWindow = 0
+        options = {"creationflags": CREATE_NO_WINDOW, "startupinfo": info}
+    return subprocess.run(
+        cmd, capture_output=True, text=True, errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, **options
+    )
+
+
+def windows_private_network(run=None) -> bool:
+    """Спрашивает у Windows категории подключённых сетей; не вышло — «нет»."""
+    if sys.platform != "win32":
+        return False
+    from utils.subproc import get_system32_path
+
+    run = run or _run_windows
+    script = (
+        "Get-NetConnectionProfile | ForEach-Object "
+        "{ $_.NetworkCategory.ToString() + ':' + $_.IPv4Connectivity.ToString() }"
+    )
+    powershell = str(Path(get_system32_path()) / "WindowsPowerShell" / "v1.0" / "powershell.exe")
+    try:
+        done = run([powershell, "-NoProfile", "-NonInteractive", "-Command", script], timeout=15)
+    except Exception:  # noqa: BLE001
+        return False
+    if getattr(done, "returncode", 1) != 0:
+        return False
+    return lan_allowed(str(getattr(done, "stdout", "") or "").splitlines())
+
+
+def windows_open_firewall(exe: Path, run=None) -> bool:
+    """Правило «входящие» для программы: только своя подсеть, частные и доменные сети."""
+    if sys.platform != "win32":
+        return False
+    from utils.subproc import get_system_exe
+
+    run = run or _run_windows
+    netsh = get_system_exe("netsh.exe")
+    base = [netsh, "advfirewall", "firewall"]
+    try:
+        shown = run([*base, "show", "rule", f"name={FIREWALL_RULE_NAME}", "verbose"], timeout=15)
+        text = str(getattr(shown, "stdout", "") or "").lower()
+        if getattr(shown, "returncode", 1) == 0 and str(exe).lower() in text and "localsubnet" in text:
+            return True
+        run([*base, "delete", "rule", f"name={FIREWALL_RULE_NAME}"], timeout=15)
+        added = run(
+            [*base, "add", "rule", f"name={FIREWALL_RULE_NAME}", "dir=in", "action=allow", f"program={exe}",
+             "enable=yes", "profile=private,domain", "remoteip=localsubnet"],
+            timeout=15,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    return getattr(added, "returncode", 1) == 0
+
+
+# ── Единственная раздача программы ─────────────────────────────────────
+
+_default: SharingService | None = None
+_default_lock = threading.Lock()
+
+
+def default_service() -> SharingService:
+    global _default
+    with _default_lock:
+        if _default is None:
+            from config.build_info import APP_VERSION, CHANNEL
+            from log.log import log
+            from settings.store import get_share_updates_lan
+            from updater.install import file_update
+
+            from ..release.signed import PRODUCT
+
+            from .adopt import adopt_installed_list
+
+            root = file_update.install_root()
+            report = lambda text: log(text, file_update.UPDATE_LOG_LEVEL)  # noqa: E731
+            _default = SharingService(
+                root=root if sys.platform == "win32" else None,
+                enabled=get_share_updates_lan,
+                load_installed=lambda: file_update.installed_manifest(root, channel=CHANNEL) if root else None,
+                product=PRODUCT,
+                current_version=APP_VERSION,
+                adopt=lambda: adopt_installed_list(
+                    root, channel=CHANNEL, version=APP_VERSION, list_path=file_update.INSTALLED_MANIFEST, report=report
+                ) if root else None,
+                exe_path=(root / file_update.APP_EXE) if root else None,
+                private_network=windows_private_network,
+                open_firewall=windows_open_firewall,
+                report=report,
+            )
+        return _default
+
+
+def refresh_default() -> bool:
+    """Из фонового потока: включить или выключить раздачу по настройке."""
+    return default_service().refresh()
+
+
+__all__ = [
+    "FIREWALL_RULE_NAME",
+    "SharingService",
+    "default_service",
+    "lan_allowed",
+    "refresh_default",
+    "windows_open_firewall",
+    "windows_private_network",
+]

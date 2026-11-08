@@ -197,6 +197,8 @@ def prepare(
     """
     from zapret_update import apply, fetch, plan, stage
 
+    from ..share import client as share_client
+
     root = install_root()
     if root is None:
         raise FileUpdateUnavailable("папка программы неизвестна")
@@ -210,6 +212,8 @@ def prepare(
         # мешающее и показать, кто держит папку. Через сутки уборка уберёт
         # рабочую папку, и путь по файлам снова будет пробоваться.
         raise FileUpdateUnavailable(f"прошлая установка v{manifest.version} по файлам не удалась ({failed})")
+    # Соседи по сети ищутся в фоне, пока считается план (см. updater/share).
+    neighbours = share_client.start_search(PRODUCT, manifest.version)
     on_stage("Сравнение с установленной версией…")
     try:
         planned = plan.make_plan(manifest, root, hashes=plan.HashCache(root / UPDATE_DIR_NAME / "hashes.json"))
@@ -217,6 +221,14 @@ def prepare(
         raise FileUpdateUnavailable(str(exc)) from None
     log(plan_summary(planned, manifest), UPDATE_LOG_LEVEL)
     on_planned(planned.download_size)
+    share_client.fill_from_neighbours(
+        planned,
+        work_dir=work,
+        search=neighbours,
+        cancelled=cancelled,
+        on_stage=on_stage,
+        report=lambda text: log(text, UPDATE_LOG_LEVEL),
+    )
     on_stage("Скачивание изменений…")
     ready = fetch.fetch_plan(
         planned,

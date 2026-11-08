@@ -13,6 +13,7 @@ class ServersSettingsWidgets:
     card: object
     auto_check_card: object | None
     auto_check_toggle: object
+    share_lan_card: object | None
     toggle_label: object | None
     version_info_label: object
 
@@ -68,6 +69,8 @@ def build_servers_settings_section(
     caption_label_cls,
     qhbox_layout_cls,
     on_auto_check_toggled,
+    share_lan_enabled: bool = True,
+    on_share_lan_toggled=None,
 ) -> ServersSettingsWidgets:
     settings_card = setting_card_group_cls(tr_fn("page.servers.settings.title", "Настройки"), content_parent)
 
@@ -95,6 +98,32 @@ def build_servers_settings_section(
     auto_check_toggle = auto_check_card
     settings_card.addSettingCard(auto_check_card)
 
+    share_lan_title = tr_fn(
+        "page.servers.settings.share_lan", "Делиться обновлениями с компьютерами в моей сети"
+    )
+    share_lan_description = tr_fn(
+        "page.servers.settings.share_lan.description",
+        "Когда выходит новая версия, другие компьютеры с этой программой в вашей домашней или рабочей "
+        "сети могут взять файлы у вас, а не с серверов. Каждый файл проверяется по подписанному списку "
+        "выпуска. В интернет ничего не раздаётся, в публичном Wi-Fi раздача выключена.",
+    )
+    share_lan_card = win11_toggle_row_cls(
+        "fa5s.network-wired",
+        share_lan_title,
+        share_lan_description,
+        accent_hex,
+    )
+    share_lan_card.setChecked(share_lan_enabled, block_signals=True)
+    set_auto_check_accessibility(
+        share_lan_card,
+        title=share_lan_title,
+        description=share_lan_description,
+        checked=share_lan_enabled,
+    )
+    if on_share_lan_toggled is not None:
+        share_lan_card.toggled.connect(on_share_lan_toggled)
+    settings_card.addSettingCard(share_lan_card)
+
     _ = settings_card_cls, qhbox_layout_cls
     version_info_label = caption_label_cls(
         tr_fn("page.servers.settings.version_channel_template", "v{version} · {channel}").format(
@@ -109,6 +138,7 @@ def build_servers_settings_section(
         card=settings_card,
         auto_check_card=auto_check_card,
         auto_check_toggle=auto_check_toggle,
+        share_lan_card=share_lan_card,
         toggle_label=toggle_label,
         version_info_label=version_info_label,
     )

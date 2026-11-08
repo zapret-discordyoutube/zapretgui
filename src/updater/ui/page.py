@@ -13,7 +13,7 @@ from ui.fluent_widgets import SettingsCard
 from ui.theme import get_theme_tokens
 from app.ui_texts import tr as tr_catalog
 from log.log import log
-from updater.page_actions import AutoCheckSetting, ChannelOpener, run_update_setting_write
+from updater.page_actions import AutoCheckSetting, ChannelOpener, ShareLanSetting, run_update_setting_write
 from updater.server_status_table_state import ServerStatusTableState
 from updater.ui.main_build import (
     build_servers_header_widgets,
@@ -94,12 +94,14 @@ class ServersPage(BasePage):
         self._check_service = check_service
         self._install_service = install_service
         self._auto_check = AutoCheckSetting(updater_feature=updater_feature, parent=self)
+        self._share_lan = ShareLanSetting(updater_feature=updater_feature, parent=self)
         self._channel_opener = ChannelOpener(updater_feature=updater_feature, parent=self)
         self._create_changelog_link_open_worker = create_changelog_link_open_worker
         self._open_about = open_about
         self._idle_view_applied = False
         self._cleanup_in_progress = False
         self._auto_check_enabled = False
+        self._share_lan_enabled = True
         self._found_version = ""
         self._found_source = ""
         self._flow = UpdateFlow(language=self._ui_language, parent=self)
@@ -133,6 +135,7 @@ class ServersPage(BasePage):
             emit_initial=True,
         )
         self._auto_check.load()
+        self._share_lan.load()
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)
@@ -145,6 +148,7 @@ class ServersPage(BasePage):
         self._install_service.failed.connect(self._on_install_failed)
         self._flow.changed.connect(self._on_flow_changed)
         self._auto_check.loaded.connect(self._on_auto_check_loaded)
+        self._share_lan.loaded.connect(self._on_share_lan_loaded)
         self._channel_opener.failed.connect(self.show_update_channel_open_error)
 
     # ── Проверка ────────────────────────────────────────────────────────
@@ -274,9 +278,11 @@ class ServersPage(BasePage):
             self.update_card.show_manual_hint()
 
     def onboarding_target(self, name: str):
-        """Экскурсия показывает карточку обновления и таблицу серверов под ней."""
+        """Экскурсия показывает карточку обновления с таблицей серверов и выключатель раздачи по сети."""
         if name == "update":
             return [self.__dict__.get("update_card"), self.__dict__.get("servers_table")]
+        if name == "share":
+            return self.__dict__.get("_share_lan_card")
         return None
 
     def on_page_activated(self) -> None:
@@ -485,6 +491,19 @@ class ServersPage(BasePage):
             self.update_card.show_manual_hint()
         log(f"Автообновление: {'включено' if enabled else 'отключено'}", "🔄 UPDATE")
 
+    def _on_share_lan_loaded(self, enabled: bool) -> None:
+        if self._cleanup_in_progress or self._share_lan.user_changed:
+            return
+        self._share_lan_enabled = bool(enabled)
+        card = getattr(self, "_share_lan_card", None)
+        if card is not None:
+            card.setChecked(bool(enabled), block_signals=True)
+
+    def _on_share_lan_toggled(self, enabled: bool) -> None:
+        self._share_lan_enabled = bool(enabled)
+        self._share_lan.save(bool(enabled))
+        log(f"Раздача обновлений по сети: {'включена' if enabled else 'выключена'}", "🔄 UPDATE")
+
     def _set_auto_check_toggle_checked(self, enabled: bool) -> None:
         toggle = getattr(self, "auto_check_toggle", None)
         if toggle is None:
@@ -557,6 +576,7 @@ class ServersPage(BasePage):
             settings_card=self._settings_card,
             toggle_label=self._toggle_label,
             auto_check_card=getattr(self, "_auto_check_card", None),
+            share_lan_card=getattr(self, "_share_lan_card", None),
             version_info_label=self._version_info_label,
             telegram_card=self._tg_card,
             telegram_info_label=self._tg_info_label,
@@ -620,9 +640,12 @@ class ServersPage(BasePage):
             caption_label_cls=CaptionLabel,
             qhbox_layout_cls=QHBoxLayout,
             on_auto_check_toggled=self._on_auto_check_toggled,
+            share_lan_enabled=self._share_lan_enabled,
+            on_share_lan_toggled=self._on_share_lan_toggled,
         )
         self._settings_card = settings_widgets.card
         self._auto_check_card = settings_widgets.auto_check_card
+        self._share_lan_card = settings_widgets.share_lan_card
         self.auto_check_toggle = settings_widgets.auto_check_toggle
         self._toggle_label = settings_widgets.toggle_label
         self._version_info_label = settings_widgets.version_info_label

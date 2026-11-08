@@ -37,6 +37,7 @@ def apply_servers_page_language(
     settings_card,
     toggle_label,
     auto_check_card,
+    share_lan_card=None,
     version_info_label,
     telegram_card,
     telegram_info_label,
@@ -82,6 +83,19 @@ def apply_servers_page_language(
             title=auto_check_title,
             description=auto_check_description,
         )
+
+    if share_lan_card is not None:
+        share_lan_title = tr_fn(
+            "page.servers.settings.share_lan", "Делиться обновлениями с компьютерами в моей сети"
+        )
+        share_lan_description = tr_fn(
+            "page.servers.settings.share_lan.description",
+            "Когда выходит новая версия, другие компьютеры с этой программой в вашей домашней или рабочей "
+            "сети могут взять файлы у вас, а не с серверов. Каждый файл проверяется по подписанному списку "
+            "выпуска. В интернет ничего не раздаётся, в публичном Wi-Fi раздача выключена.",
+        )
+        share_lan_card.set_texts(share_lan_title, share_lan_description)
+        set_auto_check_accessibility(share_lan_card, title=share_lan_title, description=share_lan_description)
 
     version_info_label.setText(
         tr_fn("page.servers.settings.version_channel_template", "v{version} · {channel}").format(

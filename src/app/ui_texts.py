@@ -3500,6 +3500,22 @@ TEXTS: dict[str, dict[str, str]] = {
             "without asking. Right after a release, updates are handed out in a queue."
         ),
     },
+    "page.servers.settings.share_lan": {
+        "ru": "Делиться обновлениями с компьютерами в моей сети",
+        "en": "Share updates with computers on my network",
+    },
+    "page.servers.settings.share_lan.description": {
+        "ru": (
+            "Когда выходит новая версия, другие компьютеры с этой программой в вашей домашней или рабочей "
+            "сети могут взять файлы у вас, а не с серверов. Каждый файл проверяется по подписанному списку "
+            "выпуска. В интернет ничего не раздаётся, в публичном Wi-Fi раздача выключена."
+        ),
+        "en": (
+            "When a new version comes out, other computers with this app on your home or work network can "
+            "take the files from you instead of the servers. Every file is checked against the signed release "
+            "list. Nothing is shared over the internet, and sharing is off on public Wi-Fi."
+        ),
+    },
     "page.servers.settings.version_channel_template": {
         "ru": "v{version} · {channel}",
         "en": "v{version} · {channel}",

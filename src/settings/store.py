@@ -1219,6 +1219,14 @@ def set_auto_update_enabled(value: bool) -> bool:
     return _set_bool(("program", "auto_update_enabled"), value)
 
 
+def get_share_updates_lan() -> bool:
+    return _get_bool(("program", "share_updates_lan"), True)
+
+
+def set_share_updates_lan(value: bool) -> bool:
+    return _set_bool(("program", "share_updates_lan"), value)
+
+
 def get_discord_restart_enabled() -> bool:
     return _get_bool(("program", "discord_auto_restart"), True)
 
@@ -2105,6 +2113,7 @@ __all__ = [
     "get_whats_new_state",
     "get_background_preset",
     "get_discord_restart_enabled",
+    "get_share_updates_lan",
     "get_display_mode",
     "get_custom_dns_servers",
     "get_dns_doh_enabled",
@@ -2206,6 +2215,7 @@ __all__ = [
     "set_background_preset",
     "set_defender_disabled_memory",
     "set_discord_restart_enabled",
+    "set_share_updates_lan",
     "set_display_mode",
     "set_dpi_autostart",
     "set_editor_smooth_scroll_enabled",
