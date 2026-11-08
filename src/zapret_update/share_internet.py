@@ -160,20 +160,27 @@ class InternetSide:
             except Exception:  # noqa: BLE001 — уборка не должна ломать остановку
                 pass
 
-    def _tell_why(self, code: str, version: str) -> None:
-        """Одно слово серверу: почему порт не открылся (или чем открылся). Не мешает запуску и не повторяется зря."""
+    def _tell_why(self, code: str, version: str, *, wait: float = 5.0, tries: int = 12) -> None:
+        """Одно слово серверу: почему порт не открылся (или чем открылся). Не мешает запуску и не повторяется зря.
+
+        Адреса серверов при запуске программы могут быть ещё не известны (имена сайтов проекта
+        узнаются в первые секунды), поэтому поток ждёт их до минуты, а не теряет слово.
+        """
         if not code or code == self._last_why or self._why_fn is None:
             return
         self._last_why = code
-        bases = list(self._bases())
-        if not bases:
-            return
 
         def send() -> None:
-            try:
-                self._why_fn(bases, self._product, version, code)
-            except Exception:  # noqa: BLE001
-                pass
+            for attempt in range(tries):
+                try:
+                    bases = list(self._bases())
+                    if bases:
+                        self._why_fn(bases, self._product, version, code)
+                        return
+                except Exception:  # noqa: BLE001 — счётчик не обязателен
+                    return
+                if attempt + 1 < tries:
+                    time.sleep(wait)
 
         threading.Thread(target=send, name="share-why", daemon=True).start()
 

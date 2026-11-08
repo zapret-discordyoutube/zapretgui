@@ -93,6 +93,36 @@ def test_why_word_goes_to_the_server_once_and_never_blocks_the_start(tmp_path) -
     assert other.start(files, VERSION) is False  # сломанный счётчик запуск не ломает
 
 
+def test_why_word_waits_for_the_server_addresses_instead_of_getting_lost(tmp_path) -> None:
+    files, _entry, _data = _files(tmp_path)
+    told: list[tuple] = []
+    known: list[str] = []  # адресов серверов при запуске ещё нет: имена сайтов узнаются в первые секунды
+
+    class WordyMapper(FakeMapper):
+        code = "no_router"
+
+    FakeMapper.instances = []
+    side = share_internet.InternetSide(
+        product="zapret-gui", book=share_peers.PeerBook(allow_local=True), host="127.0.0.1",
+        mapper_factory=lambda port: WordyMapper(port, ok=False), bases=lambda: list(known),
+        why_fn=lambda bases, product, version, code: told.append((tuple(bases), code)),
+    )
+    original = share_internet.time.sleep
+    share_internet.time.sleep = lambda _seconds: original(0.02)
+    try:
+        side._tell_why("no_router", VERSION, wait=0.02, tries=200)
+        time.sleep(0.1)
+        assert told == []  # адресов нет — ждёт, слово не потеряно и не отправлено в пустоту
+        known.append("https://q.example/stats")
+        for _ in range(100):
+            if told:
+                break
+            time.sleep(0.02)
+    finally:
+        share_internet.time.sleep = original
+    assert told == [(("https://q.example/stats",), "no_router")]
+
+
 def test_a_broken_firewall_cleanup_does_not_break_stopping(tmp_path) -> None:
     files, _entry, _data = _files(tmp_path)
 
