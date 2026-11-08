@@ -10,7 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from updater.share import discover, prefill, runtime
+from zapret_update import share_discover as discover
+from zapret_update import share_prefill as prefill
+from zapret_update import share_service as runtime
 from zapret_update.manifest import FileEntry
 from zapret_update.plan import UpdatePlan, Want
 
@@ -185,10 +187,11 @@ def test_flipping_the_switch_applies_at_once_and_a_failure_does_not_lose_the_set
 
     from settings import store
     from updater import commands
+    from updater.share import wiring
 
     saved, refreshed = Mock(), Mock()
     monkeypatch.setattr(store, "set_share_updates_lan", saved)
-    monkeypatch.setattr(runtime, "refresh_default", refreshed)
+    monkeypatch.setattr(wiring, "refresh_default", refreshed)
     commands.set_share_updates_lan(False)
     saved.assert_called_once_with(False)
     refreshed.assert_called_once_with()

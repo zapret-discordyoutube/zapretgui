@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from updater.share import discover
+from zapret_update import share_discover as discover
 
 PRODUCT, VERSION = "zapret-gui", "21.1.7.231"
 
@@ -164,7 +164,7 @@ def test_responder_limits_replies_per_second(responder):
 
 
 def test_local_addresses_are_only_lan_ones():
-    from updater.share.serve import is_lan_address
+    from zapret_update.share_serve import is_lan_address
 
     assert all(is_lan_address(address) for address in discover.local_lan_addresses())
 

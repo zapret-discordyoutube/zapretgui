@@ -34,9 +34,9 @@ def set_share_updates_lan(enabled: bool) -> None:
     # Выключатель действует сразу: раздача включается или закрывается без
     # перезапуска. Вызывается из фонового потока записи настройки.
     try:
-        from updater.share import runtime
+        from updater.share import wiring
 
-        runtime.refresh_default()
+        wiring.refresh_default()
     except Exception as exc:  # noqa: BLE001 — настройка сохранена, раздача подхватит её при запуске
         from log.log import log
 

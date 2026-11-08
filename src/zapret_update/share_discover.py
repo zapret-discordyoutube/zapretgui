@@ -28,13 +28,14 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from .serve import is_lan_address
+from .share_serve import is_lan_address
 
 MAGIC = "zapret-share"
 PROTOCOL = 1
 # У каждого продукта свой порт: Zapret GUI и Zapret KVN на одном компьютере
 # не мешают друг другу.
 DISCOVERY_PORT_GUI = 47811
+DISCOVERY_PORT_KVN = 47812
 MAX_PACKET = 512
 MAX_NEIGHBOURS = 8
 REPLIES_PER_SECOND = 20
@@ -227,6 +228,7 @@ def _accept(data: bytes, host: str, product: str, version: str, allow_loopback: 
 
 __all__ = [
     "DISCOVERY_PORT_GUI",
+    "DISCOVERY_PORT_KVN",
     "FIND_TIMEOUT",
     "MAX_NEIGHBOURS",
     "SETTLE_AFTER_FIRST",

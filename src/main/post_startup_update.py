@@ -660,11 +660,11 @@ def install_update_check(
     )
 
     def _start_update_sharing() -> None:
-        # Раздача файлов обновления соседям по сети (updater/share): включается,
+        # Раздача файлов обновления соседям по сети (zapret_update.share_*): включается,
         # если человек не выключил её в настройках. Ошибки гасятся внутри.
-        from updater.share import runtime
+        from updater.share import wiring
 
-        runtime.refresh_default()
+        wiring.refresh_default()
 
     bind_startup_gate(
         startup_host.startup_post_init_ready,

@@ -11,7 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from updater.share import client, discover, prefill, serve
+from zapret_update import share_client as client
+from zapret_update import share_discover as discover
+from zapret_update import share_prefill as prefill
+from zapret_update import share_serve as serve
 from zapret_update import fetch
 from zapret_update.manifest import FileEntry, PatchEntry
 from zapret_update.plan import UpdatePlan, Want

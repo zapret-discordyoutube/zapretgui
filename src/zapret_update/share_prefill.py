@@ -30,10 +30,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from zapret_update.plan import UpdatePlan, Want
+from .plan import UpdatePlan, Want
 
-from .discover import Neighbour
-from .serve import ROUTE
+from .share_discover import Neighbour
+from .share_serve import ROUTE
 
 MIN_SIZE = 16 * 1024
 PATCH_GAIN = 4

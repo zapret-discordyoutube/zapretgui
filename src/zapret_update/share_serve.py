@@ -28,8 +28,8 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import BinaryIO
 
-from zapret_update.manifest import FileEntry, safe_relative_path
-from zapret_update.plan import HashCache
+from .manifest import FileEntry, safe_relative_path
+from .plan import HashCache
 
 ROUTE = "/zapret-share/1/file/"
 MAX_STREAMS = 2

@@ -13,9 +13,10 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from zapret_update.plan import UpdatePlan
+from .plan import UpdatePlan
 
-from . import discover, prefill
+from . import share_discover as discover
+from . import share_prefill as prefill
 
 SEARCH_WAIT = discover.FIND_TIMEOUT + 1.0
 

@@ -25,15 +25,11 @@ def adopt_installed_list(
     channel: str,
     version: str,
     list_path: tuple[str, ...],
-    lookup: Callable[[str], object] | None = None,
-    fetch: Callable[..., object] | None = None,
+    lookup: Callable[[str], object],
+    fetch: Callable[..., object],
     report: Callable[[str], None] = lambda _text: None,
 ):
     """Сохраняет подписанный список запущенной версии; возвращает его или ``None``."""
-    if lookup is None:
-        from ..release.resolver import lookup_latest_release as lookup
-    if fetch is None:
-        from ..release.signed import fetch_signed_release as fetch
     found = lookup(channel)
     release = getattr(found, "release", None)
     if not release:

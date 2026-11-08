@@ -15,7 +15,7 @@ from updater.download import flow
 from updater.download.contracts import CancellationToken, UpdateArtifact, UpdateCancelled
 from updater.install import apply_mode, file_update
 from updater.install import handoff as install_handoff
-from updater.share import client as share_client
+from zapret_update import share_client
 from zapret_update import apply, manifest, swap
 
 

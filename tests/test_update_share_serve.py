@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from updater.share import serve
+from zapret_update import share_serve as serve
 from zapret_update.manifest import FileEntry
 
 

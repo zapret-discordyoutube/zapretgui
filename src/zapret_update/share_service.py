@@ -19,15 +19,15 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from zapret_update.plan import HashCache
-
-from .discover import DISCOVERY_PORT_GUI, Responder
-from .serve import InstalledFiles, ShareServer
+from .plan import HashCache
+from .share_discover import DISCOVERY_PORT_GUI, Responder
+from .share_serve import InstalledFiles, ShareServer
 
 FIREWALL_RULE_NAME = "Zapret: update sharing (local network)"
 PRIVATE_CATEGORIES = frozenset({"private", "domainauthenticated"})
@@ -183,7 +183,7 @@ class SharingService:
 def _run_windows(cmd, *, timeout: float = 15):
     """Запуск без окна с захватом вывода.
 
-    Свой запуск, а не ``utils.subproc.run_hidden``: тот ставит флаг
+    Свой запуск, а не ``run_hidden`` Zapret 2 GUI: тот ставит флаг
     ``DETACHED_PROCESS``, и PowerShell с ним ничего не пишет в перехваченный
     канал (найдено на win10: проверка сети всегда видела пустой вывод).
     """
@@ -200,18 +200,20 @@ def _run_windows(cmd, *, timeout: float = 15):
     )
 
 
+def _system32() -> Path:
+    return Path(os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows") / "System32"
+
+
 def windows_private_network(run=None) -> bool:
     """Спрашивает у Windows категории подключённых сетей; не вышло — «нет»."""
     if sys.platform != "win32":
         return False
-    from utils.subproc import get_system32_path
-
     run = run or _run_windows
     script = (
         "Get-NetConnectionProfile | ForEach-Object "
         "{ $_.NetworkCategory.ToString() + ':' + $_.IPv4Connectivity.ToString() }"
     )
-    powershell = str(Path(get_system32_path()) / "WindowsPowerShell" / "v1.0" / "powershell.exe")
+    powershell = str(_system32() / "WindowsPowerShell" / "v1.0" / "powershell.exe")
     try:
         done = run([powershell, "-NoProfile", "-NonInteractive", "-Command", script], timeout=15)
     except Exception:  # noqa: BLE001
@@ -225,10 +227,8 @@ def windows_open_firewall(exe: Path, run=None) -> bool:
     """Правило «входящие» для программы: только своя подсеть, частные и доменные сети."""
     if sys.platform != "win32":
         return False
-    from utils.subproc import get_system_exe
-
     run = run or _run_windows
-    netsh = get_system_exe("netsh.exe")
+    netsh = str(_system32() / "netsh.exe")
     base = [netsh, "advfirewall", "firewall"]
     try:
         shown = run([*base, "show", "rule", f"name={FIREWALL_RULE_NAME}", "verbose"], timeout=15)
@@ -246,55 +246,10 @@ def windows_open_firewall(exe: Path, run=None) -> bool:
     return getattr(added, "returncode", 1) == 0
 
 
-# ── Единственная раздача программы ─────────────────────────────────────
-
-_default: SharingService | None = None
-_default_lock = threading.Lock()
-
-
-def default_service() -> SharingService:
-    global _default
-    with _default_lock:
-        if _default is None:
-            from config.build_info import APP_VERSION, CHANNEL
-            from log.log import log
-            from settings.store import get_share_updates_lan
-            from updater.install import file_update
-
-            from ..release.signed import PRODUCT
-
-            from .adopt import adopt_installed_list
-
-            root = file_update.install_root()
-            report = lambda text: log(text, file_update.UPDATE_LOG_LEVEL)  # noqa: E731
-            _default = SharingService(
-                root=root if sys.platform == "win32" else None,
-                enabled=get_share_updates_lan,
-                load_installed=lambda: file_update.installed_manifest(root, channel=CHANNEL) if root else None,
-                product=PRODUCT,
-                current_version=APP_VERSION,
-                adopt=lambda: adopt_installed_list(
-                    root, channel=CHANNEL, version=APP_VERSION, list_path=file_update.INSTALLED_MANIFEST, report=report
-                ) if root else None,
-                exe_path=(root / file_update.APP_EXE) if root else None,
-                private_network=windows_private_network,
-                open_firewall=windows_open_firewall,
-                report=report,
-            )
-        return _default
-
-
-def refresh_default() -> bool:
-    """Из фонового потока: включить или выключить раздачу по настройке."""
-    return default_service().refresh()
-
-
 __all__ = [
     "FIREWALL_RULE_NAME",
     "SharingService",
-    "default_service",
     "lan_allowed",
-    "refresh_default",
     "windows_open_firewall",
     "windows_private_network",
 ]

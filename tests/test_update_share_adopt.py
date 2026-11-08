@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from updater.share import adopt, discover, runtime
+from zapret_update import share_adopt as adopt
+from zapret_update import share_discover as discover
+from zapret_update import share_service as runtime
 
 LIST_PATH = ("system", "update", "installed-manifest.json")
 

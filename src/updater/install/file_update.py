@@ -197,7 +197,7 @@ def prepare(
     """
     from zapret_update import apply, fetch, plan, stage
 
-    from ..share import client as share_client
+    from zapret_update import share_client
 
     root = install_root()
     if root is None:
@@ -212,7 +212,7 @@ def prepare(
         # мешающее и показать, кто держит папку. Через сутки уборка уберёт
         # рабочую папку, и путь по файлам снова будет пробоваться.
         raise FileUpdateUnavailable(f"прошлая установка v{manifest.version} по файлам не удалась ({failed})")
-    # Соседи по сети ищутся в фоне, пока считается план (см. updater/share).
+    # Соседи по сети ищутся в фоне, пока считается план (см. zapret_update.share_*).
     neighbours = share_client.start_search(PRODUCT, manifest.version)
     on_stage("Сравнение с установленной версией…")
     try:
