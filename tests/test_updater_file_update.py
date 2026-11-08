@@ -423,8 +423,8 @@ def test_prepare_asks_neighbours_after_the_plan_and_before_the_servers(tmp_path)
                              "key": "k", "files": [], "installer": {"name": "Z.exe", "size": 40, "sha256": "c" * 64}})
     fake_plan = SimpleNamespace(download_size=0, want=[], keep=[], remove=[])
 
-    def search(product, version, **_k):
-        calls.append(f"search {product} {version}")
+    def search(product, version, **kwargs):
+        calls.append(f"search {product} {version} enabled={kwargs.get('enabled')}")
         return share_client.Search(product, version, enabled=False)
 
     def fill(planned, **kwargs):
@@ -438,6 +438,7 @@ def test_prepare_asks_neighbours_after_the_plan_and_before_the_servers(tmp_path)
     with (
         patch.object(file_update, "install_root", return_value=tmp_path),
         patch.object(share_client, "start_search", search),
+        patch.object(file_update, "sharing_enabled", return_value=False),
         patch.object(share_client, "fill_from_neighbours", fill),
         patch.object(plan_module, "make_plan", lambda *_a, **_k: calls.append("plan") or fake_plan),
         patch.object(fetch, "fetch_plan", servers),
@@ -447,4 +448,16 @@ def test_prepare_asks_neighbours_after_the_plan_and_before_the_servers(tmp_path)
         with pytest.raises(RuntimeError, match="stop here"):
             file_update.prepare(SignedRelease(listed, b"{}", b"sig"), channel="dev", current_version="1.0.0.1", start_in_tray=False)
 
-    assert calls == ["search zapret-gui 1.0.0.2", "plan", "neighbours", "servers"]
+    # Выключатель выключен: поиск соседей получает enabled=False и сети не касается.
+    assert calls == ["search zapret-gui 1.0.0.2 enabled=False", "plan", "neighbours", "servers"]
+
+
+def test_sharing_switch_is_read_from_settings_and_fails_closed() -> None:
+    from settings import store
+
+    with patch.object(store, "get_share_updates_lan", return_value=True):
+        assert file_update.sharing_enabled() is True
+    with patch.object(store, "get_share_updates_lan", return_value=False):
+        assert file_update.sharing_enabled() is False
+    with patch.object(store, "get_share_updates_lan", side_effect=OSError("db locked")):
+        assert file_update.sharing_enabled() is False

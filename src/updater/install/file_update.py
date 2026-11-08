@@ -104,6 +104,20 @@ def store_sources():
     return sources
 
 
+def sharing_enabled() -> bool:
+    """Выключатель «Делиться обновлениями…»: выключен — соседей не спрашиваем и не раздаём.
+
+    Вопрос соседям — тоже сообщение в сети («здесь стоит программа версии X»), поэтому
+    человек, выключивший раздачу, не должен его посылать. Не прочиталось — «нет».
+    """
+    try:
+        from settings.store import get_share_updates_lan
+
+        return bool(get_share_updates_lan())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def installed_manifest(root: Path, *, channel: str):
     """Список установленной версии, если программа ставилась по файлам."""
     from zapret_update import manifest
@@ -213,7 +227,7 @@ def prepare(
         # рабочую папку, и путь по файлам снова будет пробоваться.
         raise FileUpdateUnavailable(f"прошлая установка v{manifest.version} по файлам не удалась ({failed})")
     # Соседи по сети ищутся в фоне, пока считается план (см. zapret_update.share_*).
-    neighbours = share_client.start_search(PRODUCT, manifest.version)
+    neighbours = share_client.start_search(PRODUCT, manifest.version, enabled=sharing_enabled())
     on_stage("Сравнение с установленной версией…")
     try:
         planned = plan.make_plan(manifest, root, hashes=plan.HashCache(root / UPDATE_DIR_NAME / "hashes.json"))
