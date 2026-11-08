@@ -213,3 +213,22 @@ def test_search_stops_at_the_wanted_count(peers) -> None:
     servers = [peers(f"p{i}") for i in range(4)]
     found = share_internet.find_internet_neighbours(_book(*servers), PRODUCT, VERSION, probe_fn=PROBE, want=2)
     assert len(found) == 2
+
+
+def test_search_for_any_version_accepts_any_version_of_the_product_and_asks_the_server_with_a_wildcard(peers) -> None:
+    old = peers("old", version="21.1.7.200")
+    new = peers("new", version="21.1.7.240")
+    asked = []
+
+    def lookup(bases, product, version):
+        asked.append(version)
+        return []
+
+    book = share_peers.PeerBook(allow_local=True)
+    book.add("127.0.0.1", old.port)
+    found = share_internet.find_internet_neighbours(book, PRODUCT, None, bases=["https://q.example"], probe_fn=PROBE, lookup_fn=lookup)
+    assert sorted(item.port for item in found) == [old.port]  # версия не важна: важно, что это наша программа
+    book.add("127.0.0.1", new.port)
+    found = share_internet.find_internet_neighbours(book, PRODUCT, None, probe_fn=PROBE)
+    assert sorted(item.port for item in found) == sorted([old.port, new.port])
+    assert asked == ["*"]

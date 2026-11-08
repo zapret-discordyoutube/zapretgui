@@ -33,6 +33,20 @@ def peer_book() -> share_peers.PeerBook:
         return _book
 
 
+def manifest_blob():
+    """Подписанный список своей версии (текст и подпись) для соседей без доступа к серверам; нет — ``None``."""
+    from updater.install import file_update
+
+    root = file_update.install_root()
+    if root is None:
+        return None
+    path = Path(root).joinpath(*file_update.INSTALLED_MANIFEST)
+    try:
+        return path.read_bytes(), path.with_name(path.name + ".sig").read_bytes()
+    except OSError:
+        return None
+
+
 def registry_bases() -> list[str]:
     """Адреса, где сервер очереди ведёт книгу раздающих: основной и зеркала (только с проверяемым TLS)."""
     from ..release import watch
@@ -42,6 +56,53 @@ def registry_bases() -> list[str]:
         if endpoint.verify_ssl and endpoint.url.endswith("/wait"):
             bases.append(endpoint.url[: -len("/wait")])
     return bases
+
+
+def release_from_peers(channel: str):
+    """Новейший выпуск, названный соседями по интернету, когда серверы не отвечают; иначе ``None``.
+
+    Работает только при включённой раздаче через интернет. Выпуск собирается из
+    ПРОВЕРЕННОГО подписанного списка (название установщика, размер, SHA-256), а адрес
+    установщика — обычный адрес выпуска на Forgejo: от соседа ничего не берётся на веру.
+    Сами файлы потом идут тем же запасным путём (серверы, затем соседи).
+    """
+    try:
+        from settings.store import get_share_updates_internet
+
+        if not get_share_updates_internet():
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    from config.build_info import APP_VERSION
+    from zapret_update import share_manifest
+
+    from ..release import forgejo
+    from ..release.signed import PRODUCT, TRUSTED_KEYS
+
+    neighbours = share_internet.find_internet_neighbours(
+        peer_book(), PRODUCT, None, bases=registry_bases()
+    )
+    found = share_manifest.fetch_from_peers(
+        neighbours, trusted=TRUSTED_KEYS, product=PRODUCT, channel=channel, current_version=APP_VERSION
+    )
+    if found is None or found.manifest.installer is None:
+        return None
+    installer = found.manifest.installer
+    version = found.manifest.version
+    return {
+        "version": version,
+        "tag_name": version,
+        "update_url": f"{forgejo.FORGEJO_ORIGIN}{forgejo.FORGEJO_RELEASE_DOWNLOAD_PREFIX}{version}/{installer.name}",
+        "file_name": installer.name,
+        "file_size": installer.size,
+        "sha256": installer.sha256,
+        "release_notes": "",
+        "prerelease": channel != "stable",
+        "name": f"Zapret {version}",
+        "source": "соседи по интернету",
+        "release_url": forgejo.release_page_url(version),
+        "signed_blob": (found.raw, found.signature),
+    }
 
 
 def internet_finder(version: str):
@@ -110,6 +171,7 @@ def default_service() -> share_service.SharingService:
                 report=report,
                 internet_enabled=get_share_updates_internet,
                 internet=internet,
+                manifest_blob=manifest_blob,
             )
         return _default
 
@@ -119,4 +181,7 @@ def refresh_default() -> bool:
     return default_service().refresh()
 
 
-__all__ = ["default_service", "internet_finder", "peer_book", "refresh_default", "registry_bases"]
+__all__ = [
+    "default_service", "internet_finder", "manifest_blob", "peer_book", "refresh_default", "registry_bases",
+    "release_from_peers",
+]

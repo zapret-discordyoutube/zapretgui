@@ -70,6 +70,7 @@ class SharingService:
         report: Callable[[str], None] = lambda _text: None,
         internet_enabled: Callable[[], bool] = lambda: False,
         internet=None,
+        manifest_blob: Callable[[], tuple[bytes, bytes] | None] | None = None,
     ) -> None:
         self._root, self._enabled, self._load_installed = root, enabled, load_installed
         self._product, self._exe_path = product, exe_path
@@ -78,6 +79,7 @@ class SharingService:
         self._discovery_port, self._host, self._allow_loopback = discovery_port, host, allow_loopback
         self._report = report
         self._internet_enabled, self._internet = internet_enabled, internet
+        self._manifest_blob = manifest_blob  # (список, подпись) своей версии: соседи берут его, если серверы недоступны
         self._lock = threading.Lock()
         self._server: ShareServer | None = None
         self._responder: Responder | None = None
@@ -183,7 +185,10 @@ class SharingService:
         if self._open_firewall is not None and self._exe_path is not None:
             if not self._open_firewall(self._exe_path):
                 self._report("Раздача обновлений: правило брандмауэра не добавилось, работаем без него")
-        server = ShareServer(self._files(installed), host=self._host, allow_loopback=self._allow_loopback)
+        server = ShareServer(
+            self._files(installed), host=self._host, allow_loopback=self._allow_loopback,
+            manifest_provider=self._manifest_blob,
+        )
         try:
             responder = Responder(
                 self._product, installed.version, server.port,
@@ -201,7 +206,7 @@ class SharingService:
     def _start_internet_locked(self, installed) -> bool:
         if not self._ready(installed, "Раздача по интернету"):
             return False
-        return bool(self._internet.start(self._files(installed), installed.version))
+        return bool(self._internet.start(self._files(installed), installed.version, self._manifest_blob))
 
     def _stop_locked(self, why: str) -> None:
         server, responder = self._server, self._responder

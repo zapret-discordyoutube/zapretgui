@@ -54,7 +54,7 @@ def probe(host: str, port: int, *, timeout: float = PROBE_TIMEOUT, allow_local: 
 def find_internet_neighbours(
     book: PeerBook,
     product: str,
-    version: str,
+    version: str | None,
     *,
     bases: Sequence[str] = (),
     want: int = WANT,
@@ -66,7 +66,7 @@ def find_internet_neighbours(
     deadline = time.monotonic() + budget
     candidates = book.pick(want * 2)
     if len(candidates) < want * 2 and bases:
-        for host, port in lookup_fn(bases, product, version):
+        for host, port in lookup_fn(bases, product, version or "*"):
             book.add(host, port)
         candidates = book.pick(want * 2)
     if not candidates:
@@ -91,7 +91,7 @@ def find_internet_neighbours(
                 peers, their_product, their_version = answer
                 for other in peers[:MAX_SHARED]:
                     book.add(*other)
-                if their_product == product and their_version == version and len(found) < want:
+                if their_product == product and (version is None or their_version == version) and len(found) < want:
                     found.append(Neighbour(host, port, tls=True))
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
@@ -142,10 +142,10 @@ class InternetSide:
     def port(self) -> int | None:
         return self._server.port if self._server is not None else None
 
-    def start(self, files: InstalledFiles, version: str) -> bool:
+    def start(self, files: InstalledFiles, version: str, manifest_provider=None) -> bool:
         server = ShareServer(
             files, host=self._host, ssl_context=self._tls_factory(), peers_provider=self._book.sample,
-            identity=(self._product, version), admits=lambda _address: True,
+            identity=(self._product, version), admits=lambda _address: True, manifest_provider=manifest_provider,
         )
         server.start()  # сразу: остановка сервера, который не запускали, зависла бы
         try:

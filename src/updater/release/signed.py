@@ -81,23 +81,31 @@ def fetch_signed_release(
     allow_same: bool = False,
     session_factory=new_session,
 ) -> SignedRelease:
-    """Как ``fetch_verified_manifest``, но вместе с байтами списка и подписью."""
-    manifest_url = str(release.get("manifest_url") or "")
-    signature_url = str(release.get("signature_url") or "")
-    if not manifest_url or not signature_url:
-        raise ManifestError("источник не отдал подписанный список выпуска", "nosig")
-    verify = bool(release.get("verify_ssl", True))
-    session = session_factory()
-    try:
+    """Как ``fetch_verified_manifest``, но вместе с байтами списка и подписью.
+
+    ``release["signed_blob"]`` — список и подпись, уже полученные от соседей по интернету
+    (``updater.share.wiring.release_from_peers``): скачивать нечего, а проверка ниже та же.
+    """
+    blob = release.get("signed_blob")
+    if blob:
+        raw, signature = bytes(blob[0]), bytes(blob[1])
+    else:
+        manifest_url = str(release.get("manifest_url") or "")
+        signature_url = str(release.get("signature_url") or "")
+        if not manifest_url or not signature_url:
+            raise ManifestError("источник не отдал подписанный список выпуска", "nosig")
+        verify = bool(release.get("verify_ssl", True))
+        session = session_factory()
         try:
-            raw = _download(session, manifest_url, verify=verify, limit=MAX_MANIFEST_BYTES)
-            signature = _download(session, signature_url, verify=verify, limit=MAX_SIGNATURE_BYTES)
-        except ManifestError:
-            raise
-        except Exception as exc:
-            raise ManifestError(f"список выпуска не скачался — {short_error(exc)}", "nosig") from exc
-    finally:
-        session.close()
+            try:
+                raw = _download(session, manifest_url, verify=verify, limit=MAX_MANIFEST_BYTES)
+                signature = _download(session, signature_url, verify=verify, limit=MAX_SIGNATURE_BYTES)
+            except ManifestError:
+                raise
+            except Exception as exc:
+                raise ManifestError(f"список выпуска не скачался — {short_error(exc)}", "nosig") from exc
+        finally:
+            session.close()
     manifest = load_signed(
         raw,
         signature,

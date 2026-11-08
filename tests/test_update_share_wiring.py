@@ -52,3 +52,20 @@ def test_registry_bases_are_the_wait_addresses_without_the_wait_word(monkeypatch
     )
     monkeypatch.setattr(watch, "wait_endpoints", lambda: endpoints)
     assert wiring.registry_bases() == ["https://git.zapret.moe/api/zapret", "https://5.6.7.8:888/api"]
+
+
+def test_signed_list_of_this_version_is_handed_to_neighbours_from_the_installed_files(tmp_path, monkeypatch) -> None:
+    from updater.install import file_update
+
+    monkeypatch.setattr(file_update, "install_root", lambda: tmp_path)
+    assert wiring.manifest_blob() is None  # списка ещё нет
+    target = tmp_path.joinpath(*file_update.INSTALLED_MANIFEST)
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"LIST")
+    assert wiring.manifest_blob() is None  # без подписи не отдаём
+    target.with_name(target.name + ".sig").write_bytes(b"SIG")
+    assert wiring.manifest_blob() == (b"LIST", b"SIG")
+    monkeypatch.setattr(file_update, "install_root", lambda: None)
+    assert wiring.manifest_blob() is None
+    monkeypatch.setattr(wiring, "_default", None)
+    assert wiring.default_service()._manifest_blob is wiring.manifest_blob

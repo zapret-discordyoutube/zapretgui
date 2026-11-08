@@ -59,6 +59,7 @@ def lookup_latest_release(
     fallback_delay: float = MIRROR_FALLBACK_DELAY_SECONDS,
     forgejo_deadline: float = FORGEJO_DEADLINE_SECONDS,
     mirrors_deadline: float = mirrors.MIRRORS_DEADLINE_SECONDS,
+    fetch_peers: Callable[[str], dict[str, Any] | None] | None = None,
 ) -> ReleaseLookup:
     selected = normalize_update_channel(channel)
     started = time.monotonic()
@@ -109,6 +110,21 @@ def lookup_latest_release(
         if outcome.ok:
             return ReleaseLookup(outcome.value)
         fail(source, short_error(outcome.error, limit=300 if source == _MIRRORS else 120))
+
+    # Серверы не ответили совсем: если человек включил раздачу через интернет, спрашиваем
+    # соседей, нет ли у них новой версии. Их список проверяется той же подписью.
+    if fetch_peers is None:
+        from ..share import wiring
+
+        fetch_peers = wiring.release_from_peers
+    try:
+        from_peers = fetch_peers(selected)
+    except Exception as exc:  # noqa: BLE001 — соседи не обязаны помогать
+        log(f"⚠️ Соседи по интернету не помогли: {short_error(exc)}", "🔄 RELEASE")
+        from_peers = None
+    if from_peers:
+        log(f"Серверы не ответили; новую версию {from_peers.get('version')} назвали соседи по интернету", "🔄 RELEASE")
+        return ReleaseLookup(from_peers)
 
     message = (
         f"Не удалось узнать новейшую версию. Forgejo: {errors[_FORGEJO]}. Зеркала: {errors[_MIRRORS]}"

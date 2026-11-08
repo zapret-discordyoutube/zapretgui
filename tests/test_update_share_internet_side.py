@@ -144,7 +144,8 @@ class FakeInternet:
     def __init__(self, ok=True):
         self.ok, self.running, self.starts, self.stops = ok, False, [], 0
 
-    def start(self, files, version):
+    def start(self, files, version, manifest_provider=None):
+        self.provider = manifest_provider
         self.starts.append(version)
         self.running = self.ok
         return self.ok
@@ -187,7 +188,7 @@ def test_internet_side_needs_the_same_conditions_as_the_lan_side(tmp_path, case)
 
 def test_internet_failure_does_not_touch_the_lan_side_and_does_not_escape(tmp_path) -> None:
     class Broken(FakeInternet):
-        def start(self, files, version):
+        def start(self, files, version, manifest_provider=None):
             raise RuntimeError("tls broke")
 
     service, _ = _service(tmp_path, lan=True, net=True, internet=Broken())

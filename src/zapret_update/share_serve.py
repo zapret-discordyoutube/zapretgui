@@ -31,6 +31,7 @@ from typing import BinaryIO
 
 from .manifest import FileEntry, safe_relative_path
 from .plan import HashCache
+from .share_manifest import MANIFEST_ROUTE, encode_manifest_reply
 from .share_peers import PEERS_ROUTE, encode_peer_list
 
 ROUTE = "/zapret-share/1/file/"
@@ -99,6 +100,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == PEERS_ROUTE and self.server.peers_provider is not None:
             return self._send_peers()
+        if path == MANIFEST_ROUTE and self.server.manifest_provider is not None:
+            return self._send_manifest()
         name = path[len(ROUTE):] if path.startswith(ROUTE) else ""
         if not _HEX64.fullmatch(name):
             return self._refuse(404)
@@ -113,6 +116,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(handle, size)
         finally:
             self.server.slots.release()
+
+    def _send_manifest(self) -> None:
+        blob = self.server.manifest_provider()
+        if not blob:
+            return self._refuse(404)
+        body = encode_manifest_reply(*blob)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except OSError:
+            pass
 
     def _send_peers(self) -> None:
         product, version = self.server.identity
@@ -162,10 +179,12 @@ class ShareServer(http.server.ThreadingHTTPServer):
         ssl_context: ssl.SSLContext | None = None,
         peers_provider: Callable[[], Iterable[tuple[str, int]]] | None = None,
         identity: tuple[str, str] = ("", ""),
+        manifest_provider: Callable[[], tuple[bytes, bytes] | None] | None = None,
     ) -> None:
         self.ssl_context = ssl_context
         self.peers_provider = peers_provider  # есть у раздачи по интернету: обмен адресами
         self.identity = identity  # (продукт, версия): соседу видно, нужны ли ему наши файлы
+        self.manifest_provider = manifest_provider  # подписанный список своей версии: для соседей без доступа к серверам
         self.files = files
         self.admits = admits or (lambda address: is_lan_address(address, allow_loopback=allow_loopback))
         self.slots = threading.BoundedSemaphore(max(1, max_streams))
