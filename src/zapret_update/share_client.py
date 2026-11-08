@@ -19,34 +19,54 @@ from . import share_discover as discover
 from . import share_prefill as prefill
 
 SEARCH_WAIT = discover.FIND_TIMEOUT + 1.0
+INTERNET_WAIT = 6.0  # поиск по интернету идёт дольше локального; он перекрывается с расчётом плана
 
 
 class Search:
-    def __init__(self, product: str, version: str, *, enabled: bool = True, find=discover.find_neighbours) -> None:
+    def __init__(
+        self,
+        product: str,
+        version: str,
+        *,
+        enabled: bool = True,
+        find=discover.find_neighbours,
+        internet=None,
+    ) -> None:
+        """``internet`` — необязательный поиск по интернету (список ``Neighbour``); соседи по сети идут первыми."""
         self._found: list[discover.Neighbour] = []
         self._thread: threading.Thread | None = None
+        self._wait = SEARCH_WAIT + (INTERNET_WAIT if internet is not None else 0.0)
         if not enabled:
             return
 
         def run() -> None:
+            found: list[discover.Neighbour] = []
             try:
-                self._found = list(find(product, version))
+                found.extend(find(product, version))
             except Exception:  # noqa: BLE001 — поиск не должен ронять обновление
-                self._found = []
+                pass
+            self._found = list(found)
+            if internet is not None:
+                try:
+                    found.extend(internet())
+                except Exception:  # noqa: BLE001
+                    pass
+                self._found = list(found)
 
         self._thread = threading.Thread(target=run, name="share-search", daemon=True)
         self._thread.start()
 
-    def result(self, timeout: float = SEARCH_WAIT) -> list[discover.Neighbour]:
+    def result(self, timeout: float | None = None) -> list[discover.Neighbour]:
         if self._thread is not None:
-            self._thread.join(timeout)
+            self._thread.join(self._wait if timeout is None else timeout)
             if self._thread.is_alive():
-                return []
+                # Не дождались интернета: соседей по сети, уже найденных, не теряем.
+                return list(self._found)
         return self._found
 
 
-def start_search(product: str, version: str, *, enabled: bool = True) -> Search:
-    return Search(product, version, enabled=enabled)
+def start_search(product: str, version: str, *, enabled: bool = True, internet=None) -> Search:
+    return Search(product, version, enabled=enabled, internet=internet)
 
 
 def fill_from_neighbours(

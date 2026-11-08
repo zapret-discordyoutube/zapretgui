@@ -48,6 +48,7 @@ SETTLE_AFTER_FIRST = 0.3
 class Neighbour:
     host: str
     port: int
+    tls: bool = False  # соседи по интернету говорят по TLS, по локальной сети — по обычному HTTP
 
 
 def _pack(**fields) -> bytes:

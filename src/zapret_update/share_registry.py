@@ -1,0 +1,69 @@
+"""Сервер очереди обновлений как «телефонная книга» соседей по интернету.
+
+Программа и так ходит к серверу очереди обновлений, поэтому он годится как один
+из трёх источников соседей (после книги на диске и обмена адресами). Две
+просьбы, обе по HTTPS и без прокси Windows:
+
+- ``POST <база>/peers?product=…&version=…&port=…`` — «я раздаю эту версию на
+  таком порту»; сервер сам проверяет, что до порта можно достучаться, и только
+  тогда записывает адрес, с которого пришла просьба;
+- ``GET <база>/peers?product=…&version=…&limit=…`` — «кто раздаёт эту версию».
+
+Ответ сервера не считается правдой: адреса проходят ту же проверку, что и все
+остальные (``share_peers.clean_peer``), а файлы — проверку по подписанному списку.
+
+Только стандартная библиотека.
+"""
+
+from __future__ import annotations
+
+import urllib.parse
+import urllib.request
+from collections.abc import Callable, Sequence
+
+from .share_peers import MAX_FILE_BYTES, parse_peer_list
+
+TIMEOUT = 5.0
+
+
+def _open(url: str, method: str, timeout: float):
+    request = urllib.request.Request(url, method=method, headers={"User-Agent": "ZapretShare/1"})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(request, timeout=timeout)
+
+
+def _url(base: str, **query: object) -> str:
+    return f"{base.rstrip('/')}/peers?{urllib.parse.urlencode(query)}"
+
+
+def register(
+    bases: Sequence[str], product: str, version: str, port: int, *, timeout: float = TIMEOUT, opener: Callable = _open
+) -> bool:
+    """Записаться на первом ответившем сервере; ``True`` — сервер принял."""
+    for base in bases:
+        try:
+            with opener(_url(base, product=product, version=version, port=int(port)), "POST", timeout) as reply:
+                if getattr(reply, "status", 200) == 200:
+                    return True
+        except Exception:  # noqa: BLE001 — не вышло здесь, пробуем следующий сервер
+            continue
+    return False
+
+
+def lookup(
+    bases: Sequence[str], product: str, version: str, limit: int = 16, *, timeout: float = TIMEOUT, opener: Callable = _open,
+    allow_local: bool = False,
+) -> list[tuple[str, int]]:
+    """Кто раздаёт эту версию: список с первого ответившего сервера (пусто, если никто не ответил)."""
+    for base in bases:
+        try:
+            with opener(_url(base, product=product, version=version, limit=int(limit)), "GET", timeout) as reply:
+                if getattr(reply, "status", 200) != 200:
+                    continue
+                return parse_peer_list(reply.read(MAX_FILE_BYTES + 1), allow_local=allow_local)
+        except Exception:  # noqa: BLE001
+            continue
+    return []
+
+
+__all__ = ["lookup", "register"]

@@ -23,6 +23,7 @@ from __future__ import annotations
 import http.server
 import ipaddress
 import re
+import ssl
 import threading
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -30,6 +31,7 @@ from typing import BinaryIO
 
 from .manifest import FileEntry, safe_relative_path
 from .plan import HashCache
+from .share_peers import PEERS_ROUTE, encode_peer_list
 
 ROUTE = "/zapret-share/1/file/"
 MAX_STREAMS = 2
@@ -81,6 +83,7 @@ class InstalledFiles:
 class _Handler(http.server.BaseHTTPRequestHandler):
     server: ShareServer
     protocol_version = "HTTP/1.0"
+    timeout = 15  # молчащее соединение не держит поток вечно
 
     def log_message(self, *_args) -> None:  # тишина: раздача не пишет в консоль
         return
@@ -94,6 +97,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not self.server.admits(self.client_address[0]):
             return self._refuse(403)
         path = self.path.split("?", 1)[0]
+        if path == PEERS_ROUTE and self.server.peers_provider is not None:
+            return self._send_peers()
         name = path[len(ROUTE):] if path.startswith(ROUTE) else ""
         if not _HEX64.fullmatch(name):
             return self._refuse(404)
@@ -108,6 +113,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(handle, size)
         finally:
             self.server.slots.release()
+
+    def _send_peers(self) -> None:
+        product, version = self.server.identity
+        body = encode_peer_list(list(self.server.peers_provider()), product=product, version=version)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except OSError:
+            pass
 
     def _send(self, handle: BinaryIO, size: int) -> None:
         start = 0
@@ -142,7 +159,13 @@ class ShareServer(http.server.ThreadingHTTPServer):
         admits: Callable[[str], bool] | None = None,
         allow_loopback: bool = False,
         max_streams: int = MAX_STREAMS,
+        ssl_context: ssl.SSLContext | None = None,
+        peers_provider: Callable[[], Iterable[tuple[str, int]]] | None = None,
+        identity: tuple[str, str] = ("", ""),
     ) -> None:
+        self.ssl_context = ssl_context
+        self.peers_provider = peers_provider  # есть у раздачи по интернету: обмен адресами
+        self.identity = identity  # (продукт, версия): соседу видно, нужны ли ему наши файлы
         self.files = files
         self.admits = admits or (lambda address: is_lan_address(address, allow_loopback=allow_loopback))
         self.slots = threading.BoundedSemaphore(max(1, max_streams))
@@ -152,6 +175,16 @@ class ShareServer(http.server.ThreadingHTTPServer):
     @property
     def port(self) -> int:
         return int(self.server_address[1])
+
+    def get_request(self):
+        sock, address = super().get_request()
+        if self.ssl_context is not None:
+            # Рукопожатие делает поток соединения, а не цикл приёма: медленный клиент никого не держит.
+            sock = self.ssl_context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False)
+        return sock, address
+
+    def handle_error(self, request, client_address) -> None:
+        return  # обрыв или чужое рукопожатие — не повод писать в консоль
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self.serve_forever, name="share-server", daemon=True)
