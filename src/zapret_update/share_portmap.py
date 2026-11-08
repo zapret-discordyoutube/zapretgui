@@ -23,22 +23,28 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import re
+import selectors
 import socket
 import threading
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+from .share_discover import local_lan_addresses
 from .share_serve import is_lan_address
 
 SSDP_ADDRESS = ("239.255.255.250", 1900)
 LEASE_SECONDS = 3600
 MAX_DESCRIPTION = 64 * 1024
+# Часть роутеров отвечает только на «upnp:rootdevice»: подходящий отбирается по описанию.
 SEARCH_TARGETS = (
     "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
     "urn:schemas-upnp-org:device:InternetGatewayDevice:2",
+    "upnp:rootdevice",
 )
+MAX_DESCRIPTIONS = 8  # сколько разных устройств расспрашивать: в сети бывают принтеры и телевизоры
 SERVICE_TYPES = (
     "urn:schemas-upnp-org:service:WANIPConnection:1",
     "urn:schemas-upnp-org:service:WANIPConnection:2",
@@ -72,45 +78,65 @@ def is_global_address(text: str) -> bool:
 
 def find_gateway(
     *,
-    timeout: float = 2.0,
+    timeout: float = 3.0,
     target: tuple[str, int] = SSDP_ADDRESS,
-    source: str = "",
+    source: str | None = None,
+    sources: Sequence[str] | None = None,
     allow_loopback: bool = False,
 ) -> Gateway | None:
-    """Роутер, ответивший на SSDP, вместе с адресом управления; иначе ``None``."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    """Роутер, ответивший на SSDP, вместе с адресом управления; иначе ``None``.
+
+    Вопрос уходит с каждого адреса компьютера в локальной сети (``sources``), а не с одного:
+    при VPN или виртуальном адаптере общий маршрут мог вести не в сеть роутера. ``source`` —
+    один адрес (для тестов).
+    """
+    origins = [source] if source is not None else (list(sources) if sources is not None else [*local_lan_addresses(), ""])
+    selector = selectors.DefaultSelector()
+    sockets: list[socket.socket] = []
     try:
-        sock.bind((source, 0))
-        sock.settimeout(0.3)
-        for search in SEARCH_TARGETS:
-            request = (
-                "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\n"
-                f"MX: 1\r\nST: {search}\r\n\r\n"
-            ).encode("ascii")
+        for origin in dict.fromkeys(origins):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sockets.append(sock)
             try:
-                sock.sendto(request, target)
+                sock.bind((origin, 0))
+                if origin:
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(origin))
+                sock.setblocking(False)
+                for search in SEARCH_TARGETS:
+                    request = (
+                        "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\n"
+                        f"MX: 2\r\nST: {search}\r\n\r\n"
+                    ).encode("ascii")
+                    sock.sendto(request, target)
+                selector.register(sock, selectors.EVENT_READ)
             except OSError:
-                return None
+                continue  # этого адреса сейчас нет или он не годится: остальные работают
         deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                data, sender = sock.recvfrom(2048)
-            except TimeoutError:
-                continue
-            except OSError:
-                return None
-            if not is_lan_address(sender[0], allow_loopback=allow_loopback):
-                continue
-            match = _LOCATION.search(data)
-            if not match:
-                continue
-            gateway = _read_description(match.group(1).decode("ascii", "ignore"), sender[0], allow_loopback)
-            if gateway is not None:
-                return gateway
+        tried: set[str] = set()
+        while time.monotonic() < deadline and len(tried) < MAX_DESCRIPTIONS:
+            for key, _events in selector.select(max(deadline - time.monotonic(), 0.0)):
+                try:
+                    data, sender = key.fileobj.recvfrom(2048)
+                except OSError:
+                    continue
+                if not is_lan_address(sender[0], allow_loopback=allow_loopback):
+                    continue
+                match = _LOCATION.search(data)
+                if not match:
+                    continue
+                location = match.group(1).decode("ascii", "ignore")
+                if location in tried:
+                    continue
+                tried.add(location)
+                gateway = _read_description(location, sender[0], allow_loopback)
+                if gateway is not None:
+                    return gateway
     except OSError:
         return None
     finally:
-        sock.close()
+        selector.close()
+        for sock in sockets:
+            sock.close()
     return None
 
 
@@ -130,7 +156,7 @@ def _read_description(location: str, sender: str, allow_loopback: bool) -> Gatew
         return None  # описание должно лежать на самом роутере
     try:
         path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
-        status, body = _http(parts.hostname, parts.port or 80, "GET", path)
+        status, body = _http(parts.hostname, parts.port or 80, "GET", path, timeout=2.0)
     except (OSError, http.client.HTTPException):
         return None
     if status != 200 or len(body) > MAX_DESCRIPTION or b"<!DOCTYPE" in body.upper() or b"<!ENTITY" in body.upper():

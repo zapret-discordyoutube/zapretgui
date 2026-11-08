@@ -162,6 +162,27 @@ class PageTests(unittest.TestCase):
         page.hide()
         self.assertFalse(page._timer.isActive())
 
+    def test_empty_page_stays_compact_at_the_top_instead_of_spreading_over_the_window(self) -> None:
+        page, _, _ = self._page({"available": True, "events": [], "summary": {}, "lan_port": 1, "notes": ["Раздача по интернету недоступна: роутер с UPnP не нашёлся"]})
+        page.resize(1100, 1000)
+        page.show()
+        for _ in range(5):
+            QApplication.processEvents()
+        # Раньше свободное место делилось между надписями поровну: карточка вырастала на сотни точек,
+        # а подпись внизу уезжала к краю окна.
+        self.assertLess(page.status_card.height(), 170)
+        from PyQt6.QtCore import QPoint
+
+        def top(widget):  # всё в координатах страницы: сводка лежит в своей строке, остальное прямо на странице
+            return widget.mapTo(page.content, QPoint(0, 0)).y()
+
+        def bottom(widget):
+            return top(widget) + widget.height()
+
+        self.assertLess(top(page.empty_label) - bottom(page.summary_label), 80)
+        self.assertLess(top(page.hint_label) - bottom(page.empty_label), 60)
+        self.assertLess(bottom(page.hint_label), 700)  # всё уместилось в верхней части окна высотой 1000
+
     def test_texts_exist_in_both_languages(self) -> None:
         from app.ui_texts import tr as catalog
 

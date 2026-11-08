@@ -26,8 +26,9 @@ def _description(control_url: str) -> bytes:
 class FakeRouter:
     """SSDP-ответчик и HTTP-сторона роутера. ``wan`` — внешний адрес, который он назовёт."""
 
-    def __init__(self, *, wan="93.184.216.34", description=None, location_host="127.0.0.1", refuse=False):
+    def __init__(self, *, wan="93.184.216.34", description=None, location_host="127.0.0.1", refuse=False, only_st=None):
         self.wan, self.refuse, self.actions, self.args = wan, refuse, [], []
+        self.only_st = only_st  # роутер отвечает только на этот вид поиска (как некоторые настоящие)
         self.description = description
         router = self
 
@@ -70,6 +71,8 @@ class FakeRouter:
         while not self._stop.is_set():
             try:
                 _data, sender = self.ssdp.recvfrom(1024)
+                if self.only_st and f"ST: {self.only_st}".encode() not in _data:
+                    continue
             except TimeoutError:
                 continue
             except OSError:
@@ -223,3 +226,31 @@ def test_every_failure_has_its_own_reason(router, monkeypatch):
     ok = share_portmap.PortMapper(45013, gateway_finder=lambda: _find(router()))
     assert ok.start() is not None and ok.reason == ""
     ok.stop()
+
+
+def test_router_answering_only_to_rootdevice_search_is_still_found(router):
+    gateway = _find(router(only_st="upnp:rootdevice"))
+    assert gateway is not None and gateway.control_path == "/ctl"
+
+
+def test_search_goes_out_of_every_adapter_and_a_dead_one_does_not_stop_it(router):
+    fake = router()
+    gateway = share_portmap.find_gateway(
+        timeout=1.5, target=fake.target, sources=["192.0.2.55", "127.0.0.1"], allow_loopback=True
+    )
+    assert gateway is not None  # первого адреса у компьютера нет (bind не вышел), второй работает
+
+
+def test_search_without_any_usable_adapter_gives_none_quickly():
+    began = time.monotonic()
+    assert share_portmap.find_gateway(timeout=0.5, target=("127.0.0.1", 9), sources=["192.0.2.55"]) is None
+    assert time.monotonic() - began < 2
+
+
+def test_many_foreign_devices_do_not_make_the_search_endless(router):
+    junk = [router(description=b"<root/>") for _ in range(share_portmap.MAX_DESCRIPTIONS + 3)]
+    began = time.monotonic()
+    assert share_portmap.find_gateway(
+        timeout=2.0, target=junk[0].target, source="127.0.0.1", allow_loopback=True
+    ) is None
+    assert time.monotonic() - began < 8

@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QAbstractItemView, QHBoxLayout, QHeaderView, QTableWidgetItem, QWidget
+from PyQt6.QtWidgets import QAbstractItemView, QHBoxLayout, QHeaderView, QSizePolicy, QTableWidgetItem, QWidget
 from qfluentwidgets import BodyLabel, BreadcrumbBar, CaptionLabel, FluentIcon, PushButton, TableWidget
 
 from app.ui_texts import tr as tr_catalog
@@ -64,6 +64,8 @@ class SharingActivityPage(BasePage):
         self.add_widget(self.breadcrumb)
 
         self.status_card = SettingsCard(parent=self.content)
+        # Карточка не растягивается по высоте окна: свободное место забирает таблица или пустота внизу.
+        self.status_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.status_labels: list[BodyLabel] = []
         for _ in range(2):
             label = BodyLabel(self.status_card)
@@ -98,7 +100,7 @@ class SharingActivityPage(BasePage):
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(COLUMNS.index("what"), QHeaderView.ResizeMode.Stretch)
         self.table.setMinimumHeight(320)
-        self.add_widget(self.table, stretch=1)
+        self.add_widget(self.table, stretch=100)
 
         self.empty_label = CaptionLabel(self.content)
         self.empty_label.setWordWrap(True)
@@ -106,6 +108,8 @@ class SharingActivityPage(BasePage):
         self.hint_label = CaptionLabel(self.content)
         self.hint_label.setWordWrap(True)
         self.add_widget(self.hint_label)
+        # Пока таблица спрятана (журнал пуст), лишнее место уходит сюда, а не растаскивает надписи по окну.
+        self.vBoxLayout.addStretch(1)
 
     def _retranslate(self) -> None:
         tr = self._tr
