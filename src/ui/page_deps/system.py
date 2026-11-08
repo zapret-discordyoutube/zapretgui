@@ -13,6 +13,7 @@ from ui.page_deps.types import (
     DpiRuntimeActions,
     FakesPageDeps,
     HostsFilePageDeps,
+    SharingActivityPageDeps,
     HostsPageDeps,
     PremiumPageDeps,
     UpdateRuntimeActions,
@@ -79,6 +80,16 @@ def build_hosts_file_page_kwargs(*, page_name: PageName, hosts_feature, show_pag
         "deps": HostsFilePageDeps(
             hosts_feature=hosts_feature,
             open_hosts_page=lambda: show_page(PageName.HOSTS, up=True),
+        ),
+    }
+
+
+def build_sharing_activity_page_kwargs(*, page_name: PageName, updater_feature, show_page) -> dict:
+    _ = page_name
+    return {
+        "deps": SharingActivityPageDeps(
+            updater_feature=updater_feature,
+            open_servers_page=lambda: show_page(PageName.SERVERS, up=True),
         ),
     }
 
@@ -302,6 +313,7 @@ def build_servers_page_kwargs(
             note_failure=updater_feature.note_auto_install_missed,
         ),
         "open_about": lambda: show_page(PageName.ABOUT, up=True),
+        "open_activity": lambda: show_page(PageName.SHARING_ACTIVITY, allow_internal=True),
         "create_changelog_link_open_worker": _create_changelog_link_open_worker,
     }
 
@@ -432,6 +444,7 @@ __all__ = [
     "build_dpi_settings_page_kwargs",
     "build_fakes_page_kwargs",
     "build_hosts_file_page_kwargs",
+    "build_sharing_activity_page_kwargs",
     "build_hosts_page_kwargs",
     "build_logs_page_kwargs",
     "build_network_page_kwargs",

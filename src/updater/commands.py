@@ -63,6 +63,19 @@ def set_share_updates_internet(enabled: bool) -> None:
         log(f"Раздача по интернету не переключилась: {exc}", "WARNING")
 
 
+def sharing_activity() -> dict:
+    """Снимок раздачи из памяти для страницы «Кто подключается» (службу не создаёт, на диск не ходит)."""
+    from updater.share import wiring
+
+    return wiring.activity_snapshot()
+
+
+def clear_sharing_activity() -> None:
+    from updater.share import wiring
+
+    wiring.clear_activity()
+
+
 def get_update_skipped_version() -> str:
     from settings.store import get_update_skipped_version
 

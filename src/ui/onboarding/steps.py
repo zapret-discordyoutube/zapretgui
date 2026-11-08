@@ -89,6 +89,7 @@ TOUR_PAGES_WITHOUT_STEPS: dict[PageName, str] = {
     PageName.PREMIUM: "Подписка не нужна, чтобы научиться пользоваться программой.",
     PageName.SUPPORT: "Куда обращаться за помощью, рассказывает шаг about_help.",
     PageName.ORCHESTRA_SETTINGS: "Оркестратор — отдельный режим, у экскурсии для него только общие шаги.",
+    PageName.SHARING_ACTIVITY: "Журнал раздачи открывают кнопкой на странице «Обновления»; о нём рассказывают шаги updates_share и updates_share_internet.",
 }
 
 TourTarget = QWidget | tuple[QWidget, QRect]

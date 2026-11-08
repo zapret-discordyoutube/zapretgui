@@ -69,6 +69,12 @@ class UpdaterFeature:
     def set_share_updates_internet(self, enabled: bool) -> None:
         self._commands().set_share_updates_internet(bool(enabled))
 
+    def sharing_activity(self) -> dict:
+        return dict(self._commands().sharing_activity())
+
+    def clear_sharing_activity(self) -> None:
+        self._commands().clear_sharing_activity()
+
     # Все методы ниже ходят в settings.sqlite3 или в сеть — только из фона.
     def get_update_skipped_version(self) -> str:
         return str(self._commands().get_update_skipped_version() or "")

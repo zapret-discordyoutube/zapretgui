@@ -3,6 +3,7 @@ from __future__ import annotations
 from updater.commands import (
     auto_install_allowed,
     check_installation_integrity,
+    clear_sharing_activity,
     create_release_watcher,
     get_update_skipped_version,
     is_auto_update_enabled,
@@ -22,6 +23,7 @@ from updater.commands import (
     set_share_updates_internet,
     set_share_updates_lan,
     set_update_skipped_version,
+    sharing_activity,
     startup_whats_new,
     update_busy_reason,
 )
@@ -29,6 +31,7 @@ from updater.commands import (
 __all__ = [
     "auto_install_allowed",
     "check_installation_integrity",
+    "clear_sharing_activity",
     "create_release_watcher",
     "get_update_skipped_version",
     "is_auto_update_enabled",
@@ -48,6 +51,7 @@ __all__ = [
     "set_share_updates_internet",
     "set_share_updates_lan",
     "set_update_skipped_version",
+    "sharing_activity",
     "startup_whats_new",
     "update_busy_reason",
 ]

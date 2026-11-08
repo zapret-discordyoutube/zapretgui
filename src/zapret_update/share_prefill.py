@@ -123,6 +123,7 @@ def prefill_from_neighbours(
     cancelled: Callable[[], bool] = lambda: False,
     threads: int = THREADS,
     everything: bool = False,
+    activity=None,
 ) -> PrefillResult:
     """Кладёт в ``ready/`` всё, что нашлось у соседей; остальное — забота ``fetch_plan``.
 
@@ -148,18 +149,27 @@ def prefill_from_neighbours(
         if ready.exists():
             return  # fetch_plan сам проверит, годится ли он
         part = parts_dir / f"{sha}.lan.part"
+
+        def note(neighbour: Neighbour, result: str, size: int = 0) -> None:
+            if activity is not None:
+                activity.add("out", "internet" if neighbour.tls else "lan", neighbour.host, "file", want.entry.path, size, result)
+
         for neighbour in pool_state.alive():
             if cancelled():
                 return
             try:
                 _download(neighbour, want, part, timeout, cancelled)
             except _Absent:
+                note(neighbour, "not_found")
                 continue
             except _Mismatch:
+                note(neighbour, "failed")
                 pool_state.strike(neighbour, heavy=True)
             except (OSError, http.client.HTTPException, ssl.SSLError):
+                note(neighbour, "failed")
                 pool_state.strike(neighbour)
             else:
+                note(neighbour, "ok", want.entry.size)
                 os.replace(part, ready)
                 with lock:
                     result.files += 1

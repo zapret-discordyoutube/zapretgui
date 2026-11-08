@@ -69,6 +69,7 @@ PAGE_PERFORMANCE_PROFILE_OVERRIDES: dict[PageName, PagePerformanceProfile] = {
             PageName.BLOCKCHECK,
             PageName.LOGS,
             PageName.SERVERS,
+            PageName.SHARING_ACTIVITY,
             PageName.ORCHESTRA,
             PageName.TELEGRAM_PROXY,
             PageName.TELEGRAM_PROXY_ADVANCED,

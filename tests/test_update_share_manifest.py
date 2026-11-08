@@ -143,7 +143,7 @@ def test_service_hands_the_signed_list_to_both_of_its_servers(tmp_path) -> None:
     class Net:
         running = False
 
-        def start(self, files, version, manifest_provider=None):
+        def start(self, files, version, manifest_provider=None, activity=None):
             seen["net"] = manifest_provider
             self.running = True
             return True

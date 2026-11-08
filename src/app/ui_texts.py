@@ -3532,6 +3532,162 @@ TEXTS: dict[str, dict[str, str]] = {
             "ry file is checked against the signed release list. It works if your router can open ports (UPnP) and you are not behind your provider's NAT. Off until you turn it on yourself."
         ),
     },
+    "page.sharing_activity.title": {
+        "ru": "Кто подключается",
+        "en": "Who connects",
+    },
+    "page.sharing_activity.status.lan.on": {
+        "ru": "Раздача по локальной сети: включена, порт {port}",
+        "en": "Local network sharing: on, port {port}",
+    },
+    "page.sharing_activity.status.lan.off": {
+        "ru": "Раздача по локальной сети: не работает",
+        "en": "Local network sharing: not running",
+    },
+    "page.sharing_activity.status.net.on": {
+        "ru": "Раздача через интернет: включена, ваш адрес для других — {address}",
+        "en": "Internet sharing: on, your address for others is {address}",
+    },
+    "page.sharing_activity.status.net.off": {
+        "ru": "Раздача через интернет: не работает",
+        "en": "Internet sharing: not running",
+    },
+    "page.sharing_activity.status.unavailable": {
+        "ru": "Раздача ещё не запускалась: она стартует через минуту после запуска программы.",
+        "en": "Sharing has not started yet: it starts about a minute after the app launches.",
+    },
+    "page.sharing_activity.summary": {
+        "ru": "Обращений: {events} · разных гостей: {visitors} · отдано: {given} · получено: {taken}",
+        "en": "Requests: {events} · distinct visitors: {visitors} · given: {given} · taken: {taken}",
+    },
+    "page.sharing_activity.dir.in": {
+        "ru": "К вам",
+        "en": "To you",
+    },
+    "page.sharing_activity.dir.out": {
+        "ru": "От вас",
+        "en": "From you",
+    },
+    "page.sharing_activity.via.lan": {
+        "ru": "Локальная сеть",
+        "en": "Local network",
+    },
+    "page.sharing_activity.via.internet": {
+        "ru": "Интернет",
+        "en": "Internet",
+    },
+    "page.sharing_activity.what.search": {
+        "ru": "Вопрос в сети: у кого есть версия?",
+        "en": "Network question: who has the version?",
+    },
+    "page.sharing_activity.what.file": {
+        "ru": "Файл {name}",
+        "en": "File {name}",
+    },
+    "page.sharing_activity.what.peers": {
+        "ru": "Обмен адресами",
+        "en": "Address exchange",
+    },
+    "page.sharing_activity.what.manifest": {
+        "ru": "Подписанный список выпуска",
+        "en": "Signed release list",
+    },
+    "page.sharing_activity.what.request": {
+        "ru": "Посторонний запрос",
+        "en": "Foreign request",
+    },
+    "page.sharing_activity.result.given": {
+        "ru": "отдано",
+        "en": "given",
+    },
+    "page.sharing_activity.result.taken": {
+        "ru": "получено",
+        "en": "taken",
+    },
+    "page.sharing_activity.result.answered": {
+        "ru": "отвечено",
+        "en": "answered",
+    },
+    "page.sharing_activity.result.interrupted": {
+        "ru": "прервано",
+        "en": "interrupted",
+    },
+    "page.sharing_activity.result.refused": {
+        "ru": "отказано",
+        "en": "refused",
+    },
+    "page.sharing_activity.result.busy": {
+        "ru": "заняты",
+        "en": "busy",
+    },
+    "page.sharing_activity.result.not_found": {
+        "ru": "нет такого",
+        "en": "not found",
+    },
+    "page.sharing_activity.result.failed": {
+        "ru": "сбой",
+        "en": "failed",
+    },
+    "page.sharing_activity.column.time": {
+        "ru": "Время",
+        "en": "Time",
+    },
+    "page.sharing_activity.column.dir": {
+        "ru": "Кто к кому",
+        "en": "Who to whom",
+    },
+    "page.sharing_activity.column.via": {
+        "ru": "Откуда",
+        "en": "From",
+    },
+    "page.sharing_activity.column.peer": {
+        "ru": "Адрес",
+        "en": "Address",
+    },
+    "page.sharing_activity.column.what": {
+        "ru": "Что",
+        "en": "What",
+    },
+    "page.sharing_activity.column.size": {
+        "ru": "Размер",
+        "en": "Size",
+    },
+    "page.sharing_activity.column.result": {
+        "ru": "Итог",
+        "en": "Result",
+    },
+    "page.sharing_activity.clear": {
+        "ru": "Очистить журнал",
+        "en": "Clear log",
+    },
+    "page.sharing_activity.table": {
+        "ru": "Журнал обращений к раздаче обновлений",
+        "en": "Sharing requests log",
+    },
+    "page.sharing_activity.table.description": {
+        "ru": "Каждая строка: время, кто к кому обращался, откуда, адрес, что просили, размер и итог.",
+        "en": "Each row: time, who contacted whom, from where, the address, what was asked, the size and the result.",
+    },
+    "page.sharing_activity.hint": {
+        "ru": "Журнал хранится, только пока программа запущена: адреса других компьютеров на диск не записываются.",
+        "en": "The log is kept only while the app is running: addresses of other computers are never written to disk.",
+    },
+    "page.sharing_activity.empty": {
+        "ru": "Пока никто не подключался. Когда другой компьютер возьмёт у вас файл или спросит про версию, это появится здесь.",
+        "en": "Nobody has connected yet. When another computer takes a file from you or asks about a version, it will appear here.",
+    },
+    "page.sharing_activity.empty.off": {
+        "ru": "Раздача выключена или ещё не запустилась: включите её на странице «Серверы».",
+        "en": "Sharing is off or has not started yet: turn it on on the Servers page.",
+    },
+    "page.sharing_activity.open": {
+        "ru": "Открыть",
+        "en": "Open",
+    },
+    "page.sharing_activity.open.description": {
+        "ru": "Журнал: кто брал у этого компьютера файлы обновления и откуда.",
+        "en": "A log of who took update files from this computer, and from where.",
+    },
     "page.servers.settings.version_channel_template": {
         "ru": "v{version} · {channel}",
         "en": "v{version} · {channel}",
@@ -7140,6 +7296,7 @@ NAV_PAGE_TEXT_KEYS: dict[PageName, str] = {
     PageName.PREMIUM: "nav.page.premium",
     PageName.LOGS: "nav.page.logs",
     PageName.SERVERS: "page.servers.title",
+    PageName.SHARING_ACTIVITY: "page.sharing_activity.title",
     PageName.ABOUT: "nav.page.about",
     PageName.SUPPORT: "page.support.title",
     PageName.TELEGRAM_PROXY_ADVANCED: "page.telegram_proxy_advanced.title",

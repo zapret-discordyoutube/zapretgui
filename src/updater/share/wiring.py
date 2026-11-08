@@ -33,6 +33,34 @@ def peer_book() -> share_peers.PeerBook:
         return _book
 
 
+def activity_snapshot() -> dict:
+    """Что показывает страница «Кто подключается»: состояние раздачи и журнал событий.
+
+    Только читает уже созданное в памяти (службу не создаёт и на диск не ходит): страница
+    спрашивает это каждые пару секунд из окна. Службы ещё нет — «пока ничего».
+    """
+    service = _default
+    if service is None:
+        return {"available": False}
+    side = service._internet
+    mapping = getattr(side, "mapping", None) if side is not None else None
+    notes = [text for _when, text in list(service.notes) + (list(side.notes) if side is not None else [])]
+    return {
+        "available": True,
+        "lan_port": service.port,
+        "internet_running": service.internet_running,
+        "internet_address": f"{mapping.external_ip}:{mapping.external_port}" if mapping is not None else "",
+        "notes": notes[-6:],
+        "events": service.activity.snapshot(),
+        "summary": service.activity.summary(),
+    }
+
+
+def clear_activity() -> None:
+    if _default is not None:
+        _default.activity.clear()
+
+
 def manifest_blob():
     """Подписанный список своей версии (текст и подпись) для соседей без доступа к серверам; нет — ``None``."""
     from updater.install import file_update
@@ -182,6 +210,6 @@ def refresh_default() -> bool:
 
 
 __all__ = [
-    "default_service", "internet_finder", "manifest_blob", "peer_book", "refresh_default", "registry_bases",
+    "activity_snapshot", "clear_activity", "default_service", "internet_finder", "manifest_blob", "peer_book", "refresh_default", "registry_bases",
     "release_from_peers",
 ]

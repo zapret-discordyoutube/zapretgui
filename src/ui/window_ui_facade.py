@@ -22,6 +22,7 @@ def _get_nav_labels():
         PageName.NETWORK_CUSTOM_DNS: "Свой DNS",
         PageName.HOSTS: "Редактор hosts",
         PageName.HOSTS_FILE: "Файл hosts",
+        PageName.SHARING_ACTIVITY: "Кто подключается",
         PageName.BLOCKCHECK: "BlockCheck",
         PageName.APPEARANCE: "Оформление",
         PageName.PREMIUM: "Донат",

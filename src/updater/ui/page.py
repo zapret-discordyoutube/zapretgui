@@ -40,7 +40,7 @@ from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.widgets.win11_controls import Win11ToggleRow
 from qfluentwidgets import (
-    CaptionLabel, PushSettingCard, SettingCardGroup, InfoBar,
+    CaptionLabel, FluentIcon, PushSettingCard, SettingCardGroup, InfoBar,
 )
 
 from config.build_info import APP_VERSION, CHANNEL
@@ -85,6 +85,7 @@ class ServersPage(BasePage):
         install_service,
         open_about,
         create_changelog_link_open_worker,
+        open_activity=None,
     ):
         super().__init__(
             "Серверы",
@@ -105,6 +106,7 @@ class ServersPage(BasePage):
         self._channel_opener = ChannelOpener(updater_feature=updater_feature, parent=self)
         self._create_changelog_link_open_worker = create_changelog_link_open_worker
         self._open_about = open_about
+        self._open_activity = open_activity
         self._idle_view_applied = False
         self._cleanup_in_progress = False
         self._auto_check_enabled = False
@@ -589,6 +591,11 @@ class ServersPage(BasePage):
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
         self._flow.set_language(self._ui_language)
+        card = getattr(self, "_activity_card", None)
+        if card is not None:
+            card.setTitle(self._tr("page.sharing_activity.title", "Кто подключается"))
+            card.setContent(self._tr("page.sharing_activity.open.description", "Журнал: кто брал у этого компьютера файлы обновления и откуда."))
+            card.button.setText(self._tr("page.sharing_activity.open", "Открыть"))
         apply_servers_page_language(
             tr_fn=self._tr,
             ui_language=self._ui_language,
@@ -679,6 +686,17 @@ class ServersPage(BasePage):
         self._toggle_label = settings_widgets.toggle_label
         self._version_info_label = settings_widgets.version_info_label
         self.add_widget(self._settings_card)
+        # Журнал раздачи: кто и откуда брал файлы обновления у этого компьютера.
+        self._activity_card = PushSettingCard(
+            self._tr("page.sharing_activity.open", "Открыть"),
+            FluentIcon.SHARE,
+            self._tr("page.sharing_activity.title", "Кто подключается"),
+            self._tr("page.sharing_activity.open.description", "Журнал: кто брал у этого компьютера файлы обновления и откуда."),
+            self.content,
+        )
+        self._activity_card.clicked.connect(lambda *_: self._open_activity() if self._open_activity else None)
+        self._activity_card.setVisible(self._open_activity is not None)
+        self.add_widget(self._activity_card)
         self.add_widget(self._version_info_label)
 
         # Telegram card

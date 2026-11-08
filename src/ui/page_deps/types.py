@@ -32,6 +32,12 @@ class HostsFilePageDeps:
 
 
 @dataclass(frozen=True, slots=True)
+class SharingActivityPageDeps:
+    updater_feature: object
+    open_servers_page: Callable[[], object]
+
+
+@dataclass(frozen=True, slots=True)
 class FakesPageDeps:
     """Узкие действия страницы «Фейки»: только фабрики фоновых worker-ов и навигация."""
 
@@ -69,6 +75,7 @@ __all__ = [
     "DnsPageDeps",
     "FakesPageDeps",
     "HostsFilePageDeps",
+    "SharingActivityPageDeps",
     "HostsPageDeps",
     "PremiumPageDeps",
     "UpdateRuntimeActions",

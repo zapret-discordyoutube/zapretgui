@@ -101,7 +101,9 @@ class Responder:
         port: int = DISCOVERY_PORT_GUI,
         admits: Callable[[str], bool] | None = None,
         allow_loopback: bool = False,
+        activity=None,
     ) -> None:
+        self._activity = activity  # журнал раздачи: кто спрашивал «у кого есть версия?»
         self._product, self._version, self._http_port = product, version, int(http_port)
         self._admits = admits or (lambda address: is_lan_address(address, allow_loopback=allow_loopback))
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -159,6 +161,8 @@ class Responder:
         self._socket.sendto(
             _pack(op="here", product=self._product, version=self._version, port=self._http_port), sender
         )
+        if self._activity is not None:
+            self._activity.add("in", "lan", sender[0], "search")
 
 
 def find_neighbours(

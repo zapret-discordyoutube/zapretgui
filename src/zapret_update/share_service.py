@@ -22,10 +22,13 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
+from collections import deque
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from .plan import HashCache
+from .share_activity import ActivityLog
 from .share_discover import DISCOVERY_PORT_GUI, Responder
 from .share_serve import InstalledFiles, ShareServer
 
@@ -77,12 +80,19 @@ class SharingService:
         self._current_version, self._adopt = current_version, adopt
         self._private_network, self._open_firewall = private_network, open_firewall
         self._discovery_port, self._host, self._allow_loopback = discovery_port, host, allow_loopback
-        self._report = report
         self._internet_enabled, self._internet = internet_enabled, internet
+        # Последние слова службы о себе («сеть не частная», «правило не добавилось»): их показывает страница.
+        self.notes: deque[tuple[float, str]] = deque(maxlen=8)
+        self._report_out = report
         self._manifest_blob = manifest_blob  # (список, подпись) своей версии: соседи берут его, если серверы недоступны
         self._lock = threading.Lock()
         self._server: ShareServer | None = None
         self._responder: Responder | None = None
+        self.activity = ActivityLog()  # кто к нам обращался: показывает страница «Кто подключается»
+
+    def _report(self, text: str) -> None:
+        self.notes.append((time.time(), str(text)))
+        self._report_out(text)
 
     @property
     def running(self) -> bool:
@@ -187,12 +197,13 @@ class SharingService:
                 self._report("Раздача обновлений: правило брандмауэра не добавилось, работаем без него")
         server = ShareServer(
             self._files(installed), host=self._host, allow_loopback=self._allow_loopback,
-            manifest_provider=self._manifest_blob,
+            manifest_provider=self._manifest_blob, activity=self.activity, via="lan",
         )
         try:
             responder = Responder(
                 self._product, installed.version, server.port,
                 host=self._host, port=self._discovery_port, allow_loopback=self._allow_loopback,
+                activity=self.activity,
             )
         except OSError:
             server.server_close()
@@ -206,7 +217,7 @@ class SharingService:
     def _start_internet_locked(self, installed) -> bool:
         if not self._ready(installed, "Раздача по интернету"):
             return False
-        return bool(self._internet.start(self._files(installed), installed.version, self._manifest_blob))
+        return bool(self._internet.start(self._files(installed), installed.version, self._manifest_blob, self.activity))
 
     def _stop_locked(self, why: str) -> None:
         server, responder = self._server, self._responder

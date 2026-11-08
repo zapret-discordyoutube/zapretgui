@@ -59,6 +59,7 @@ def fill_from_neighbours(
     on_stage: Callable[[str], None] = lambda _text: None,
     report: Callable[[str], None] = lambda _text: None,
     fill=prefill.prefill_from_neighbours,
+    activity=None,
 ) -> prefill.PrefillResult:
     """Берёт файлы у соседей; при любой беде возвращает пустой итог."""
     try:
@@ -66,7 +67,7 @@ def fill_from_neighbours(
         if not neighbours or not plan.want:
             return prefill.PrefillResult()
         on_stage("Скачивание у соседей по сети…")
-        result = fill(plan, work_dir=work_dir, neighbours=neighbours, cancelled=cancelled)
+        result = fill(plan, work_dir=work_dir, neighbours=neighbours, cancelled=cancelled, activity=activity)
         report(
             f"Соседи по сети: найдено {len(neighbours)}, взято файлов {result.files} "
             f"({result.bytes / 1048576:.1f} МБ), остальное — с серверов"
@@ -86,6 +87,7 @@ def fill_from_internet(
     on_stage: Callable[[str], None] = lambda _text: None,
     report: Callable[[str], None] = lambda _text: None,
     fill=prefill.prefill_from_neighbours,
+    activity=None,
 ) -> prefill.PrefillResult:
     """Запасной путь: серверы не отдали файлы, берём их у копий программы в интернете.
 
@@ -101,7 +103,7 @@ def fill_from_internet(
         if not neighbours:
             report("Серверы обновлений не отдали файлы, а в интернете никого не нашлось")
             return prefill.PrefillResult()
-        result = fill(plan, work_dir=work_dir, neighbours=neighbours, cancelled=cancelled, everything=True)
+        result = fill(plan, work_dir=work_dir, neighbours=neighbours, cancelled=cancelled, everything=True, activity=activity)
         report(
             f"Серверы не отдали файлы: у копий в интернете найдено {len(neighbours)}, взято файлов {result.files} "
             f"({result.bytes / 1048576:.1f} МБ)"

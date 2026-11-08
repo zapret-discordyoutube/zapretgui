@@ -67,6 +67,11 @@ class InstalledFiles:
     def __contains__(self, sha256: str) -> bool:
         return sha256 in self._by_sha
 
+    def name_of(self, sha256: str) -> str:
+        """Путь файла из подписанного списка (для журнала); чужого имени сюда не попадает."""
+        entry = self._by_sha.get(sha256)
+        return entry.path if entry is not None else ""
+
     def open(self, sha256: str) -> tuple[BinaryIO, int] | None:
         """Открытый файл и его размер, если он есть и не изменился."""
         entry = self._by_sha.get(sha256)
@@ -90,21 +95,36 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         return
 
     def _refuse(self, code: int) -> None:
+        self._result = {403: "refused", 404: "not_found", 416: "refused", 503: "busy"}.get(code, "failed")
         self.send_response(code)
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802 — имя задано http.server
+        self._result, self._what, self._detail, self._sent = "ok", "request", "", 0
+        try:
+            self._answer()
+        finally:
+            activity = self.server.activity
+            if activity is not None:
+                activity.add(
+                    "in", self.server.via, self.client_address[0], self._what, self._detail, self._sent, self._result
+                )
+
+    def _answer(self) -> None:
         if not self.server.admits(self.client_address[0]):
             return self._refuse(403)
         path = self.path.split("?", 1)[0]
         if path == PEERS_ROUTE and self.server.peers_provider is not None:
+            self._what = "peers"
             return self._send_peers()
         if path == MANIFEST_ROUTE and self.server.manifest_provider is not None:
+            self._what = "manifest"
             return self._send_manifest()
         name = path[len(ROUTE):] if path.startswith(ROUTE) else ""
         if not _HEX64.fullmatch(name):
             return self._refuse(404)
+        self._what, self._detail = "file", self.server.files.name_of(name)
         if not self.server.slots.acquire(blocking=False):
             return self._refuse(503)
         try:
@@ -128,8 +148,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(body)
+            self._sent = len(body)
         except OSError:
-            pass
+            self._result = "interrupted"
 
     def _send_peers(self) -> None:
         product, version = self.server.identity
@@ -140,8 +161,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(body)
+            self._sent = len(body)
         except OSError:
-            pass
+            self._result = "interrupted"
 
     def _send(self, handle: BinaryIO, size: int) -> None:
         start = 0
@@ -160,8 +182,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             while chunk := handle.read(CHUNK):
                 self.wfile.write(chunk)
+                self._sent += len(chunk)
         except OSError:
-            pass  # получатель ушёл: это его право
+            self._result = "interrupted"  # получатель ушёл: это его право
 
 
 class ShareServer(http.server.ThreadingHTTPServer):
@@ -180,7 +203,11 @@ class ShareServer(http.server.ThreadingHTTPServer):
         peers_provider: Callable[[], Iterable[tuple[str, int]]] | None = None,
         identity: tuple[str, str] = ("", ""),
         manifest_provider: Callable[[], tuple[bytes, bytes] | None] | None = None,
+        activity=None,
+        via: str = "lan",
     ) -> None:
+        self.activity = activity  # журнал раздачи: кто и что у нас брал
+        self.via = via  # "lan" или "internet": подпись событий
         self.ssl_context = ssl_context
         self.peers_provider = peers_provider  # есть у раздачи по интернету: обмен адресами
         self.identity = identity  # (продукт, версия): соседу видно, нужны ли ему наши файлы

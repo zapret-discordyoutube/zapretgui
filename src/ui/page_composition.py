@@ -18,6 +18,7 @@ from ui.page_deps.system import (
     build_dpi_settings_page_kwargs,
     build_fakes_page_kwargs,
     build_hosts_file_page_kwargs,
+    build_sharing_activity_page_kwargs,
     build_hosts_page_kwargs,
     build_logs_page_kwargs,
     build_network_page_kwargs,
@@ -175,6 +176,11 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
         build_servers_page_kwargs,
         features=("runtime", "updater", "external_actions"),
         actions=("show_page", "request_exit"),
+    ),
+    PageName.SHARING_ACTIVITY: PageDepsSpec(
+        build_sharing_activity_page_kwargs,
+        features=("updater",),
+        actions=("show_page",),
     ),
     PageName.BLOCKCHECK: PageDepsSpec(
         build_blockcheck_page_kwargs,

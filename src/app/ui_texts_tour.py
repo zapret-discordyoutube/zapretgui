@@ -892,7 +892,8 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "в интернете, в том числе в других городах, а ваш компьютер будет отдавать файлы им.\n\n"
             "Цена такая: роутер откроет порт, а ваш IP-адрес увидят те, кто с вами соединится. Каждый файл "
             "проверяется по подписанному списку выпуска, поэтому подсунуть чужой нельзя. Это работает, если "
-            "роутер умеет открывать порты (UPnP) и у вас не провайдерский NAT."
+            "роутер умеет открывать порты (UPnP) и у вас не провайдерский NAT.\n\n"
+            "Кто и откуда брал у вас файлы, видно на странице «Кто подключается»: кнопка под переключателями."
         ),
         "en": (
             "The Share updates over the internet switch is off until you turn it on yourself. If the update "
@@ -900,7 +901,8 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "the internet, including other cities, and your computer hands files out to them.\n\n"
             "The price: your router opens a port, and your IP address is seen by those who connect to you. Every "
             "file is checked against the signed release list, so a wrong one cannot be slipped in. It works if your "
-            "router can open ports (UPnP) and you are not behind your provider's NAT."
+            "router can open ports (UPnP) and you are not behind your provider's NAT.\n\n"
+            "Who took files from you, and from where, is shown on the Who connects page: the button below the switches."
         ),
     },
     "onboarding.step.updates_share.title": {

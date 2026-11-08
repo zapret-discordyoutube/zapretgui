@@ -44,6 +44,7 @@ class PageName(Enum):
     PREMIUM = auto()                 # Донат/Premium
     LOGS = auto()                    # Логи
     SERVERS = auto()                 # Серверы обновлений
+    SHARING_ACTIVITY = auto()        # Кто подключается к раздаче обновлений (вложенная в «Серверы»)
     ABOUT = auto()                   # О программе
     SUPPORT = auto()                 # Поддержка (Forgejo Issues и каналы сообщества)
 

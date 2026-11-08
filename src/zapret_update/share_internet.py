@@ -20,6 +20,7 @@ import http.client
 import ssl
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
@@ -125,7 +126,8 @@ class InternetSide:
     ) -> None:
         self._product, self._book, self._bases = product, book, bases
         self._open_firewall, self._mapper_factory, self._register = open_firewall, mapper_factory, register_fn
-        self._tls_factory, self._host, self._heartbeat, self._report = tls_factory, host, heartbeat, report
+        self._tls_factory, self._host, self._heartbeat, self._report_out = tls_factory, host, heartbeat, report
+        self.notes: deque[tuple[float, str]] = deque(maxlen=6)  # что и почему не вышло: видно на странице раздачи
         self._allow_loopback = allow_loopback
         self._server: ShareServer | None = None
         self._mapper = None
@@ -133,6 +135,10 @@ class InternetSide:
         self._thread: threading.Thread | None = None
         self.mapping = None
         self.version = ""
+
+    def _report(self, text: str) -> None:
+        self.notes.append((time.time(), str(text)))
+        self._report_out(text)
 
     @property
     def running(self) -> bool:
@@ -142,10 +148,11 @@ class InternetSide:
     def port(self) -> int | None:
         return self._server.port if self._server is not None else None
 
-    def start(self, files: InstalledFiles, version: str, manifest_provider=None) -> bool:
+    def start(self, files: InstalledFiles, version: str, manifest_provider=None, activity=None) -> bool:
         server = ShareServer(
             files, host=self._host, ssl_context=self._tls_factory(), peers_provider=self._book.sample,
             identity=(self._product, version), admits=lambda _address: True, manifest_provider=manifest_provider,
+            activity=activity, via="internet",
         )
         server.start()  # сразу: остановка сервера, который не запускали, зависла бы
         try:
