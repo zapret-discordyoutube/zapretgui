@@ -461,3 +461,62 @@ def test_sharing_switch_is_read_from_settings_and_fails_closed() -> None:
         assert file_update.sharing_enabled() is False
     with patch.object(store, "get_share_updates_lan", side_effect=OSError("db locked")):
         assert file_update.sharing_enabled() is False
+
+
+def _prepare_with_failing_servers(tmp_path, *, find, taken_files):
+    """Серверы не отдают файлы: сначала fetch_plan падает, потом (если нужно) идёт запасной путь."""
+    from updater.release.signed import SignedRelease
+    from updater.share import wiring
+    from zapret_update import fetch, plan as plan_module, share_prefill, stage
+
+    calls: list[str] = []
+    listed = manifest.parse({"schema": 1, "product": "zapret-gui", "channel": "dev", "version": "1.0.0.2", "created": 1,
+                             "key": "k", "files": [], "installer": {"name": "Z.exe", "size": 40, "sha256": "c" * 64}})
+    fake_plan = SimpleNamespace(download_size=0, want=[object()], keep=[], remove=[])
+    attempts = {"n": 0}
+
+    def servers(*_a, **_k):
+        attempts["n"] += 1
+        calls.append(f"servers{attempts['n']}")
+        if attempts["n"] == 1 or taken_files == 0:
+            raise fetch.FetchError("blocked", "net")
+        return {}
+
+    def internet(planned, **kwargs):
+        calls.append("internet")
+        assert kwargs["find"] is find
+        return share_prefill.PrefillResult(files=taken_files, bytes=0)
+
+    def stop_after_download(*_a, **_k):
+        calls.append("stage")
+        raise RuntimeError("downloaded")
+
+    with (
+        patch.object(file_update, "install_root", return_value=tmp_path),
+        patch.object(share_client, "fill_from_internet", internet),
+        patch.object(wiring, "internet_finder", lambda version: find),
+        patch.object(plan_module, "make_plan", lambda *_a, **_k: fake_plan),
+        patch.object(fetch, "fetch_plan", servers),
+        patch.object(stage, "build_stage", stop_after_download),
+        patch.object(file_update, "store_sources", return_value=[]),
+        patch.object(file_update, "plan_summary", return_value=""),
+    ):
+        with pytest.raises((RuntimeError, fetch.FetchError)) as caught:
+            file_update.prepare(SignedRelease(listed, b"{}", b"sig"), channel="dev", current_version="1.0.0.1", start_in_tray=False)
+    return calls, caught.value
+
+
+def test_internet_peers_are_asked_only_after_the_servers_failed(tmp_path) -> None:
+    find = lambda: []  # noqa: E731
+    calls, error = _prepare_with_failing_servers(tmp_path, find=find, taken_files=2)
+    assert calls == ["servers1", "internet", "servers2", "stage"] and str(error) == "downloaded"
+
+
+def test_without_the_internet_switch_the_server_failure_is_final(tmp_path) -> None:
+    calls, error = _prepare_with_failing_servers(tmp_path, find=None, taken_files=2)
+    assert calls == ["servers1"] and "blocked" in str(error)
+
+
+def test_if_internet_peers_gave_nothing_the_server_failure_is_final(tmp_path) -> None:
+    calls, error = _prepare_with_failing_servers(tmp_path, find=lambda: [], taken_files=0)
+    assert calls == ["servers1", "internet"] and "blocked" in str(error)

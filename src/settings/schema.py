@@ -75,6 +75,9 @@ def default_program() -> dict[str, Any]:
         # Отдавать файлы обновления другим компьютерам в той же домашней/рабочей
         # сети (zapret_update.share_*). По интернету не раздаётся.
         "share_updates_lan": True,
+        # Раздача и забор файлов обновления через интернет: открывает порт на роутере и показывает
+        # адрес соседям, поэтому включается только самим человеком.
+        "share_updates_internet": False,
         "discord_auto_restart": True,
         "max_blocked": False,
         "russian_state_media_blocked": False,

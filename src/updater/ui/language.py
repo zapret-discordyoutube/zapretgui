@@ -38,6 +38,7 @@ def apply_servers_page_language(
     toggle_label,
     auto_check_card,
     share_lan_card=None,
+    share_internet_card=None,
     version_info_label,
     telegram_card,
     telegram_info_label,
@@ -96,6 +97,17 @@ def apply_servers_page_language(
         )
         share_lan_card.set_texts(share_lan_title, share_lan_description)
         set_auto_check_accessibility(share_lan_card, title=share_lan_title, description=share_lan_description)
+
+    if share_internet_card is not None:
+        share_internet_title = tr_fn("page.servers.settings.share_internet", "Делиться обновлениями через интернет")
+        share_internet_description = tr_fn(
+            "page.servers.settings.share_internet.description",
+            "Если серверы обновлений не отдают файлы (их заблокировали), программа возьмёт новые файлы у таких же копий в интернете, в том числе в других городах, а ваш компьютер будет отдавать файлы им. Для этого роутер откроет порт, а ваш IP-адрес увидят те, кто с вами соединится. Каждый файл проверяется по подписанному списку выпуска. Работает, если роутер умеет открывать порты (UPnP) и у вас не провайдерский NAT. Выключено, пока вы сами не включите.",
+        )
+        share_internet_card.set_texts(share_internet_title, share_internet_description)
+        set_auto_check_accessibility(
+            share_internet_card, title=share_internet_title, description=share_internet_description
+        )
 
     version_info_label.setText(
         tr_fn("page.servers.settings.version_channel_template", "v{version} · {channel}").format(

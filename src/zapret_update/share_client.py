@@ -19,54 +19,35 @@ from . import share_discover as discover
 from . import share_prefill as prefill
 
 SEARCH_WAIT = discover.FIND_TIMEOUT + 1.0
-INTERNET_WAIT = 6.0  # поиск по интернету идёт дольше локального; он перекрывается с расчётом плана
 
 
 class Search:
-    def __init__(
-        self,
-        product: str,
-        version: str,
-        *,
-        enabled: bool = True,
-        find=discover.find_neighbours,
-        internet=None,
-    ) -> None:
-        """``internet`` — необязательный поиск по интернету (список ``Neighbour``); соседи по сети идут первыми."""
+    def __init__(self, product: str, version: str, *, enabled: bool = True, find=discover.find_neighbours) -> None:
+        """Поиск соседей по локальной сети; ``enabled=False`` — не спрашивать (выключатель выключен)."""
         self._found: list[discover.Neighbour] = []
         self._thread: threading.Thread | None = None
-        self._wait = SEARCH_WAIT + (INTERNET_WAIT if internet is not None else 0.0)
         if not enabled:
             return
 
         def run() -> None:
-            found: list[discover.Neighbour] = []
             try:
-                found.extend(find(product, version))
+                self._found = list(find(product, version))
             except Exception:  # noqa: BLE001 — поиск не должен ронять обновление
-                pass
-            self._found = list(found)
-            if internet is not None:
-                try:
-                    found.extend(internet())
-                except Exception:  # noqa: BLE001
-                    pass
-                self._found = list(found)
+                self._found = []
 
         self._thread = threading.Thread(target=run, name="share-search", daemon=True)
         self._thread.start()
 
-    def result(self, timeout: float | None = None) -> list[discover.Neighbour]:
+    def result(self, timeout: float = SEARCH_WAIT) -> list[discover.Neighbour]:
         if self._thread is not None:
-            self._thread.join(self._wait if timeout is None else timeout)
+            self._thread.join(timeout)
             if self._thread.is_alive():
-                # Не дождались интернета: соседей по сети, уже найденных, не теряем.
-                return list(self._found)
+                return []
         return self._found
 
 
-def start_search(product: str, version: str, *, enabled: bool = True, internet=None) -> Search:
-    return Search(product, version, enabled=enabled, internet=internet)
+def start_search(product: str, version: str, *, enabled: bool = True) -> Search:
+    return Search(product, version, enabled=enabled)
 
 
 def fill_from_neighbours(
@@ -96,4 +77,39 @@ def fill_from_neighbours(
         return prefill.PrefillResult()
 
 
-__all__ = ["Search", "fill_from_neighbours", "start_search"]
+def fill_from_internet(
+    plan: UpdatePlan,
+    *,
+    work_dir: Path,
+    find: Callable[[], list[discover.Neighbour]],
+    cancelled: Callable[[], bool] = lambda: False,
+    on_stage: Callable[[str], None] = lambda _text: None,
+    report: Callable[[str], None] = lambda _text: None,
+    fill=prefill.prefill_from_neighbours,
+) -> prefill.PrefillResult:
+    """Запасной путь: серверы не отдали файлы, берём их у копий программы в интернете.
+
+    Зовётся только после неудачи серверов: при живых серверах адрес человека
+    соседям по интернету не показывается. Берём всё нужное целиком, даже то, что
+    с сервера пришло бы маленькой заплаткой: серверов нет, а файл нужен.
+    """
+    try:
+        if not plan.want:
+            return prefill.PrefillResult()
+        on_stage("Серверы не отвечают — ищем копии программы в интернете…")
+        neighbours = find()
+        if not neighbours:
+            report("Серверы обновлений не отдали файлы, а в интернете никого не нашлось")
+            return prefill.PrefillResult()
+        result = fill(plan, work_dir=work_dir, neighbours=neighbours, cancelled=cancelled, everything=True)
+        report(
+            f"Серверы не отдали файлы: у копий в интернете найдено {len(neighbours)}, взято файлов {result.files} "
+            f"({result.bytes / 1048576:.1f} МБ)"
+        )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        report(f"Копии в интернете не помогли: {exc}")
+        return prefill.PrefillResult()
+
+
+__all__ = ["Search", "fill_from_internet", "fill_from_neighbours", "start_search"]

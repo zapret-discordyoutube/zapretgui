@@ -65,14 +65,14 @@ def registry():
         item.server_close()
 
 
-def test_register_sends_product_version_and_port_and_stops_at_the_first_answer(registry) -> None:
+def test_register_sends_product_version_and_port_to_every_server(registry) -> None:
     first, second = registry(), registry()
     assert share_registry.register([first.base, second.base], PRODUCT, VERSION, 45123) is True
     method, path = first.requests[0]
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
     assert method == "POST" and path.startswith("/stats/peers?")
     assert query == {"product": [PRODUCT], "version": [VERSION], "port": ["45123"]}
-    assert not second.requests
+    assert second.requests and second.requests[0][0] == "POST"  # записались и там: блокировка одного сервера не прячет нас
 
 
 def test_register_moves_on_from_a_dead_or_unhappy_server(registry) -> None:
@@ -88,6 +88,14 @@ def test_lookup_returns_only_honest_global_addresses(registry) -> None:
     assert share_registry.lookup([server.base], PRODUCT, VERSION, 8) == [("93.184.216.34", 45000), ("93.184.216.35", 45001)]
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(server.requests[0][1]).query)
     assert query["limit"] == ["8"] and query["version"] == [VERSION]
+
+
+def test_lookup_merges_the_lists_of_all_servers_without_repeats_up_to_the_limit(registry) -> None:
+    one = registry(peers=[("93.184.216.1", 45000), ("93.184.216.2", 45000)])
+    two = registry(peers=[("93.184.216.2", 45000), ("93.184.216.3", 45000), ("93.184.216.4", 45000)])
+    merged = share_registry.lookup([one.base, "http://127.0.0.1:9/dead", two.base], PRODUCT, VERSION, 10, timeout=1)
+    assert merged == [("93.184.216.1", 45000), ("93.184.216.2", 45000), ("93.184.216.3", 45000), ("93.184.216.4", 45000)]
+    assert len(share_registry.lookup([one.base, two.base], PRODUCT, VERSION, 3)) == 3
 
 
 def test_lookup_of_a_broken_server_is_empty(registry) -> None:

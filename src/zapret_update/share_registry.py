@@ -39,31 +39,40 @@ def _url(base: str, **query: object) -> str:
 def register(
     bases: Sequence[str], product: str, version: str, port: int, *, timeout: float = TIMEOUT, opener: Callable = _open
 ) -> bool:
-    """Записаться на первом ответившем сервере; ``True`` — сервер принял."""
+    """Записаться на всех известных серверах (основной и зеркала); ``True`` — принял хотя бы один.
+
+    Записываемся везде, а не на первом ответившем: у каждого сервера своя книга, и
+    блокировка одного не должна прятать раздающего от тех, кто спросит другой.
+    """
+    accepted = False
     for base in bases:
         try:
             with opener(_url(base, product=product, version=version, port=int(port)), "POST", timeout) as reply:
-                if getattr(reply, "status", 200) == 200:
-                    return True
+                accepted = accepted or getattr(reply, "status", 200) == 200
         except Exception:  # noqa: BLE001 — не вышло здесь, пробуем следующий сервер
             continue
-    return False
+    return accepted
 
 
 def lookup(
     bases: Sequence[str], product: str, version: str, limit: int = 16, *, timeout: float = TIMEOUT, opener: Callable = _open,
     allow_local: bool = False,
 ) -> list[tuple[str, int]]:
-    """Кто раздаёт эту версию: список с первого ответившего сервера (пусто, если никто не ответил)."""
+    """Кто раздаёт эту версию: списки всех ответивших серверов, без повторов, до ``limit`` адресов."""
+    found: list[tuple[str, int]] = []
     for base in bases:
+        if len(found) >= limit:
+            break
         try:
             with opener(_url(base, product=product, version=version, limit=int(limit)), "GET", timeout) as reply:
                 if getattr(reply, "status", 200) != 200:
                     continue
-                return parse_peer_list(reply.read(MAX_FILE_BYTES + 1), allow_local=allow_local)
+                for peer in parse_peer_list(reply.read(MAX_FILE_BYTES + 1), allow_local=allow_local):
+                    if peer not in found:
+                        found.append(peer)
         except Exception:  # noqa: BLE001
             continue
-    return []
+    return found[: int(limit)]
 
 
 __all__ = ["lookup", "register"]

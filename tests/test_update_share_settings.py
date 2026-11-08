@@ -16,6 +16,24 @@ def test_default_is_on_and_garbage_falls_back_to_default() -> None:
     assert normalize_program({"share_updates_lan": "maybe"})["share_updates_lan"] is True
 
 
+def test_internet_sharing_is_off_unless_the_person_turns_it_on() -> None:
+    assert normalize_program({})["share_updates_internet"] is False
+    assert normalize_program({"share_updates_internet": True})["share_updates_internet"] is True
+    assert normalize_program({"share_updates_internet": "yes please"})["share_updates_internet"] is False
+    from settings import store
+
+    with TemporaryDirectory() as temp_dir:
+        with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
+            store.close_settings_database()
+            try:
+                assert store.get_share_updates_internet() is False
+                store.set_share_updates_internet(True)
+                assert store.get_share_updates_internet() is True
+                assert store.get_share_updates_lan() is True  # соседний выключатель не задет
+            finally:
+                store.close_settings_database()
+
+
 def test_value_survives_the_sqlite_store() -> None:
     from settings import store
 

@@ -244,16 +244,42 @@ def prepare(
         report=lambda text: log(text, UPDATE_LOG_LEVEL),
     )
     on_stage("Скачивание изменений…")
-    ready = fetch.fetch_plan(
-        planned,
-        root=root,
-        work_dir=work,
-        sources=store_sources(),
-        cancelled=cancelled,
-        progress=(lambda done, all_bytes: on_progress(int(done * 100 / max(1, all_bytes)), done, all_bytes))
-        if on_progress is not None
-        else (lambda _done, _total: None),
-    )
+
+    def download():
+        return fetch.fetch_plan(
+            planned,
+            root=root,
+            work_dir=work,
+            sources=store_sources(),
+            cancelled=cancelled,
+            progress=(lambda done, all_bytes: on_progress(int(done * 100 / max(1, all_bytes)), done, all_bytes))
+            if on_progress is not None
+            else (lambda _done, _total: None),
+        )
+
+    try:
+        ready = download()
+    except fetch.FetchError:
+        # Серверы файлы не отдали (заблокированы, лежат): если человек включил раздачу
+        # по интернету, берём недостающее у таких же копий программы. Пока серверы
+        # живы, адрес человека соседям по интернету не показывается.
+        from ..share import wiring
+
+        find = wiring.internet_finder(manifest.version)
+        if find is None:
+            raise
+        taken = share_client.fill_from_internet(
+            planned,
+            work_dir=work,
+            find=find,
+            cancelled=cancelled,
+            on_stage=on_stage,
+            report=lambda text: log(text, UPDATE_LOG_LEVEL),
+        )
+        if not taken.files:
+            raise
+        on_stage("Скачивание изменений…")
+        ready = download()
     on_stage("Подготовка новой версии…")
     tree = stage.build_stage(planned, root=root, ready=ready, stage_dir=work / "tree")
     # Список выпуска едет вместе с версией: после установки это список

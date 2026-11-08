@@ -3516,6 +3516,22 @@ TEXTS: dict[str, dict[str, str]] = {
             "list. Nothing is shared over the internet, and sharing is off on public Wi-Fi."
         ),
     },
+    "page.servers.settings.share_internet": {
+        "ru": "Делиться обновлениями через интернет",
+        "en": "Share updates over the internet",
+    },
+    "page.servers.settings.share_internet.description": {
+        "ru": (
+            "Если серверы обновлений не отдают файлы (их заблокировали), программа возьмёт новые файлы у таких же копий в интернете, в том числе в других"
+            " городах, а ваш компьютер будет отдавать файлы им. Для этого роутер откроет порт, а ваш IP-адрес увидят те, кто с вами соединится. Каждый файл проверяется по по"
+            "дписанному списку выпуска. Работает, если роутер умеет открывать порты (UPnP) и у вас не провайдерский NAT. Выключено, пока вы сами не включите."
+        ),
+        "en": (
+            "If the update servers do not give the files (they are blocked), the app takes the new files from other copies of the app on the internet, in"
+            "cluding other cities, and your computer hands files out to them. For this your router opens a port, and your IP address is seen by those who connect to you. Eve"
+            "ry file is checked against the signed release list. It works if your router can open ports (UPnP) and you are not behind your provider's NAT. Off until you turn it on yourself."
+        ),
+    },
     "page.servers.settings.version_channel_template": {
         "ru": "v{version} · {channel}",
         "en": "v{version} · {channel}",

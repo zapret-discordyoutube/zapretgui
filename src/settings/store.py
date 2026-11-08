@@ -1227,6 +1227,14 @@ def set_share_updates_lan(value: bool) -> bool:
     return _set_bool(("program", "share_updates_lan"), value)
 
 
+def get_share_updates_internet() -> bool:
+    return _get_bool(("program", "share_updates_internet"), False)
+
+
+def set_share_updates_internet(value: bool) -> bool:
+    return _set_bool(("program", "share_updates_internet"), value)
+
+
 def get_discord_restart_enabled() -> bool:
     return _get_bool(("program", "discord_auto_restart"), True)
 
@@ -2113,6 +2121,7 @@ __all__ = [
     "get_whats_new_state",
     "get_background_preset",
     "get_discord_restart_enabled",
+    "get_share_updates_internet",
     "get_share_updates_lan",
     "get_display_mode",
     "get_custom_dns_servers",
@@ -2215,6 +2224,7 @@ __all__ = [
     "set_background_preset",
     "set_defender_disabled_memory",
     "set_discord_restart_enabled",
+    "set_share_updates_internet",
     "set_share_updates_lan",
     "set_display_mode",
     "set_dpi_autostart",

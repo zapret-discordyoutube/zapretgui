@@ -16,6 +16,7 @@ class ServersSettingsWidgets:
     share_lan_card: object | None
     toggle_label: object | None
     version_info_label: object
+    share_internet_card: object | None = None
 
 
 @dataclass(slots=True)
@@ -71,6 +72,8 @@ def build_servers_settings_section(
     on_auto_check_toggled,
     share_lan_enabled: bool = True,
     on_share_lan_toggled=None,
+    share_internet_enabled: bool = False,
+    on_share_internet_toggled=None,
 ) -> ServersSettingsWidgets:
     settings_card = setting_card_group_cls(tr_fn("page.servers.settings.title", "Настройки"), content_parent)
 
@@ -124,6 +127,28 @@ def build_servers_settings_section(
         share_lan_card.toggled.connect(on_share_lan_toggled)
     settings_card.addSettingCard(share_lan_card)
 
+    share_internet_title = tr_fn("page.servers.settings.share_internet", "Делиться обновлениями через интернет")
+    share_internet_description = tr_fn(
+        "page.servers.settings.share_internet.description",
+        "Если серверы обновлений не отдают файлы (их заблокировали), программа возьмёт новые файлы у таких же копий в интернете, в том числе в других городах, а ваш компьютер будет отдавать файлы им. Для этого роутер откроет порт, а ваш IP-адрес увидят те, кто с вами соединится. Каждый файл проверяется по подписанному списку выпуска. Работает, если роутер умеет открывать порты (UPnP) и у вас не провайдерский NAT. Выключено, пока вы сами не включите.",
+    )
+    share_internet_card = win11_toggle_row_cls(
+        "fa5s.globe",
+        share_internet_title,
+        share_internet_description,
+        accent_hex,
+    )
+    share_internet_card.setChecked(share_internet_enabled, block_signals=True)
+    set_auto_check_accessibility(
+        share_internet_card,
+        title=share_internet_title,
+        description=share_internet_description,
+        checked=share_internet_enabled,
+    )
+    if on_share_internet_toggled is not None:
+        share_internet_card.toggled.connect(on_share_internet_toggled)
+    settings_card.addSettingCard(share_internet_card)
+
     _ = settings_card_cls, qhbox_layout_cls
     version_info_label = caption_label_cls(
         tr_fn("page.servers.settings.version_channel_template", "v{version} · {channel}").format(
@@ -139,6 +164,7 @@ def build_servers_settings_section(
         auto_check_card=auto_check_card,
         auto_check_toggle=auto_check_toggle,
         share_lan_card=share_lan_card,
+        share_internet_card=share_internet_card,
         toggle_label=toggle_label,
         version_info_label=version_info_label,
     )

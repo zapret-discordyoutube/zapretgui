@@ -881,6 +881,28 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "after a release, updates are handed out in a queue, so yours may arrive a little later."
         ),
     },
+    "onboarding.step.updates_share_internet.title": {
+        "ru": "Раздача обновлений через интернет",
+        "en": "Sharing updates over the internet",
+    },
+    "onboarding.step.updates_share_internet.body": {
+        "ru": (
+            "Выключатель «Делиться обновлениями через интернет» выключен, пока вы сами его не включите. "
+            "Если серверы обновлений заблокированы и не отдают файлы, программа возьмёт их у таких же копий "
+            "в интернете, в том числе в других городах, а ваш компьютер будет отдавать файлы им.\n\n"
+            "Цена такая: роутер откроет порт, а ваш IP-адрес увидят те, кто с вами соединится. Каждый файл "
+            "проверяется по подписанному списку выпуска, поэтому подсунуть чужой нельзя. Это работает, если "
+            "роутер умеет открывать порты (UPnP) и у вас не провайдерский NAT."
+        ),
+        "en": (
+            "The Share updates over the internet switch is off until you turn it on yourself. If the update "
+            "servers are blocked and do not give the files, the app takes them from other copies of the app on "
+            "the internet, including other cities, and your computer hands files out to them.\n\n"
+            "The price: your router opens a port, and your IP address is seen by those who connect to you. Every "
+            "file is checked against the signed release list, so a wrong one cannot be slipped in. It works if your "
+            "router can open ports (UPnP) and you are not behind your provider's NAT."
+        ),
+    },
     "onboarding.step.updates_share.title": {
         "ru": "Раздача обновлений по сети",
         "en": "Sharing updates on your network",

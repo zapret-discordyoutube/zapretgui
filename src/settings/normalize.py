@@ -286,6 +286,7 @@ def normalize_program(data: object) -> dict[str, Any]:
         ),
         "auto_update_enabled": as_bool(raw.get("auto_update_enabled"), defaults["auto_update_enabled"]),
         "share_updates_lan": as_bool(raw.get("share_updates_lan"), defaults["share_updates_lan"]),
+        "share_updates_internet": as_bool(raw.get("share_updates_internet"), defaults["share_updates_internet"]),
         "discord_auto_restart": as_bool(raw.get("discord_auto_restart"), defaults["discord_auto_restart"]),
         "max_blocked": as_bool(raw.get("max_blocked"), defaults["max_blocked"]),
         "russian_state_media_blocked": as_bool(

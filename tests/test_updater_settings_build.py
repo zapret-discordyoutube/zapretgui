@@ -185,10 +185,11 @@ class UpdaterSettingsBuildTests(unittest.TestCase):
             on_auto_check_toggled=lambda _value: None,
         )
 
-        # Две строки: автообновление и раздача обновлений по сети; подпись версии — не карточка.
-        self.assertEqual(len(widgets.card.rows), 2)
+        # Три строки: автообновление, раздача по сети и раздача через интернет; подпись версии — не карточка.
+        self.assertEqual(len(widgets.card.rows), 3)
         self.assertIs(widgets.card.rows[0], widgets.auto_check_card)
         self.assertIs(widgets.card.rows[1], widgets.share_lan_card)
+        self.assertIs(widgets.card.rows[2], widgets.share_internet_card)
         self.assertEqual(widgets.version_info_label.text, "v21.0.0.142 · dev")
 
     def test_share_lan_switch_starts_with_its_saved_value_and_reports_clicks(self) -> None:
@@ -214,6 +215,24 @@ class UpdaterSettingsBuildTests(unittest.TestCase):
         widgets.share_lan_card.toggled.callback(True)  # щелчок человека
         self.assertEqual(clicks, [True])
         self.assertIn("в моей сети", widgets.share_lan_card.accessibleName())
+
+    def test_share_internet_switch_is_off_by_default_and_reports_clicks(self) -> None:
+        clicks: list[bool] = []
+        kwargs = dict(
+            content_parent=object(), tr_fn=lambda _key, default: default, accent_hex="#22dddd",
+            auto_check_enabled=True, app_version="21.0.0.142", channel="dev",
+            setting_card_group_cls=_FakeSettingsGroup, settings_card_cls=_FakeCard,
+            win11_toggle_row_cls=_FakeToggleRow, caption_label_cls=_FakeLabel, qhbox_layout_cls=_FakeLayout,
+            on_auto_check_toggled=lambda _value: None,
+        )
+        widgets = build_servers_settings_section(**kwargs, on_share_internet_toggled=clicks.append)
+        self.assertFalse(widgets.share_internet_card.checked)  # выключено, пока человек не включит
+        widgets.share_internet_card.toggled.callback(True)
+        self.assertEqual(clicks, [True])
+        self.assertIn("через интернет", widgets.share_internet_card.accessibleName())
+        self.assertIn("IP-адрес", widgets.share_internet_card.args[2])  # цена названа прямо в описании
+        on = build_servers_settings_section(**kwargs, share_internet_enabled=True)
+        self.assertTrue(on.share_internet_card.checked)
 
     def test_version_label_exposes_screen_reader_state(self) -> None:
         widgets = build_servers_settings_section(

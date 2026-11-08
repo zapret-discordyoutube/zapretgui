@@ -122,8 +122,13 @@ def prefill_from_neighbours(
     timeout: float = STALL_TIMEOUT,
     cancelled: Callable[[], bool] = lambda: False,
     threads: int = THREADS,
+    everything: bool = False,
 ) -> PrefillResult:
-    """Кладёт в ``ready/`` всё, что нашлось у соседей; остальное — забота ``fetch_plan``."""
+    """Кладёт в ``ready/`` всё, что нашлось у соседей; остальное — забота ``fetch_plan``.
+
+    ``everything`` — просить и то, что обычно выгоднее взять с сервера (мелочь, файлы с
+    маленькой заплаткой): так делают, когда серверов нет и файл нужен любой ценой.
+    """
     result = PrefillResult()
     if not neighbours:
         return result
@@ -132,7 +137,7 @@ def prefill_from_neighbours(
     parts_dir.mkdir(parents=True, exist_ok=True)
     unique: dict[str, Want] = {}
     for want in plan.want:
-        if worth_asking(want):
+        if everything or worth_asking(want):
             unique.setdefault(want.entry.sha256, want)
     pool_state = _Neighbours(neighbours)
     lock = threading.Lock()

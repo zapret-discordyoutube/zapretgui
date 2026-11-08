@@ -43,6 +43,26 @@ def set_share_updates_lan(enabled: bool) -> None:
         log(f"Раздача обновлений не переключилась: {exc}", "WARNING")
 
 
+def is_share_updates_internet() -> bool:
+    from settings.store import get_share_updates_internet
+
+    return bool(get_share_updates_internet())
+
+
+def set_share_updates_internet(enabled: bool) -> None:
+    from settings.store import set_share_updates_internet
+
+    set_share_updates_internet(bool(enabled))
+    try:
+        from updater.share import wiring
+
+        wiring.refresh_default()
+    except Exception as exc:  # noqa: BLE001 — настройка сохранена, раздача подхватит её при запуске
+        from log.log import log
+
+        log(f"Раздача по интернету не переключилась: {exc}", "WARNING")
+
+
 def get_update_skipped_version() -> str:
     from settings.store import get_update_skipped_version
 

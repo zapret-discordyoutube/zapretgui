@@ -210,31 +210,79 @@ def test_stop_closes_both_parts(tmp_path) -> None:
     assert not service.running and not fake.running
 
 
-# ── поиск соседей: сеть первой, интернет следом ────────────────────────
+# ── запасной путь: серверы не отдали файлы ─────────────────────────────
 
-def test_search_puts_lan_neighbours_before_internet_ones_and_survives_an_internet_failure() -> None:
-    lan = share_discover.Neighbour("192.168.1.9", 47000)
-    net = share_discover.Neighbour(WAN, 45000, tls=True)
-    both = share_client.Search("p", "1", find=lambda *_a: [lan], internet=lambda: [net])
-    assert both.result() == [lan, net]
+def _entry_and_plan(tmp_path, *, size=64 * 1024):
+    data = os.urandom(size)
+    entry = FileEntry("a.bin", len(data), hashlib.sha256(data).hexdigest(), len(data))
+    return entry, data, UpdatePlan(version="x", want=[Want(entry)])
 
-    def broken():
+
+def test_internet_fallback_takes_files_from_internet_peers(tmp_path) -> None:
+    from zapret_update import share_cert, share_serve
+
+    entry, data, plan = _entry_and_plan(tmp_path)
+    root = tmp_path / "peer"
+    root.mkdir()
+    (root / "a.bin").write_bytes(data)
+    server = share_serve.ShareServer(
+        share_serve.InstalledFiles(root, [entry]), host="127.0.0.1", allow_loopback=True, ssl_context=share_cert.server_context()
+    )
+    server.start()
+    stages, reports = [], []
+    try:
+        result = share_client.fill_from_internet(
+            plan, work_dir=tmp_path / "work", find=lambda: [share_discover.Neighbour("127.0.0.1", server.port, tls=True)],
+            on_stage=stages.append, report=reports.append,
+        )
+    finally:
+        server.stop()
+    assert result.files == 1 and (tmp_path / "work" / "ready" / entry.sha256).read_bytes() == data
+    assert any("в интернете" in text for text in stages) and "взято файлов 1" in reports[-1]
+
+
+def test_internet_fallback_asks_even_for_files_the_server_would_have_sent_as_a_small_patch(tmp_path) -> None:
+    from zapret_update import share_prefill
+    from zapret_update.manifest import PatchEntry
+
+    entry, _, _ = _entry_and_plan(tmp_path, size=2 * 1024 * 1024)
+    plan = UpdatePlan(version="x", want=[Want(entry, PatchEntry("f" * 64, entry.sha256, 4096))])
+    asked = []
+
+    def fill(planned, **kwargs):
+        asked.append(kwargs["everything"])
+        return share_prefill.PrefillResult()
+
+    share_client.fill_from_internet(plan, work_dir=tmp_path, find=lambda: [share_discover.Neighbour(WAN, 45000, tls=True)], fill=fill)
+    assert asked == [True]
+    assert share_prefill.worth_asking(plan.want[0]) is False  # обычным путём этот файл у соседей не просят
+
+
+@pytest.mark.parametrize("case", ["nobody", "search_fails", "no_wants"])
+def test_internet_fallback_never_raises_and_says_what_happened(tmp_path, case) -> None:
+    entry, _, plan = _entry_and_plan(tmp_path)
+    reports = []
+
+    def boom():
         raise OSError("registry down")
 
-    assert share_client.Search("p", "1", find=lambda *_a: [lan], internet=broken).result() == [lan]
-    assert share_client.Search("p", "1", find=lambda *_a: [lan]).result() == [lan]
-    assert share_client.Search("p", "1", enabled=False, find=lambda *_a: [lan], internet=lambda: [net]).result() == []
+    find = {"nobody": lambda: [], "search_fails": boom, "no_wants": lambda: [share_discover.Neighbour(WAN, 45000, tls=True)]}[case]
+    if case == "no_wants":
+        plan = UpdatePlan(version="x", want=[])
+    result = share_client.fill_from_internet(plan, work_dir=tmp_path / "w", find=find, report=reports.append)
+    assert result.files == 0
+    assert (not reports) == (case == "no_wants")
 
 
-def test_slow_internet_does_not_lose_the_neighbours_already_found() -> None:
+def test_search_is_lan_only_and_the_switch_stops_the_question() -> None:
     lan = share_discover.Neighbour("192.168.1.9", 47000)
+    assert share_client.Search("p", "1", find=lambda *_a: [lan]).result() == [lan]
+    assert share_client.Search("p", "1", enabled=False, find=lambda *_a: [lan]).result() == []
 
-    def slow():
-        time.sleep(1.5)
-        return [share_discover.Neighbour(WAN, 45000, tls=True)]
+    def boom(*_a):
+        raise OSError("no")
 
-    search = share_client.Search("p", "1", find=lambda *_a: [lan], internet=slow)
-    assert search.result(0.3) == [lan]
+    assert share_client.Search("p", "1", find=boom).result() == []
 
 
 # ── правило брандмауэра для интернета ──────────────────────────────────

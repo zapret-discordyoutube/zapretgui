@@ -118,6 +118,24 @@ class ShareLanSetting(BoolSetting):
         self._updater_feature.set_share_updates_lan(value)
 
 
+class ShareInternetSetting(BoolSetting):
+    """«Делиться обновлениями через интернет» (выключено, пока человек не включит)."""
+
+    def __init__(self, *, updater_feature, parent=None) -> None:
+        super().__init__(
+            updater_feature=updater_feature,
+            what="раздачи обновлений через интернет",
+            thread_name="updater-share-internet",
+            parent=parent,
+        )
+
+    def _read_value(self) -> bool:
+        return bool(self._updater_feature.is_share_updates_internet())
+
+    def _write_value(self, value: bool) -> None:
+        self._updater_feature.set_share_updates_internet(value)
+
+
 class ChannelOpener(QObject):
     failed = pyqtSignal(str)
 
@@ -153,4 +171,6 @@ def run_update_setting_write(action, *, name: str, description: str) -> None:
     threading.Thread(target=run, name=name, daemon=True).start()
 
 
-__all__ = ["AutoCheckSetting", "BoolSetting", "ChannelOpener", "ShareLanSetting", "run_update_setting_write"]
+__all__ = [
+    "AutoCheckSetting", "BoolSetting", "ChannelOpener", "ShareInternetSetting", "ShareLanSetting", "run_update_setting_write",
+]
