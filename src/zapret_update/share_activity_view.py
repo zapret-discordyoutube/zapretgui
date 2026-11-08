@@ -15,6 +15,8 @@ Tr = Callable[[str, str], str]
 DEFAULTS = {
     "page.sharing_activity.status.lan.on": "Раздача по локальной сети: включена, порт {port}",
     "page.sharing_activity.status.lan.off": "Раздача по локальной сети: не работает",
+    "page.sharing_activity.status.lan.switched_off": "Раздача по локальной сети: выключена",
+    "page.sharing_activity.status.net.switched_off": "Раздача через интернет: выключена",
     "page.sharing_activity.status.net.on": "Раздача через интернет: включена, ваш адрес для других — {address}",
     "page.sharing_activity.status.net.off": "Раздача через интернет: не работает",
     "page.sharing_activity.status.unavailable": "Раздача ещё не запускалась: она стартует через минуту после запуска программы.",
@@ -94,12 +96,14 @@ def status_lines(snapshot: dict, tr: Tr) -> list[str]:
     if port:
         lines.append(tr("page.sharing_activity.status.lan.on", DEFAULTS["page.sharing_activity.status.lan.on"]).format(port=port))
     else:
-        lines.append(tr("page.sharing_activity.status.lan.off", DEFAULTS["page.sharing_activity.status.lan.off"]))
+        key = "lan.off" if snapshot.get("lan_switch", True) else "lan.switched_off"
+        lines.append(tr(f"page.sharing_activity.status.{key}", DEFAULTS[f"page.sharing_activity.status.{key}"]))
     if snapshot.get("internet_running"):
         text = tr("page.sharing_activity.status.net.on", DEFAULTS["page.sharing_activity.status.net.on"])
         lines.append(text.format(address=snapshot.get("internet_address") or "?"))
     else:
-        lines.append(tr("page.sharing_activity.status.net.off", DEFAULTS["page.sharing_activity.status.net.off"]))
+        key = "net.off" if snapshot.get("internet_switch", True) else "net.switched_off"
+        lines.append(tr(f"page.sharing_activity.status.{key}", DEFAULTS[f"page.sharing_activity.status.{key}"]))
     return lines
 
 

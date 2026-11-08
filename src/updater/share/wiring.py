@@ -48,6 +48,8 @@ def activity_snapshot() -> dict:
     return {
         "available": True,
         "lan_port": service.port,
+        "lan_switch": service.switches[0],
+        "internet_switch": service.switches[1],
         "internet_running": service.internet_running,
         "internet_address": f"{mapping.external_ip}:{mapping.external_port}" if mapping is not None else "",
         "notes": notes[-6:],
@@ -174,6 +176,7 @@ def default_service() -> share_service.SharingService:
                 )
                 if exe
                 else None,
+                close_firewall=lambda: share_service.windows_close_firewall(share_service.FIREWALL_RULE_NAME_INTERNET),
                 report=report,
             )
             _default = share_service.SharingService(

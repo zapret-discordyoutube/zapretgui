@@ -162,6 +162,15 @@ def test_firewall_without_rights_reports_false(monkeypatch):
     assert runtime.windows_open_firewall(Path("C:/x.exe"), run=run) is False
 
 
+def test_firewall_rule_is_deleted_by_name(monkeypatch):
+    monkeypatch.setattr(runtime.sys, "platform", "win32")
+    run, calls = _fake_run([SimpleNamespace(returncode=0, stdout="")])
+    assert runtime.windows_close_firewall("Zapret: update sharing (internet)", run=run) is True
+    assert "delete" in calls[0] and "name=Zapret: update sharing (internet)" in calls[0]
+    gone, _ = _fake_run([SimpleNamespace(returncode=1, stdout="")])
+    assert runtime.windows_close_firewall("x", run=gone) is False  # правила не было: не ошибка, просто «нет»
+
+
 def test_windows_network_check_parses_powershell_and_fails_closed(monkeypatch):
     monkeypatch.setattr(runtime.sys, "platform", "win32")
     ok, _ = _fake_run([SimpleNamespace(returncode=0, stdout="Public:Internet\r\nPrivate:Internet\r\n")])

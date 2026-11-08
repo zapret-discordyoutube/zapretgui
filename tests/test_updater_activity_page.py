@@ -59,6 +59,17 @@ class ViewWordsTests(unittest.TestCase):
         self.assertEqual([("не работает" in line) for line in off], [True, True])
         self.assertIn("ещё не запускалась", activity_view.status_lines({"available": False}, tr)[0])
 
+    def test_a_switch_that_is_off_says_off_and_a_failed_one_says_not_running(self) -> None:
+        both_off = activity_view.status_lines(
+            {"available": True, "lan_port": None, "internet_running": False, "lan_switch": False, "internet_switch": False}, tr
+        )
+        self.assertEqual([("выключена" in line) for line in both_off], [True, True])
+        self.assertFalse(any("не работает" in line for line in both_off))
+        failed = activity_view.status_lines(
+            {"available": True, "lan_port": None, "internet_running": False, "lan_switch": True, "internet_switch": True}, tr
+        )
+        self.assertEqual([("не работает" in line) for line in failed], [True, True])
+
     def test_summary_line(self) -> None:
         text = activity_view.summary_text({"events": 7, "visitors": 3, "given_bytes": 2_500_000, "taken_bytes": 0}, tr)
         self.assertIn("Обращений: 7", text)

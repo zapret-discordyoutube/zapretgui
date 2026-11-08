@@ -3544,6 +3544,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Раздача по локальной сети: не работает",
         "en": "Local network sharing: not running",
     },
+    "page.sharing_activity.status.lan.switched_off": {
+        "ru": "Раздача по локальной сети: выключена",
+        "en": "Local network sharing: off",
+    },
+    "page.sharing_activity.status.net.switched_off": {
+        "ru": "Раздача через интернет: выключена",
+        "en": "Internet sharing: off",
+    },
     "page.sharing_activity.status.net.on": {
         "ru": "Раздача через интернет: включена, ваш адрес для других — {address}",
         "en": "Internet sharing: on, your address for others is {address}",

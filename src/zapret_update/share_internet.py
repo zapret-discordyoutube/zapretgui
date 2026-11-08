@@ -116,6 +116,7 @@ class InternetSide:
         book: PeerBook,
         bases: Callable[[], Sequence[str]] = lambda: (),
         open_firewall: Callable[[int], bool] | None = None,
+        close_firewall: Callable[[], object] | None = None,
         mapper_factory: Callable[[int], object] = PortMapper,
         register_fn: Callable = share_registry.register,
         tls_factory: Callable[[], ssl.SSLContext] = server_context,
@@ -126,6 +127,7 @@ class InternetSide:
     ) -> None:
         self._product, self._book, self._bases = product, book, bases
         self._open_firewall, self._mapper_factory, self._register = open_firewall, mapper_factory, register_fn
+        self._close_firewall = close_firewall
         self._tls_factory, self._host, self._heartbeat, self._report_out = tls_factory, host, heartbeat, report
         self.notes: deque[tuple[float, str]] = deque(maxlen=6)  # что и почему не вышло: видно на странице раздачи
         self._allow_loopback = allow_loopback
@@ -148,6 +150,14 @@ class InternetSide:
     def port(self) -> int | None:
         return self._server.port if self._server is not None else None
 
+    def _drop_firewall_rule(self) -> None:
+        """Правило брандмауэра живёт ровно столько, сколько работает раздача: выключили — убрали."""
+        if self._close_firewall is not None:
+            try:
+                self._close_firewall()
+            except Exception:  # noqa: BLE001 — уборка не должна ломать остановку
+                pass
+
     def start(self, files: InstalledFiles, version: str, manifest_provider=None, activity=None) -> bool:
         server = ShareServer(
             files, host=self._host, ssl_context=self._tls_factory(), peers_provider=self._book.sample,
@@ -164,9 +174,11 @@ class InternetSide:
                 reason = getattr(mapper, "reason", "") or "роутер не открыл порт или у вас нет «белого» адреса"
                 self._report(f"Раздача по интернету недоступна: {reason}")
                 server.stop()
+                self._drop_firewall_rule()
                 return False
         except Exception:  # noqa: BLE001
             server.stop()
+            self._drop_firewall_rule()
             raise
         self._server, self._mapper, self.mapping, self.version = server, mapper, mapping, version
         self._stop.clear()
@@ -196,6 +208,8 @@ class InternetSide:
                     part.stop()
                 except Exception:  # noqa: BLE001
                     pass
+        if server is not None:
+            self._drop_firewall_rule()
         try:
             self._book.save()
         except OSError:

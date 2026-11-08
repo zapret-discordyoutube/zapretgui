@@ -54,6 +54,34 @@ def _side(book=None, **kw):
     return side, registered
 
 
+def test_firewall_rule_is_removed_when_the_side_stops_or_never_got_a_port(tmp_path) -> None:
+    files, _entry, _data = _files(tmp_path)
+    closed: list[int] = []
+    side, _ = _side(close_firewall=lambda: closed.append(1))
+    assert side.start(files, VERSION) is True
+    assert closed == []  # пока раздаёт — правило нужно
+    side.stop()
+    assert closed == [1]
+    side.stop()  # повторная остановка ничего не ломает и не бьёт по брандмауэру
+    assert closed == [1]
+
+    refused, _ = _side(close_firewall=lambda: closed.append(2), mapper_factory=lambda port: FakeMapper(port, ok=False))
+    assert refused.start(files, VERSION) is False
+    assert closed == [1, 2]  # роутер не открыл порт: правило тоже убрано
+
+
+def test_a_broken_firewall_cleanup_does_not_break_stopping(tmp_path) -> None:
+    files, _entry, _data = _files(tmp_path)
+
+    def boom():
+        raise OSError("netsh missing")
+
+    side, _ = _side(close_firewall=boom)
+    assert side.start(files, VERSION) is True
+    side.stop()
+    assert not side.running
+
+
 def test_started_side_serves_over_tls_registers_and_stops_cleanly(tmp_path) -> None:
     files, entry, data = _files(tmp_path)
     side, registered = _side()

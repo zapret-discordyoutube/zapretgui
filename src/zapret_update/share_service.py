@@ -103,6 +103,11 @@ class SharingService:
         return self._internet is not None and self._internet.running
 
     @property
+    def switches(self) -> tuple[bool, bool]:
+        """Что человек включил: (по локальной сети, через интернет). Отличает «выключено» от «не вышло»."""
+        return self._wanted()
+
+    @property
     def port(self) -> int | None:
         return self._server.port if self._server is not None else None
 
@@ -321,11 +326,25 @@ def windows_open_firewall(
     return getattr(added, "returncode", 1) == 0
 
 
+def windows_close_firewall(name: str, run=None) -> bool:
+    """Убирает своё правило брандмауэра по имени; правила не было — тоже не беда."""
+    if sys.platform != "win32":
+        return False
+    run = run or _run_windows
+    netsh = str(_system32() / "netsh.exe")
+    try:
+        done = run([netsh, "advfirewall", "firewall", "delete", "rule", f"name={name}"], timeout=15)
+    except Exception:  # noqa: BLE001
+        return False
+    return getattr(done, "returncode", 1) == 0
+
+
 __all__ = [
     "FIREWALL_RULE_NAME",
     "FIREWALL_RULE_NAME_INTERNET",
     "SharingService",
     "lan_allowed",
+    "windows_close_firewall",
     "windows_open_firewall",
     "windows_private_network",
 ]
