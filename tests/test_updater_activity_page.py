@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
 
-from updater.ui import activity_view
+from zapret_update import share_activity_view as activity_view
 from zapret_update.share_activity import ActivityLog, Event
 
 

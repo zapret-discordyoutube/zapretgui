@@ -17,7 +17,7 @@ from app.ui_texts import tr as tr_catalog
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_item_accessible_text, set_state_text
 from ui.fluent_widgets import SettingsCard
 from ui.pages.base_page import BasePage
-from updater.ui import activity_view
+from zapret_update import share_activity_view as activity_view
 
 REFRESH_MS = 2000
 ROWS_SHOWN = 300
