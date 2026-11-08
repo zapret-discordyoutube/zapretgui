@@ -154,7 +154,8 @@ class InternetSide:
             mapper = self._mapper_factory(server.port)
             mapping = mapper.start()
             if mapping is None:
-                self._report("Раздача по интернету недоступна: роутер не открыл порт или у вас нет «белого» адреса")
+                reason = getattr(mapper, "reason", "") or "роутер не открыл порт или у вас нет «белого» адреса"
+                self._report(f"Раздача по интернету недоступна: {reason}")
                 server.stop()
                 return False
         except Exception:  # noqa: BLE001

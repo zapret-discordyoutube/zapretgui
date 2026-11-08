@@ -185,13 +185,33 @@ def local_address_towards(gateway: Gateway) -> str | None:
         return None
 
 
-def add_mapping(gateway: Gateway, *, internal_ip: str, port: int, external_port: int | None = None,
-                lease: int = LEASE_SECONDS, description: str = "update sharing") -> Mapping | None:
-    """Просит роутер пробросить порт; ``None`` — отказал или внешний адрес не «белый»."""
+def address_kind(text: str | None) -> str:
+    """Какого рода внешний адрес роутера, без самого адреса (в журнал адрес человека не пишем)."""
+    try:
+        address = ipaddress.ip_address(str(text))
+    except ValueError:
+        return "неизвестен"
+    if address.is_global:
+        return "белый"
+    if address in ipaddress.ip_network("100.64.0.0/10"):
+        return "общий адрес провайдера (CGNAT)"
+    if address.is_link_local or address.is_loopback or address.is_unspecified:
+        return "служебный"
+    if address.is_private:
+        return "частный (за другим роутером или NAT провайдера)"
+    return "служебный"
+
+
+def try_add_mapping(gateway: Gateway, *, internal_ip: str, port: int, external_port: int | None = None,
+                    lease: int = LEASE_SECONDS, description: str = "update sharing") -> tuple[Mapping | None, str]:
+    """Просит роутер пробросить порт; второй элемент — почему не вышло (пусто, если вышло)."""
     outside = external_port or port
     address = external_ip(gateway)
-    if address is None or not is_global_address(address):
-        return None  # провайдерский NAT или адрес неизвестен: снаружи всё равно не достучаться
+    if address is None:
+        return None, "роутер не назвал внешний адрес"
+    if not is_global_address(address):
+        # Провайдерский NAT или второй роутер: снаружи всё равно не достучаться.
+        return None, f"внешний адрес роутера не белый: {address_kind(address)}"
     try:
         status, _ = _soap(gateway, "AddPortMapping", {
             "NewRemoteHost": "", "NewExternalPort": str(outside), "NewProtocol": "TCP",
@@ -199,8 +219,18 @@ def add_mapping(gateway: Gateway, *, internal_ip: str, port: int, external_port:
             "NewPortMappingDescription": description, "NewLeaseDuration": str(int(lease)),
         })
     except (OSError, http.client.HTTPException):
-        return None
-    return Mapping(address, outside, internal_ip, port) if status == 200 else None
+        return None, "роутер не ответил на просьбу открыть порт"
+    if status != 200:
+        return None, f"роутер отказался открыть порт (ответ {status})"
+    return Mapping(address, outside, internal_ip, port), ""
+
+
+def add_mapping(gateway: Gateway, *, internal_ip: str, port: int, external_port: int | None = None,
+                lease: int = LEASE_SECONDS, description: str = "update sharing") -> Mapping | None:
+    """Просит роутер пробросить порт; ``None`` — отказал или внешний адрес не «белый»."""
+    return try_add_mapping(
+        gateway, internal_ip=internal_ip, port=port, external_port=external_port, lease=lease, description=description
+    )[0]
 
 
 def delete_mapping(gateway: Gateway, mapping: Mapping) -> bool:
@@ -220,17 +250,21 @@ class PortMapper:
         self._port, self._renew_every, self._finder = int(port), float(renew_every), gateway_finder
         self._gateway: Gateway | None = None
         self.mapping: Mapping | None = None
+        self.reason = ""  # почему порт не открылся: идёт в журнал, чтобы по журналам людей было видно, что мешает чаще
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
     def start(self) -> Mapping | None:
+        self.reason = ""
         gateway = self._finder()
         if gateway is None:
+            self.reason = "роутер с UPnP не нашёлся (UPnP выключен или его нет)"
             return None
         internal = local_address_towards(gateway)
         if internal is None:
+            self.reason = "не удалось определить адрес компьютера в сети роутера"
             return None
-        mapping = add_mapping(gateway, internal_ip=internal, port=self._port)
+        mapping, self.reason = try_add_mapping(gateway, internal_ip=internal, port=self._port)
         if mapping is None:
             return None
         self._gateway, self.mapping = gateway, mapping
@@ -251,6 +285,6 @@ class PortMapper:
 
 
 __all__ = [
-    "Gateway", "Mapping", "PortMapper", "add_mapping", "delete_mapping", "external_ip",
-    "find_gateway", "is_global_address", "local_address_towards",
+    "Gateway", "Mapping", "PortMapper", "add_mapping", "address_kind", "delete_mapping", "external_ip",
+    "find_gateway", "is_global_address", "local_address_towards", "try_add_mapping",
 ]

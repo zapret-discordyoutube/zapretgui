@@ -102,7 +102,19 @@ def test_router_that_does_not_open_the_port_means_no_internet_sharing_and_nothin
     reports: list[str] = []
     side, registered = _side(mapper_factory=lambda port: FakeMapper(port, ok=False), report=reports.append)
     assert side.start(files, VERSION) is False and not side.running and not registered
-    assert any("не открыл порт" in text for text in reports)
+    assert any("Раздача по интернету недоступна" in text for text in reports)
+
+
+def test_the_log_names_the_real_reason_the_router_gave(tmp_path) -> None:
+    files, *_ = _files(tmp_path)
+    reports: list[str] = []
+
+    class Reasoned(FakeMapper):
+        reason = "внешний адрес роутера не белый: общий адрес провайдера (CGNAT)"
+
+    side, _ = _side(mapper_factory=lambda port: Reasoned(port, ok=False), report=reports.append)
+    assert side.start(files, VERSION) is False
+    assert any("CGNAT" in text for text in reports)
 
 
 def test_firewall_gets_the_real_port_and_its_failure_is_not_fatal(tmp_path) -> None:

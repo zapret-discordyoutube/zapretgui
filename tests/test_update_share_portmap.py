@@ -184,3 +184,42 @@ def test_mapper_without_a_router_does_nothing():
     mapper = share_portmap.PortMapper(45002, gateway_finder=lambda: None)
     assert mapper.start() is None
     mapper.stop()
+
+
+@pytest.mark.parametrize(
+    ("wan", "expected"),
+    [
+        ("93.184.216.34", "белый"),
+        ("100.64.5.5", "CGNAT"),
+        ("192.168.0.1", "частный"),
+        ("10.1.2.3", "частный"),
+        ("169.254.1.1", "служебный"),
+        ("garbage", "неизвестен"),
+        (None, "неизвестен"),
+    ],
+)
+def test_address_kind_names_the_kind_but_never_the_address(wan, expected):
+    kind = share_portmap.address_kind(wan)
+    assert expected in kind and (wan is None or str(wan) not in kind)
+
+
+def test_every_failure_has_its_own_reason(router, monkeypatch):
+    monkeypatch.setattr(share_portmap, "local_address_towards", lambda gateway: "192.168.1.20")
+    cases = {
+        "refused": (dict(refuse=True), "отказался"),
+        "cgnat": (dict(wan="100.64.1.1"), "CGNAT"),
+        "private": (dict(wan="192.168.1.1"), "частный"),
+    }
+    for name, (kwargs, word) in cases.items():
+        fake = router(**kwargs)
+        mapper = share_portmap.PortMapper(45010, gateway_finder=lambda fake=fake: _find(fake))
+        assert mapper.start() is None
+        assert word in mapper.reason, (name, mapper.reason)
+        assert "100.64.1.1" not in mapper.reason and "192.168.1.1" not in mapper.reason  # адрес в журнал не идёт
+    assert share_portmap.PortMapper(45011, gateway_finder=lambda: None).start() is None
+    silent = share_portmap.PortMapper(45012, gateway_finder=lambda: None)
+    silent.start()
+    assert "UPnP" in silent.reason
+    ok = share_portmap.PortMapper(45013, gateway_finder=lambda: _find(router()))
+    assert ok.start() is not None and ok.reason == ""
+    ok.stop()
