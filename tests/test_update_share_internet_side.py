@@ -70,6 +70,29 @@ def test_firewall_rule_is_removed_when_the_side_stops_or_never_got_a_port(tmp_pa
     assert closed == [1, 2]  # роутер не открыл порт: правило тоже убрано
 
 
+def test_why_word_goes_to_the_server_once_and_never_blocks_the_start(tmp_path) -> None:
+    files, _entry, _data = _files(tmp_path)
+    told: list[tuple] = []
+
+    class WordyMapper(FakeMapper):
+        code = "no_router"
+
+    side, _ = _side(mapper_factory=lambda port: WordyMapper(port, ok=False), why_fn=lambda bases, product, version, code: told.append((tuple(bases), product, version, code)))
+    assert side.start(files, VERSION) is False
+    assert side.start(files, VERSION) is False  # повторная попытка с тем же словом сервер не засоряет
+    for _ in range(50):
+        if told:
+            break
+        time.sleep(0.05)
+    assert told == [(("https://q.example/stats",), "zapret-gui", VERSION, "no_router")]
+
+    def boom(*_a):
+        raise OSError("server gone")
+
+    other, _ = _side(mapper_factory=lambda port: WordyMapper(port, ok=False), why_fn=boom)
+    assert other.start(files, VERSION) is False  # сломанный счётчик запуск не ломает
+
+
 def test_a_broken_firewall_cleanup_does_not_break_stopping(tmp_path) -> None:
     files, _entry, _data = _files(tmp_path)
 

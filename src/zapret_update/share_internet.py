@@ -119,6 +119,7 @@ class InternetSide:
         close_firewall: Callable[[], object] | None = None,
         mapper_factory: Callable[[int], object] = PortMapper,
         register_fn: Callable = share_registry.register,
+        why_fn: Callable = share_registry.report_why,
         tls_factory: Callable[[], ssl.SSLContext] = server_context,
         host: str = "0.0.0.0",
         heartbeat: float = HEARTBEAT_SECONDS,
@@ -127,6 +128,7 @@ class InternetSide:
     ) -> None:
         self._product, self._book, self._bases = product, book, bases
         self._open_firewall, self._mapper_factory, self._register = open_firewall, mapper_factory, register_fn
+        self._why_fn, self._last_why = why_fn, ""
         self._close_firewall = close_firewall
         self._tls_factory, self._host, self._heartbeat, self._report_out = tls_factory, host, heartbeat, report
         self.notes: deque[tuple[float, str]] = deque(maxlen=6)  # что и почему не вышло: видно на странице раздачи
@@ -158,6 +160,23 @@ class InternetSide:
             except Exception:  # noqa: BLE001 — уборка не должна ломать остановку
                 pass
 
+    def _tell_why(self, code: str, version: str) -> None:
+        """Одно слово серверу: почему порт не открылся (или чем открылся). Не мешает запуску и не повторяется зря."""
+        if not code or code == self._last_why or self._why_fn is None:
+            return
+        self._last_why = code
+        bases = list(self._bases())
+        if not bases:
+            return
+
+        def send() -> None:
+            try:
+                self._why_fn(bases, self._product, version, code)
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=send, name="share-why", daemon=True).start()
+
     def start(self, files: InstalledFiles, version: str, manifest_provider=None, activity=None) -> bool:
         server = ShareServer(
             files, host=self._host, ssl_context=self._tls_factory(), peers_provider=self._book.sample,
@@ -170,6 +189,7 @@ class InternetSide:
                 self._report("Раздача по интернету: правило брандмауэра не добавилось, работаем без него")
             mapper = self._mapper_factory(server.port)
             mapping = mapper.start()
+            self._tell_why(getattr(mapper, "code", ""), version)
             if mapping is None:
                 reason = getattr(mapper, "reason", "") or "роутер не открыл порт или у вас нет «белого» адреса"
                 self._report(f"Раздача по интернету недоступна: {reason}")

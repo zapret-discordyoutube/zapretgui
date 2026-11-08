@@ -15,6 +15,10 @@ from zapret_update import share_portmap
 SERVICE = "urn:schemas-upnp-org:service:WANIPConnection:1"
 
 
+
+def _NO_PMP(hosts, port):  # NAT-PMP в этих тестах не проверяется и в сеть не ходит
+    return None, "", "", "silent"
+
 def _description(control_url: str) -> bytes:
     return (
         '<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><device><serviceList><service>'
@@ -171,7 +175,7 @@ def test_answer_from_a_non_lan_address_is_ignored(router):
 def test_mapper_keeps_the_mapping_and_removes_it_on_stop(router, monkeypatch):
     fake = router()
     monkeypatch.setattr(share_portmap, "local_address_towards", lambda gateway: "192.168.1.20")
-    mapper = share_portmap.PortMapper(45001, renew_every=0.05, gateway_finder=lambda: _find(fake))
+    mapper = share_portmap.PortMapper(45001, renew_every=0.05, gateway_finder=lambda: _find(fake), pmp_open=_NO_PMP)
     mapping = mapper.start()
     assert mapping is not None and mapping.external_ip == "93.184.216.34"
     for _ in range(60):
@@ -184,7 +188,7 @@ def test_mapper_keeps_the_mapping_and_removes_it_on_stop(router, monkeypatch):
 
 
 def test_mapper_without_a_router_does_nothing():
-    mapper = share_portmap.PortMapper(45002, gateway_finder=lambda: None)
+    mapper = share_portmap.PortMapper(45002, gateway_finder=lambda: None, pmp_open=_NO_PMP)
     assert mapper.start() is None
     mapper.stop()
 
@@ -215,15 +219,15 @@ def test_every_failure_has_its_own_reason(router, monkeypatch):
     }
     for name, (kwargs, word) in cases.items():
         fake = router(**kwargs)
-        mapper = share_portmap.PortMapper(45010, gateway_finder=lambda fake=fake: _find(fake))
+        mapper = share_portmap.PortMapper(45010, gateway_finder=lambda fake=fake: _find(fake), pmp_open=_NO_PMP)
         assert mapper.start() is None
         assert word in mapper.reason, (name, mapper.reason)
         assert "100.64.1.1" not in mapper.reason and "192.168.1.1" not in mapper.reason  # адрес в журнал не идёт
-    assert share_portmap.PortMapper(45011, gateway_finder=lambda: None).start() is None
-    silent = share_portmap.PortMapper(45012, gateway_finder=lambda: None)
+    assert share_portmap.PortMapper(45011, gateway_finder=lambda: None, pmp_open=_NO_PMP).start() is None
+    silent = share_portmap.PortMapper(45012, gateway_finder=lambda: None, pmp_open=_NO_PMP)
     silent.start()
     assert "UPnP" in silent.reason
-    ok = share_portmap.PortMapper(45013, gateway_finder=lambda: _find(router()))
+    ok = share_portmap.PortMapper(45013, gateway_finder=lambda: _find(router()), pmp_open=_NO_PMP)
     assert ok.start() is not None and ok.reason == ""
     ok.stop()
 

@@ -270,44 +270,113 @@ def delete_mapping(gateway: Gateway, mapping: Mapping) -> bool:
 
 
 class PortMapper:
-    """Держит проброс порта: продлевает аренду, снимает при остановке."""
+    """Держит проброс порта: продлевает аренду, снимает при остановке.
 
-    def __init__(self, port: int, *, renew_every: float = LEASE_SECONDS / 2, gateway_finder=find_gateway) -> None:
+    Сначала UPnP, потом NAT-PMP/PCP (у многих роутеров включено только это).
+    ``reason`` — почему порт не открылся (в журнал и на страницу), ``code`` — то же одним
+    словом без подробностей, ``via`` — каким способом получилось (``upnp``/``pcp``/``natpmp``).
+    """
+
+    def __init__(self, port: int, *, renew_every: float = LEASE_SECONDS / 2, gateway_finder=find_gateway,
+                 pmp_open=None, pmp_hosts=None) -> None:
         self._port, self._renew_every, self._finder = int(port), float(renew_every), gateway_finder
+        self._pmp_open, self._pmp_hosts = pmp_open, pmp_hosts
         self._gateway: Gateway | None = None
+        self._pmp_gateway = ""
         self.mapping: Mapping | None = None
         self.reason = ""  # почему порт не открылся: идёт в журнал, чтобы по журналам людей было видно, что мешает чаще
+        self.code = ""
+        self.via = ""
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+    @staticmethod
+    def _code_of(reason: str) -> str:
+        if "CGNAT" in reason:
+            return "cgnat"
+        if "частный" in reason:
+            return "double_nat"
+        if "не белый" in reason or "служебный" in reason:
+            return "not_public"
+        if "отказал" in reason or "не разрешает" in reason:
+            return "refused"
+        if "не назвал внешний" in reason:
+            return "no_external_ip"
+        if "не ответил" in reason:
+            return "no_answer"
+        return "other"
+
     def start(self) -> Mapping | None:
-        self.reason = ""
+        self.reason = self.code = self.via = ""
         gateway = self._finder()
+        upnp_reason = ""
         if gateway is None:
-            self.reason = "роутер с UPnP не нашёлся (UPnP выключен или его нет)"
-            return None
-        internal = local_address_towards(gateway)
-        if internal is None:
-            self.reason = "не удалось определить адрес компьютера в сети роутера"
-            return None
-        mapping, self.reason = try_add_mapping(gateway, internal_ip=internal, port=self._port)
-        if mapping is None:
-            return None
-        self._gateway, self.mapping = gateway, mapping
+            upnp_reason = "роутер с UPnP не нашёлся (UPnP выключен или его нет)"
+            code = "no_router"
+        else:
+            internal = local_address_towards(gateway)
+            if internal is None:
+                self.reason, self.code = "не удалось определить адрес компьютера в сети роутера", "no_local_ip"
+                return None
+            mapping, upnp_reason = try_add_mapping(gateway, internal_ip=internal, port=self._port)
+            if mapping is not None:
+                self._gateway, self.mapping, self.via, self.code = gateway, mapping, "upnp", "via_upnp"
+                self._start_renewal()
+                return mapping
+            code = self._code_of(upnp_reason)
+        # UPnP не помог: у многих роутеров он выключен, а NAT-PMP или PCP включены.
+        mapping, via, host, pmp_reason = self._try_pmp(gateway.host if gateway is not None else "")
+        if mapping is not None:
+            self._pmp_gateway, self.mapping, self.via, self.code = host, mapping, via, f"via_{via}"
+            self._start_renewal()
+            return mapping
+        meaningful = pmp_reason not in ("silent", "unsupported", "")
+        if gateway is None and meaningful:
+            self.reason, self.code = pmp_reason, self._code_of(pmp_reason)
+        elif gateway is None:
+            self.reason, self.code = upnp_reason + ", NAT-PMP и PCP тоже не ответили", "no_router"
+        else:
+            self.reason, self.code = upnp_reason, code
+        return None
+
+    def _try_pmp(self, upnp_host: str) -> tuple[Mapping | None, str, str, str]:
+        try:
+            from . import share_natpmp
+
+            hosts = list(self._pmp_hosts() if self._pmp_hosts is not None else share_natpmp.default_gateways())
+            if upnp_host and upnp_host not in hosts:
+                hosts.insert(0, upnp_host)
+            return (self._pmp_open or share_natpmp.try_open)(hosts[:share_natpmp.MAX_GATEWAYS + 1], port=self._port)
+        except Exception:  # noqa: BLE001 — запасной способ не должен ломать основной
+            return None, "", "", "silent"
+
+    def _start_renewal(self) -> None:
         self._thread = threading.Thread(target=self._renew, name="share-portmap", daemon=True)
         self._thread.start()
-        return mapping
 
     def _renew(self) -> None:
         while not self._stop.wait(self._renew_every):
-            if self._gateway is not None and self.mapping is not None:
+            if self.mapping is None:
+                continue
+            if self.via == "upnp" and self._gateway is not None:
                 add_mapping(self._gateway, internal_ip=self.mapping.internal_ip, port=self._port)
+            elif self._pmp_gateway:
+                self._try_pmp(self._pmp_gateway)
 
     def stop(self) -> None:
         self._stop.set()
-        if self._gateway is not None and self.mapping is not None:
-            delete_mapping(self._gateway, self.mapping)
+        if self.mapping is not None:
+            if self.via == "upnp" and self._gateway is not None:
+                delete_mapping(self._gateway, self.mapping)
+            elif self._pmp_gateway:
+                try:
+                    from . import share_natpmp
+
+                    share_natpmp.unmap(self._pmp_gateway, self.mapping, self.via)
+                except Exception:  # noqa: BLE001
+                    pass
         self._gateway = self.mapping = None
+        self._pmp_gateway = ""
 
 
 __all__ = [

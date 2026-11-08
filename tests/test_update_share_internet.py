@@ -83,6 +83,16 @@ def test_register_moves_on_from_a_dead_or_unhappy_server(registry) -> None:
     assert share_registry.register([], PRODUCT, VERSION, 45123) is False
 
 
+def test_why_report_carries_only_the_word_and_unknown_words_never_leave(registry) -> None:
+    server = registry()
+    assert share_registry.report_why([server.base], PRODUCT, VERSION, "no_router") is True
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(server.requests[0][1]).query)
+    assert server.requests[0][0] == "POST" and query == {"product": [PRODUCT], "version": [VERSION], "why": ["no_router"]}
+    assert share_registry.report_why([server.base], PRODUCT, VERSION, "my address is 1.2.3.4") is False
+    assert len(server.requests) == 1  # слово не из списка в сеть не уходит
+    assert share_registry.report_why(["http://127.0.0.1:9/dead"], PRODUCT, VERSION, "other", timeout=1) is False
+
+
 def test_lookup_returns_only_honest_global_addresses(registry) -> None:
     server = registry(peers=[("93.184.216.34", 45000), ("192.168.1.2", 45000), ("93.184.216.34", 80), ("93.184.216.35", 45001)])
     assert share_registry.lookup([server.base], PRODUCT, VERSION, 8) == [("93.184.216.34", 45000), ("93.184.216.35", 45001)]

@@ -54,6 +54,33 @@ def register(
     return accepted
 
 
+WHY_CODES = frozenset({
+    "via_upnp", "via_pcp", "via_natpmp",  # получилось, и чем именно
+    "no_router", "no_local_ip", "no_external_ip", "no_answer", "refused", "cgnat", "double_nat", "not_public", "other",
+})
+
+
+def report_why(
+    bases: Sequence[str], product: str, version: str, code: str, *, timeout: float = TIMEOUT, opener: Callable = _open
+) -> bool:
+    """Сообщить серверу одно слово: почему раздача по интернету не открылась (или чем открылась).
+
+    Это счётчик для разработчиков, чтобы понять, чего людям не хватает чаще (UPnP, белого адреса).
+    Уходит только пока раздача по интернету включена; в слове нет адреса, имени или идентификатора.
+    Сервер считает слово один раз в сутки с одного адреса, не запоминая сам адрес.
+    """
+    if code not in WHY_CODES:
+        return False
+    accepted = False
+    for base in bases:
+        try:
+            with opener(_url(base, product=product, version=version, why=code), "POST", timeout) as reply:
+                accepted = accepted or getattr(reply, "status", 200) == 200
+        except Exception:  # noqa: BLE001 — счётчик не обязателен
+            continue
+    return accepted
+
+
 def lookup(
     bases: Sequence[str], product: str, version: str, limit: int = 16, *, timeout: float = TIMEOUT, opener: Callable = _open,
     allow_local: bool = False,
@@ -75,4 +102,4 @@ def lookup(
     return found[: int(limit)]
 
 
-__all__ = ["lookup", "register"]
+__all__ = ["WHY_CODES", "lookup", "register", "report_why"]
