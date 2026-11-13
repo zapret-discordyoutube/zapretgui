@@ -1821,6 +1821,9 @@ class _SectionBlock(QWidget):
         # Перечень серверов — сеткой карточек одним виджетом; остальное — строками таблицы.
         self.grid: TilesGrid | None = None
         self.table: RowsTable | None = None
+        # Строки с кнопкой делят таблицу: кнопка встаёт сразу под своей строкой.
+        self.tables: list[RowsTable] = []
+        self.action_buttons: list[PushButton] = []
         self.rows: list = []
         self.findings_flow: CardsFlow | None = None
         if tiles:
@@ -1849,12 +1852,18 @@ class _SectionBlock(QWidget):
             layout.addSpacing(6)
         else:
             # Строки рисует один виджет: строка-виджет на каждое измерение делала отчёт тяжёлым.
-            self.table = RowsTable(section.lines, [line_icon(line, section) for line in section.lines], name_width, self)
-            layout.addWidget(self.table)
-        # Строки с кнопкой — кнопкой под таблицей: туда, где это чинится.
-        self.action_buttons: list[PushButton] = []
-        if self.table is not None:
-            self._add_action_buttons(layout, section.lines)
+            # Строка с кнопкой (туда, где это чинится) замыкает свой кусок таблицы, кнопка — сразу под ней;
+            # ширина столбца названий общая, поэтому куски стоят ровно.
+            chunk: list[Line] = []
+            for line in section.lines:
+                chunk.append(line)
+                if line_action_text(line)[0]:
+                    self._add_rows(layout, chunk, section, name_width)
+                    self._add_action_button(layout, line)
+                    chunk = []
+            if chunk:
+                self._add_rows(layout, chunk, section, name_width)
+            self.table = self.tables[0] if self.tables else None
         # Длинный текст (таблица серверов, узлы по дороге) — в редакторе с подсветкой и своей
         # прокруткой. Одной надписью на сотни строк он перерисовывался целиком при каждой
         # прокрутке страницы, и страница заметно тормозила.
@@ -1889,25 +1898,24 @@ class _SectionBlock(QWidget):
             layout.addWidget(self.editor)
             layout.addSpacing(8)
 
-    def _add_action_buttons(self, layout, lines) -> None:
-        row = None
-        for line in lines:
-            label, description = line_action_text(line)
-            if not label:
-                continue
-            if row is None:
-                row = QHBoxLayout()
-                row.setContentsMargins(0, 6, 0, 0)
-                row.setSpacing(8)
-                layout.addLayout(row)
-            button = PushButton(label, self)
-            set_control_accessibility(button, name=label, description=description)
-            set_tooltip(button, description)
-            button.clicked.connect(lambda _checked=False, a=line.action, t=line.target: self.action_requested.emit(a, t))
-            row.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
-            self.action_buttons.append(button)
-        if row is not None:
-            row.addStretch(1)
+    def _add_rows(self, layout, lines, section: Section, name_width: int) -> None:
+        table = RowsTable(lines, [line_icon(line, section) for line in lines], name_width, self)
+        layout.addWidget(table)
+        self.tables.append(table)
+
+    def _add_action_button(self, layout, line: Line) -> None:
+        label, description = line_action_text(line)
+        row = QHBoxLayout()
+        # Кнопка под столбцом значений своей строки.
+        row.setContentsMargins(self.tables[-1].text_left(), 2, 0, 8)
+        button = PushButton(label, self)
+        set_control_accessibility(button, name=label, description=description)
+        set_tooltip(button, description)
+        button.clicked.connect(lambda _checked=False, a=line.action, t=line.target: self.action_requested.emit(a, t))
+        row.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.action_buttons.append(button)
 
     def set_narrow(self) -> None:
         """Раздел стоит в столбце рядом с другими: полоса долей короче, чтобы заголовок помещался."""

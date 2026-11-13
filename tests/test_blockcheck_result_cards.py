@@ -752,7 +752,8 @@ class CardsWidgetsTests(unittest.TestCase):
         from qfluentwidgets import PushButton
 
         coverage = {"profile": "YouTube", "via": "список youtube.txt", "strategy": True, "strategy_name": "MultiSplit Pattern 7", "preset": "Default"}
-        target = _target("youtubei.googleapis.com", ok=False, main=True, coverage=coverage)
+        # «Как блокируют» идёт после «Профиль пресета»: у кнопки есть строки и выше, и ниже.
+        target = _target("youtubei.googleapis.com", ok=False, main=True, coverage=coverage, cause_text="Блокировка по имени сайта")
         service = _service("youtube", "YouTube", "fail", [target], kind="by_name", status="Блокировка по имени", tags=[])
         [card] = [item for item in build_cards({"services": [service]}) if item.site]
         view = ResultDetailView()
@@ -767,6 +768,14 @@ class CardsWidgetsTests(unittest.TestCase):
         self.assertEqual(button.text(), "Подобрать стратегию для youtubei.googleapis.com")
         button.click()
         self.assertEqual(asked, [("strategy", "youtubei.googleapis.com")])
+        # Кнопка стоит сразу под своей строкой, а не в конце раздела: таблица делится на ней.
+        [block] = [item for item in view.blocks if item.action_buttons]
+        self.assertEqual(block.tables[0].lines()[-1].name, "Профиль пресета")
+        self.assertGreater(len(block.tables), 1)
+        layout = block.layout()
+        order = [layout.itemAt(i).widget() or layout.itemAt(i).layout() for i in range(layout.count())]
+        button_row = next(item for item in order if not isinstance(item, QWidget) and item is not None and item.indexOf(button) >= 0)
+        self.assertEqual(order.index(button_row), order.index(block.tables[0]) + 1)
 
         # Имя вне профилей: подбор не поможет, кнопка ведёт в «Профили пресета».
         lost = _target("youtubei.googleapis.com", ok=False, main=True, coverage={"profile": "", "strategy": True})
