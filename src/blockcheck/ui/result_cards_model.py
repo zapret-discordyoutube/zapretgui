@@ -155,6 +155,8 @@ class Card:
     site: bool = False
     # Широкая карточка занимает весь ряд.
     wide: bool = False
+    # Сам сайт открывается, а эти его части — нет (из отчёта, ``broken_parts``).
+    broken_parts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,6 +313,7 @@ def _site_card(service: dict) -> Card:
         tags=tuple(tags),
         sections=tuple(detail),
         site=True,
+        broken_parts=tuple(str(part) for part in service.get("broken_parts") or () if part),
     )
 
 

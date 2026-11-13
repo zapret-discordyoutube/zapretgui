@@ -186,6 +186,7 @@ def services_report(services: dict, verdicts: dict, collected: dict) -> list[dic
             "kind": verdicts[key].kind,
             "status": service_view.service_status(verdicts[key], collected[key]),
             "opens": verdicts[key].opens,
+            "broken_parts": list(verdicts[key].broken_parts),
             "headline": verdicts[key].headline,
             "advice": list(verdicts[key].advice),
             "dns_note": verdicts[key].dns_note,

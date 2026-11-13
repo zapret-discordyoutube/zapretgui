@@ -324,6 +324,9 @@ class ServiceVerdict:
     # соединиться или который не работает сам, — замечание (WARN), а не тревога, но
     # он не открывается. История и сравнение «с Zapret и без» судят по этому полю.
     opens: bool = True
+    # Сам сайт открывается, а эти его части (назначения адресов: «служба плеера») — нет.
+    # Экран говорит «частично», а не «не открывается»: главная страница у человека грузится.
+    broken_parts: tuple[str, ...] = ()
 
 
 _BROKEN = (ReachState.DPI, ReachState.FREEZE, ReachState.IP_BLOCK, ReachState.CERT)
@@ -530,7 +533,14 @@ def summarize_service(
                 advice = advice + (ADVICE_HOSTS_STALE,)
         if spoofed and _ADVICE_DNS not in advice:
             advice = advice + (_ADVICE_DNS,)
-        return ServiceVerdict(level, headline, advice, dns_note, own_kind or _leading_kind(secondary_broken))
+        return ServiceVerdict(
+            level,
+            headline,
+            advice,
+            dns_note,
+            own_kind or _leading_kind(secondary_broken),
+            broken_parts=tuple(dict.fromkeys(item.purpose or item.host for item in secondary_broken)),
+        )
 
     if main.reach in _BROKEN:
         broken = [main, *secondary_broken]

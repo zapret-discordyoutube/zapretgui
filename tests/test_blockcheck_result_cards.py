@@ -692,6 +692,30 @@ class CardsWidgetsTests(unittest.TestCase):
         stages, broken = site_road(opens)
         self.assertEqual((broken, [stage.state for stage in stages]), (-1, ["ok"] * 5))
 
+        # Как у YouTube на МТС: www.youtube.com открылся (браузерное приветствие прошло, отдельных
+        # TLS 1.2/1.3 нет), а служба плеера режется по имени. Было «TLS —» и «Сайт не открывается».
+        roads = [
+            {"key": "dns", "label": "DNS", "word": "честный", "state": "ok"},
+            {"key": "browser", "label": "Chrome", "word": "проходит", "state": "ok"},
+            {"key": "quic", "label": "QUIC", "word": "работает", "state": "ok"},
+        ]
+        partly = _service(
+            "youtube", "YouTube", "warn",
+            [_target("www.youtube.com", main=True), _target("youtubei.googleapis.com", "служба плеера", ok=False)],
+            kind="sni", status="По имени (SNI)", roads=roads, tags=[], broken_parts=["служба плеера"],
+        )
+        [partly_card] = [item for item in build_cards({"services": [partly]}) if item.site]
+        stages, broken = site_road(partly_card)
+        self.assertEqual([(stage.word, stage.state) for stage in stages[3:]], [("проходит", "ok"), ("частично", "warn")])
+        self.assertEqual(broken, -1)
+        partly_road = SiteRoad(partly_card)
+        self.addCleanup(partly_road.deleteLater)
+        self.assertIn("Не работают: служба плеера", partly_road.accessibleDescription() + partly_road.accessibleName())
+        # Сайт целиком не открылся — «частично» не говорим, даже если часть названа.
+        whole = _service("x", "X", "fail", [_target("x.com", ok=False, main=True)], kind="sni", status="По имени (SNI)", roads=roads[:1], tags=[], broken_parts=["видео"])
+        [whole_card] = [item for item in build_cards({"services": [whole]}) if item.site]
+        self.assertNotIn("частично", [stage.word for stage in site_road(whole_card)[0]])
+
         view = ResultDetailView()
         self.addCleanup(view.deleteLater)
         view.resize(1000, 600)

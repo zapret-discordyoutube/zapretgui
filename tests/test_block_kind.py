@@ -118,6 +118,8 @@ class HeadlineNamesTheKindTests(unittest.TestCase):
         )
 
         self.assertEqual((verdict.level, verdict.kind), (Level.WARN, bk.KIND_CUT))
+        # Сам сайт открывается: экран скажет «частично» и назовёт сломанную часть.
+        self.assertEqual((verdict.opens, verdict.broken_parts), (True, ("видео",)))
         self.assertEqual(
             verdict.headline, "YouTube открывается, но не работают видео: загрузка обрывается после 16 КБ"
         )

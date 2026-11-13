@@ -49,7 +49,12 @@ def site_road(card: Card) -> tuple[tuple[RoadStage, ...], int]:
         stages.append(RoadStage("Сервер", "отвечает" if reached or card.level == "ok" else "—", "ok" if reached or card.level == "ok" else "unknown", "fa5s.server"))
 
     failed = [mark for mark in tls if mark.state == "fail"]
-    if tls and len(failed) == len(tls):
+    chrome = _mark(card, "Chrome")
+    if not tls and chrome is not None and chrome.state == "ok":
+        # Отдельно TLS 1.2/1.3 проверяют, только когда сайт не открылся. Открылся — прошло
+        # браузерное приветствие, а это и есть TLS: «—» здесь читалось как «не проверяли».
+        stages.append(RoadStage("TLS", "проходит", "ok", "fa5s.lock"))
+    elif tls and len(failed) == len(tls):
         stages.append(RoadStage("TLS", failed[-1].word, "fail", "fa5s.lock"))
     elif failed:
         stages.append(RoadStage("TLS", "частично", "warn", "fa5s.lock"))
@@ -64,6 +69,10 @@ def site_road(card: Card) -> tuple[tuple[RoadStage, ...], int]:
         stages.append(RoadStage("Сайт", "через раз", "warn", "fa5s.globe"))
     elif cut:
         stages.append(RoadStage("Сайт", "обрыв на 16 КБ", "fail", "fa5s.globe"))
+    elif card.broken_parts and card.level != "fail":
+        # Главная страница открывается, не работают части сервиса (служба плеера, видео):
+        # «не открывается» было бы неправдой.
+        stages.append(RoadStage("Сайт", "частично", "warn", "fa5s.globe"))
     else:
         stages.append(RoadStage("Сайт", "не открывается", "fail" if card.level == "fail" else "warn", "fa5s.globe"))
 
@@ -101,7 +110,8 @@ class SiteRoad(QWidget):
         self._played = False
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
         where = self.stages[self.broken].title if self.broken >= 0 else "нигде"
-        set_state_text(self, "Дорога до сайта: " + "; ".join(f"{stage.title} — {stage.word}" for stage in self.stages if stage.word) + f". Режут: {where}")
+        parts = f". Не работают: {', '.join(card.broken_parts)}" if card.broken_parts else ""
+        set_state_text(self, "Дорога до сайта: " + "; ".join(f"{stage.title} — {stage.word}" for stage in self.stages if stage.word) + f". Режут: {where}{parts}")
 
     def last_reached(self) -> int:
         """Номер шага, до которого доезжает точка."""
