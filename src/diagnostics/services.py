@@ -10,7 +10,9 @@
 - ``SCOPE_ALL`` — ещё популярные сайты и контрольные;
 - ``SCOPE_FULL`` — ещё длинный список сайтов, которые блокируют чаще всего
   (собран по спискам проектов dpi-detector и rkn-block-checker, лицензия MIT),
-  и свои домены пользователя.
+  и свои домены пользователя;
+- ``service_scope(ключ)`` — один сервис («только YouTube»): его выбирают карточкой
+  сервиса в BlockCheck. Остальные разделы проверки — как в коротком режиме.
 
 Контрольные сайты нужны для сравнения: если не открываются и они, дело в
 подключении, а не в блокировках.
@@ -38,6 +40,9 @@ __all__ = [
     "STEP_VOICE",
     "progress_steps",
     "related_targets",
+    "scope_service",
+    "scope_title",
+    "service_scope",
     "SERVICES",
     "YOUTUBE_HOST",
     "Service",
@@ -235,9 +240,38 @@ FULL_SERVICES: tuple[Service, ...] = (
 )
 
 
+_SERVICE_SCOPE_PREFIX = "service:"
+
+
+def service_scope(key: str) -> str:
+    """Режим «только этот сервис» — так его зовут движок, история и экран."""
+    return f"{_SERVICE_SCOPE_PREFIX}{key}"
+
+
+def scope_service(scope: str) -> Service | None:
+    """Сервис режима «только он». ``None`` — режим не про один сервис или сервис неизвестен."""
+    scope = str(scope or "").strip().lower()
+    if not scope.startswith(_SERVICE_SCOPE_PREFIX):
+        return None
+    key = scope[len(_SERVICE_SCOPE_PREFIX):]
+    return next((item for item in (*SERVICES.values(), *EXTRA_SERVICES, *FULL_SERVICES) if item.key == key), None)
+
+
+def scope_title(scope: str) -> str:
+    """Что проверяли — словами: «Все сайты», «YouTube». Неизвестный режим — как есть."""
+    service = scope_service(scope)
+    if service is not None:
+        return service.label
+    return SCOPE_TITLES.get(str(scope or ""), str(scope or ""))
+
+
 def build_services(scope: str, user_domains=()) -> dict[str, Service]:
     """Сервисы для проверки: основные, при «Все сайты» — остальные и свои домены,
-    при полной проверке — ещё длинный список часто блокируемых сайтов."""
+    при полной проверке — ещё длинный список часто блокируемых сайтов, в режиме
+    одного сервиса — только он."""
+    single = scope_service(scope)
+    if single is not None:
+        return {single.key: single}
     services = dict(SERVICES)
     scope = str(scope or "").strip().lower()
     if scope not in (SCOPE_ALL, SCOPE_FULL):

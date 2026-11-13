@@ -89,8 +89,9 @@ class BlockcheckTourGuide(QObject):
         cards = page._result_cards
         scan = page._strategy_tab_page
         if name == "start":
-            # Выбор набора, галочка сверки с сервером и кнопки «Проверить» и «С обходом и без»: они есть при любой раскладке верха страницы.
-            return [page._scope_combo, page._outside_box, page._start_btn, page._paired_btn]
+            # Выбор набора, галочка сверки с сервером, кнопки «Проверить» и «С обходом и без» и карточки
+            # одного сервиса: они есть при любой раскладке верха страницы.
+            return [page._scope_combo, page._outside_box, page._start_btn, page._paired_btn, page._service_cards]
         if name == "domains":
             # Поле своих доменов открывается ссылкой «+ Свой домен»: пока его нет, экскурсия показывает ссылку.
             if page._domains_card.isVisible() or page._custom_domain_btn is None:

@@ -24,17 +24,10 @@ class QuickService:
     target: str
     # Подсказка под курсором: что именно проверяется.
     hint: str = ""
-    # Адрес для «Проверки домена»: там нужна страница сайта, остальные адреса сервиса (у YouTube — видеосервер)
-    # добавляются к ней сами. Пусто — тот же адрес, что и для подбора.
-    site: str = ""
     # Остальные имена сервиса: подбор стратегии должен открыть и их, а профиль пишется на все имена сразу.
     # У YouTube страница, видеосервер и превью — это разные имена, и закрыт может быть любой.
     # Каждое имя — пара (имя для профиля, хост для пробы): профиль на ytimg.com покрывает и поддомены, проба идёт на i.ytimg.com.
     companions: tuple[tuple[str, str], ...] = ()
-
-    @property
-    def site_host(self) -> str:
-        return self.site or self.target
 
 
 QUICK_SERVICES: tuple[QuickService, ...] = (
@@ -64,7 +57,7 @@ def service_for_target(value: str) -> QuickService | None:
     host = host_of(str(value or "")).lower()
     if not host:
         return None
-    return next((item for item in QUICK_SERVICES if host in (item.target, item.site_host)), None)
+    return next((item for item in QUICK_SERVICES if host == item.target), None)
 
 
 def companions_for(value: str) -> tuple[tuple[str, str], ...]:

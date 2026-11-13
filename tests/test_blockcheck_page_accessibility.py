@@ -227,7 +227,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         controls = page._summary_panel.controls
         self.assertEqual(
             [controls.itemAt(index).widget() for index in range(controls.count())],
-            [page._options_row, page._status_label, page._progress_bar, page._domains_card],
+            [page._options_row, page._services_caption, page._service_cards, page._status_label, page._progress_bar, page._domains_card],
         )
         # До первой проверки нет ни строки состояния (она повторяла бы список), ни поля доменов:
         # поле открывает ссылка «+ Свой домен».
@@ -587,13 +587,15 @@ class ScopeChoiceTests(unittest.TestCase):
         page = _make_page()
         combo = page._scope_combo
 
-        self.assertEqual([combo.itemData(index) for index in range(combo.count())], ["all", "main", "full"])
+        # Один сервис (YouTube, Discord…) выбирают карточкой, а не пунктом меню.
+        self.assertEqual([combo.itemData(index) for index in range(combo.count())], ["all", "full"])
         self.assertEqual(page._current_scope(), "all")
-        combo.setCurrentIndex(2)
+        combo.setCurrentIndex(1)
         self.assertEqual(page._current_scope(), "full")
         self.assertIn("Глубокая диагностика", combo.currentText())
         page.set_ui_language("en")
-        self.assertEqual(combo.itemText(2), "Deep diagnostics (about a minute)")
+        self.assertEqual(combo.itemText(1), "Deep diagnostics (about a minute)")
+        self.assertEqual(page._services_caption.text(), "Or check just one service:")
 
 
 class SummaryChangesTests(unittest.TestCase):

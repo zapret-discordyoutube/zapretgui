@@ -1,10 +1,11 @@
 """BlockCheck: какие сайты открываются и что делать с остальными.
 
 Вкладки страницы: «BlockCheck» (сама проверка), «Подбор стратегии»,
-«Проверка домена» и «DNS подмена». Бывшая вкладка «Диагностика» влилась в BlockCheck: режим
-«Discord и YouTube» — это она.
+«Проверка домена» и «DNS подмена». Бывшая вкладка «Диагностика» влилась в BlockCheck.
+Известные сервисы (YouTube, Discord…) проверяются здесь же карточками — каждый отдельно;
+«Проверка домена» — только для своего домена или адреса.
 
-Экран проверки сверху вниз: что проверить и кнопка → свои домены → итог
+Экран проверки сверху вниз: что проверить и кнопка → карточки одного сервиса → свои домены → итог
 (одна фраза, проблемы по важности, советы и кнопка «Подобрать стратегию») →
 список сайтов → «Отчёт» (отдельное окно) и «Подготовить обращение».
 Проверяет движок ``diagnostics.engine.run_blockcheck`` в фоновом потоке.
@@ -28,7 +29,8 @@ from blockcheck import paired_run
 from blockcheck.ui.check_results import BlockcheckHistoryList, BlockcheckSummaryPanel
 from blockcheck.ui.result_cards import ProgressSteps, ResultCardsView, ResultDetailView
 from blockcheck.ui.domain_chip import DomainChip
-from diagnostics.services import SCOPE_ALL, SCOPE_FULL, SCOPE_MAIN, progress_steps
+from blockcheck.ui.quick_service_cards import QuickServiceCards
+from diagnostics.services import SCOPE_ALL, SCOPE_FULL, progress_steps, service_scope
 from blockcheck.ui.domains_build import build_blockcheck_domains_ui
 from blockcheck.ui.helpers import (
     add_domain_chip,
@@ -433,9 +435,6 @@ class BlockcheckPage(BasePage):
             tr_catalog("page.blockcheck.scope_all", default="Только сайты (быстро)"), userData=SCOPE_ALL
         )
         self._scope_combo.addItem(
-            tr_catalog("page.blockcheck.scope_main", default="Только Discord и YouTube (быстро)"), userData=SCOPE_MAIN
-        )
-        self._scope_combo.addItem(
             tr_catalog("page.blockcheck.scope_full", default="Глубокая диагностика (около минуты)"), userData=SCOPE_FULL
         )
         self._scope_combo.setCurrentIndex(0)
@@ -483,6 +482,21 @@ class BlockcheckPage(BasePage):
         self._custom_domain_btn.clicked.connect(self._open_custom_domains)
         options.addWidget(self._custom_domain_btn)
         self._summary_panel.controls.addWidget(self._options_row)
+
+        # Один сервис — карточкой: YouTube, Discord и другие проверяются отдельно, тем же BlockCheck.
+        # Свой домен или адрес — на вкладке «Проверка домена».
+        self._services_caption = CaptionLabel(
+            tr_catalog("page.blockcheck.services_caption", default="Или проверьте только один сервис:")
+        )
+        self._summary_panel.controls.addWidget(self._services_caption)
+        self._service_cards = QuickServiceCards()
+        self._service_cards.chosen.connect(self._on_start_service)
+        set_control_accessibility(
+            self._service_cards,
+            name="Проверить один сервис",
+            description="Нажатие на карточку сразу проверяет только этот сервис: все его адреса, как в общей проверке.",
+        )
+        self._summary_panel.controls.addWidget(self._service_cards)
 
         self._status_label = CaptionLabel(
             tr_catalog("page.blockcheck.ready", default="Сайты, хостинги и звонки — так, как их открыл бы браузер")
@@ -890,9 +904,13 @@ class BlockcheckPage(BasePage):
     # ------------------------------------------------------------------
 
     def _current_scope(self) -> str:
-        return str(self._scope_combo.currentData() or SCOPE_MAIN)
+        return str(self._scope_combo.currentData() or SCOPE_ALL)
 
-    def _on_start(self):
+    def _on_start_service(self, key: str) -> None:
+        """Карточка сервиса: сразу проверить только его."""
+        self._on_start(scope=service_scope(key))
+
+    def _on_start(self, *_args, scope: str = ""):
         # Закрытую страницу не запускаем: поздние сигналы прошлого запуска уже никто не ждёт.
         if self._run_runtime.is_running() or self._cleanup_in_progress:
             return
@@ -904,8 +922,9 @@ class BlockcheckPage(BasePage):
         self._drop_partial()
         self._result_cards.clear()
         self._results_card.setVisible(False)
-        scope = self._current_scope()
+        scope = scope or self._current_scope()
         self._outside_box.setEnabled(False)
+        self._service_cards.setEnabled(False)
         self._progress_steps.start(progress_steps(scope))
         self._progress_card.setVisible(True)
         # Список сайтов проверки уже взят: добавлять свои домены до конца проверки бесполезно.
@@ -1659,6 +1678,7 @@ class BlockcheckPage(BasePage):
             progress_bar=self._progress_bar,
         )
         self._outside_box.setEnabled(True)
+        self._service_cards.setEnabled(True)
         self._domains_hidden_for_run = False
         self._sync_domains_area()
         # Между проверками парного запуска запускать нечего: Zapret переключается.
@@ -1674,7 +1694,7 @@ class BlockcheckPage(BasePage):
         set_control_accessibility(
             self._scope_combo,
             name=state_text,
-            description="«Discord и YouTube» — только они; «Все сайты» — ещё мессенджеры, соцсети и ваши домены. Звонки и обрыв на 16 КБ проверяются всегда.",
+            description="«Только сайты» — известные сайты и ваши домены; «Глубокая диагностика» — ещё DNS-серверы, место фильтра и другие пробы. Один сервис — карточкой ниже. Звонки и обрыв на 16 КБ проверяются всегда.",
         )
         set_combo_items_accessibility(self._scope_combo, name="Что проверить BlockCheck")
 
@@ -2263,8 +2283,8 @@ class BlockcheckPage(BasePage):
                 self._custom_domain_btn.setText(_tr("page.blockcheck.custom_domain.open", "Свой домен"))
             # Порядок тот же, что при создании списка: сайты первые, глубокая диагностика последняя.
             self._scope_combo.setItemText(0, _tr("page.blockcheck.scope_all", "Только сайты (быстро)"))
-            self._scope_combo.setItemText(1, _tr("page.blockcheck.scope_main", "Только Discord и YouTube (быстро)"))
-            self._scope_combo.setItemText(2, _tr("page.blockcheck.scope_full", "Глубокая диагностика (около минуты)"))
+            self._scope_combo.setItemText(1, _tr("page.blockcheck.scope_full", "Глубокая диагностика (около минуты)"))
+            self._services_caption.setText(_tr("page.blockcheck.services_caption", "Или проверьте только один сервис:"))
             self._update_scope_combo_accessibility()
             if self._domains_caption is not None:
                 self._domains_caption.setText(_tr("page.blockcheck.custom_domains", "Проверить ещё и свои домены:"))

@@ -2,7 +2,8 @@
 
 BlockCheck отвечает на вопрос «какие сайты открываются и что с остальными».
 Сайты собраны в сервисы (Discord — это сайт, чат и CDN картинок; YouTube — сайт,
-превью и видеосервер). Режим «Discord и YouTube» проверяет только их, «Все
+превью и видеосервер). Короткий режим проверяет Discord и YouTube, режим одного
+сервиса (``service:<ключ>``, карточка сервиса на экране) — только его, «Все
 сайты» — ещё мессенджеры, соцсети, контрольные сайты и домены пользователя.
 Голосовые серверы (UDP) и обрыв загрузки на 16–20 КБ проверяются всегда.
 
@@ -102,6 +103,9 @@ from diagnostics.services import (  # noqa: F401  (GOOGLEVIDEO_FALLBACK_HOST о�
     Service,
     Target,
     build_services,
+    scope_service,
+    scope_title,
+    service_scope,
     site_service,
 )
 from diagnostics.services import (
@@ -625,7 +629,7 @@ class _Setting:
 
 def _announce(scope: str, emit: Emit) -> _Setting:
     """Шапка отчёта: режим, система, Zapret и программы обхода, которые могут мешать проверке."""
-    emit(f"🔍 BlockCheck: {_SCOPE_TITLES[scope]} — {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
+    emit(f"🔍 BlockCheck: {scope_title(scope)} — {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
     environment = sections.environment_lines()
     for line in environment:
         emit(line)
@@ -677,7 +681,7 @@ def run_blockcheck(
     from diagnostics.voice_check import check_voice, summarize_voice
 
     scope = str(scope or "").strip().lower()
-    if scope not in _SCOPE_TITLES:
+    if scope not in _SCOPE_TITLES and scope_service(scope) is None:
         scope = SCOPE_MAIN
     full = scope == SCOPE_FULL
     services = build_services(scope, user_domains)
@@ -724,7 +728,7 @@ def run_blockcheck(
         )
 
         network_future = run.later(STEP_SYSTEM, sections.check_network, run, other_tools)
-        # Дата-центры Telegram — часть списка «все сайты»: в коротком режиме их не трогаем.
+        # Дата-центры Telegram — часть списка «все сайты» и проверки одного Telegram: в коротком режиме их не трогаем.
         telegram_future = (
             run.later(
                 STEP_SYSTEM,
@@ -734,7 +738,7 @@ def run_blockcheck(
                 connect=lambda address, port: telegram_check.connect_once(address, port, cancel=run.probe_cancel),
                 pause=run.pause,
             )
-            if scope != SCOPE_MAIN
+            if scope in (SCOPE_ALL, SCOPE_FULL, service_scope("telegram"))
             else None
         )
         ipv6_future = run.later(STEP_IPV6, sections.check_ipv6, run)

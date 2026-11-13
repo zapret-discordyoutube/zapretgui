@@ -475,9 +475,9 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
     "onboarding.step.blockcheck_start.body": {
         "ru": (
             "BlockCheck сам открывает сайты — так, как их открыл бы браузер Chrome, — и смотрит, что с ними "
-            "происходит. Выберите, что проверить: только сайты, только Discord и YouTube или глубокую "
-            "диагностику — ещё и DNS-серверы, место фильтра и пробы, которых браузер не делает, около минуты. "
-            "Затем нажмите «Проверить».\n\n"
+            "происходит. Выберите, что проверить: только сайты или глубокую диагностику — ещё и DNS-серверы, "
+            "место фильтра и пробы, которых браузер не делает, около минуты. Затем нажмите «Проверить». "
+            "Один сервис — YouTube, Discord, Telegram и другие — проверяется отдельно: нажмите на его карточку.\n\n"
             f"Галочка «Сверить с сервером {zapret_dns.COUNTRY_RU_IN}» попросит наш сервер открыть закрытые сайты "
             "из-за рубежа: так видно, блокировка это или сайт не работает сам. По умолчанию она выключена — "
             "соединение с сервером проекта провайдер видит.\n\n"
@@ -488,9 +488,9 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
         ),
         "en": (
             "BlockCheck opens sites by itself — the way the Chrome browser would — and watches what happens "
-            "to them. Choose what to check: only sites, only Discord and YouTube, or deep diagnostics — also "
-            "DNS servers, the filter location and probes a browser never makes, about a minute. "
-            "Then press Check.\n\n"
+            "to them. Choose what to check: only sites or deep diagnostics — also DNS servers, the filter "
+            "location and probes a browser never makes, about a minute. Then press Check. "
+            "One service — YouTube, Discord, Telegram and others — is checked on its own: click its card.\n\n"
             f"The Cross-check with the server {zapret_dns.COUNTRY_EN_IN} box asks our server to open the blocked sites "
             "from abroad: this shows whether it is a block or the site itself is down. It is off by default — "
             "your provider sees the connection to the project server.\n\n"
@@ -688,7 +688,8 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
     "onboarding.step.domain_lookup.title": {"ru": "Проверка домена", "en": "Domain check"},
     "onboarding.step.domain_lookup.body": {
         "ru": (
-            "Всё об одном сайте. Впишите домен или IP-адрес и запустите проверку. Сначала программа "
+            "Всё о вашем сайте. Впишите свой домен или IP-адрес и запустите проверку — известные сервисы "
+            "вроде YouTube и Discord проверяются карточками на первой вкладке. Сначала программа "
             "открывает сайт так, как его открыл бы браузер, а затем всегда делает подробный разбор, даже "
             "если всё открылось: пинг, адреса от разных DNS-серверов, узлы по дороге до сервера и какие "
             "ещё домены живут на том же адресе.\n\n"
@@ -696,7 +697,8 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "ничего не уходит."
         ),
         "en": (
-            "Everything about one site. Type a domain or an IP address and start the check. First the "
+            "Everything about your site. Type your own domain or IP address and start the check — well-known "
+            "services like YouTube and Discord are checked with cards on the first tab. First the "
             "program opens the site the way a browser would, then it always runs a detailed check, even "
             "if everything opened — ping, addresses from different DNS servers, the hops on the way to "
             "the server and which other domains live on the same address.\n\n"

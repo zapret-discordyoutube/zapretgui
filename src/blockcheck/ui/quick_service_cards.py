@@ -1,7 +1,8 @@
 """Карточки самых известных заблокированных сервисов: логотип и название, выбор одним нажатием.
 
 Заменяют поиск адреса в текстовом меню: YouTube, Discord, Telegram и другие всегда на виду.
-Карточка только сообщает, какой сервис выбрали (``picked``), а адрес подставляет страница.
+Карточка только сообщает, какой сервис выбрали: ``picked`` — его адрес (подбор стратегии подставляет
+его в поле), ``chosen`` — его ключ (BlockCheck проверяет этот сервис целиком).
 """
 
 from __future__ import annotations
@@ -137,12 +138,12 @@ class ServiceCard(QWidget):
 
 
 class QuickServiceCards(QWidget):
-    """Сетка карточек сервисов. ``picked(адрес)`` — нажали на карточку; ``set_target`` отмечает выбранную."""
+    """Сетка карточек сервисов. ``picked(адрес)`` и ``chosen(ключ)`` — нажали на карточку; ``set_target`` отмечает выбранную."""
 
     picked = pyqtSignal(str)
+    chosen = pyqtSignal(str)
 
-    def __init__(self, parent=None, *, services: tuple[QuickService, ...] = QUICK_SERVICES, for_site_check: bool = False) -> None:
-        """``for_site_check`` — адрес для «Проверки домена» (страница сайта), а не для подбора стратегии."""
+    def __init__(self, parent=None, *, services: tuple[QuickService, ...] = QUICK_SERVICES) -> None:
         super().__init__(parent)
         self.setObjectName("quickServiceCards")
         grid = QGridLayout(self)
@@ -152,8 +153,7 @@ class QuickServiceCards(QWidget):
         self._cards: list[ServiceCard] = []
         for index, service in enumerate(services):
             card = ServiceCard(service, self)
-            address = service.site_host if for_site_check else service.target
-            card.clicked.connect(lambda address=address: self.picked.emit(address))
+            card.clicked.connect(lambda service=service: self._pick(service))
             grid.addWidget(card, index // COLUMNS, index % COLUMNS)
             self._cards.append(card)
         for column in range(COLUMNS):
@@ -163,6 +163,10 @@ class QuickServiceCards(QWidget):
             name="Быстрый выбор сервиса",
             description="Карточки известных сервисов: YouTube, Discord, Telegram и других. Нажатие подставляет адрес сервиса.",
         )
+
+    def _pick(self, service: QuickService) -> None:
+        self.picked.emit(service.target)
+        self.chosen.emit(service.key)
 
     def cards(self) -> list[ServiceCard]:
         return list(self._cards)

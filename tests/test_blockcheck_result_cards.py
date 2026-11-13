@@ -896,12 +896,32 @@ class PageCardsTests(unittest.TestCase):
 
         self.assertEqual(page._scope_combo.currentIndex(), 0)
         self.assertEqual(page._current_scope(), SCOPE_ALL)
-        self.assertEqual(page._scope_combo.itemText(2), "Глубокая диагностика (около минуты)")
-        self.assertEqual([page._scope_combo.itemData(index) for index in range(3)], ["all", "main", "full"])
+        self.assertEqual(page._scope_combo.itemText(1), "Глубокая диагностика (около минуты)")
+        # «Discord и YouTube» больше не пункт меню: один сервис выбирают карточкой.
+        self.assertEqual([page._scope_combo.itemData(index) for index in range(page._scope_combo.count())], ["all", "full"])
         # Смена языка расставляет названия в том же порядке.
         page.set_ui_language("ru")
         self.assertEqual(page._scope_combo.itemText(0), "Только сайты (быстро)")
-        self.assertEqual(page._scope_combo.itemText(2), "Глубокая диагностика (около минуты)")
+        self.assertEqual(page._scope_combo.itemText(1), "Глубокая диагностика (около минуты)")
+
+    def test_service_card_checks_only_that_service_and_waits_while_a_check_runs(self) -> None:
+        page = self._page()
+        started: list[dict] = []
+        youtube = next(card for card in page._service_cards.cards() if card.service.key == "youtube")
+        discord = next(card for card in page._service_cards.cards() if card.service.key == "discord")
+
+        with patch("blockcheck.ui.page.start_blockcheck_page_run", lambda **kwargs: started.append(kwargs)):
+            youtube.click()
+            self.assertEqual([item["scope"] for item in started], ["service:youtube"])
+            # Пока идёт проверка, карточки не запускают вторую.
+            self.assertFalse(page._service_cards.isEnabled())
+            page._reset_ui()
+            self.assertTrue(page._service_cards.isEnabled())
+            discord.click()
+            # Кнопка «Проверить» по-прежнему берёт режим из меню.
+            page._start_btn.click()
+
+        self.assertEqual([item["scope"] for item in started], ["service:youtube", "service:discord", "all"])
 
     def test_card_opens_details_over_the_page_and_closing_brings_it_back(self) -> None:
         page = self._page()

@@ -556,9 +556,9 @@ TEXTS: dict[str, dict[str, str]] = {
             "it is a block or the site itself is down. Your provider will see the connection to the project server."
         ),
     },
-    "page.blockcheck.scope_main": {
-        "ru": "Только Discord и YouTube (быстро)",
-        "en": "Discord and YouTube only (quick)",
+    "page.blockcheck.services_caption": {
+        "ru": "Или проверьте только один сервис:",
+        "en": "Or check just one service:",
     },
     "page.blockcheck.scope_full": {
         "ru": "Глубокая диагностика (около минуты)",

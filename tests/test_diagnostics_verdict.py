@@ -1713,11 +1713,28 @@ class BlockcheckScopeTests(unittest.TestCase):
         everything = engine.build_services("all", ["Example.org", "discord.com"])
 
         self.assertEqual(list(main), ["discord", "youtube"])
+        # Один сервис — любой из списков, даже из глубокой проверки; неизвестный ключ — короткий режим.
+        self.assertEqual(list(engine.build_services("service:whatsapp")), ["whatsapp"])
+        self.assertEqual(list(engine.build_services("service:YouTube")), ["youtube"])
+        self.assertEqual(list(engine.build_services("service:nope")), ["discord", "youtube"])
+
         self.assertIn("telegram", everything)
         self.assertTrue(everything["google"].control)
         self.assertIn("user:example.org", everything)
         # Домен, который и так проверяется, не дублируется.
         self.assertNotIn("user:discord.com", everything)
+
+    def test_every_service_card_of_blockcheck_has_its_service(self) -> None:
+        from blockcheck.quick_services import QUICK_SERVICES
+        from diagnostics.services import scope_service, scope_title, service_scope
+
+        for card in QUICK_SERVICES:
+            service = scope_service(service_scope(card.key))
+            self.assertIsNotNone(service, card.key)
+            # Карточка и проверка говорят про один и тот же сайт.
+            self.assertIn(card.target, [target.host for target in service.targets], card.key)
+        self.assertEqual(scope_title("service:youtube"), "YouTube")
+        self.assertEqual(scope_title("all"), "Все сайты")
 
     def test_unparsable_stun_answer_means_udp_works(self) -> None:
         from types import SimpleNamespace
@@ -1897,6 +1914,17 @@ class BlockcheckScopeTests(unittest.TestCase):
         quick = self._run_with_telegram([False] * 5, scope="main")
         self.assertIsNone(quick["telegram"])
         self.assertEqual(quick["network"]["external_ip"], "203.0.113.7")
+
+    def test_one_service_check_runs_only_that_service(self) -> None:
+        # Карточка сервиса в BlockCheck: только его адреса; дата-центры — только у самого Telegram.
+        youtube = self._run_with_telegram([True] * 5, scope="service:youtube")
+        self.assertEqual([item["key"] for item in youtube["services"]], ["youtube"])
+        self.assertIsNone(youtube["telegram"])
+        self.assertEqual(youtube["scope"], "service:youtube")
+
+        telegram = self._run_with_telegram([True] * 5, scope="service:telegram")
+        self.assertEqual([item["key"] for item in telegram["services"]], ["telegram"])
+        self.assertEqual(telegram["telegram"]["items"][0]["text"], "соединение за 30 мс")
 
     def test_cut_on_foreign_controls_is_not_whitelist_mode(self) -> None:
         """Google и Cloudflare обрываются после 16 КБ — это лечит Zapret, а не «закрыты все зарубежные адреса»."""

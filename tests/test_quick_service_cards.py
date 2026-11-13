@@ -54,13 +54,16 @@ class WidgetTests(unittest.TestCase):
 
         widget = QuickServiceCards()
         picked: list[str] = []
+        chosen: list[str] = []
         widget.picked.connect(picked.append)
+        widget.chosen.connect(chosen.append)
         discord = next(card for card in widget.cards() if card.service.key == "discord")
 
         discord.click()
         widget.set_target("discord.com")
 
-        self.assertEqual(picked, ["discord.com"])
+        # Адрес — для поля подбора стратегии, ключ — для BlockCheck одного сервиса.
+        self.assertEqual((picked, chosen), (["discord.com"], ["discord"]))
         self.assertEqual(widget.selected_key(), "discord")
         widget.set_target("example.org")
         self.assertEqual(widget.selected_key(), "")
@@ -102,27 +105,14 @@ class DomainPageTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
         return page
 
-    def test_card_fills_the_field_and_starts_the_check_of_the_site_page(self) -> None:
-        from unittest.mock import patch
+    def test_domain_check_has_no_service_cards(self) -> None:
+        from blockcheck.ui.quick_service_cards import QuickServiceCards
 
         page = self._page()
-        youtube = next(card for card in page.quick_cards.cards() if card.service.key == "youtube")
 
-        with patch.object(page, "start_lookup") as start:
-            youtube.click()
-
-        # Для проверки домена у YouTube берётся страница сайта: видеосерверы добавляются к ней сами.
-        self.assertEqual(page.target_input.text(), "www.youtube.com")
-        start.assert_called_once()
-        self.assertEqual(page.quick_cards.selected_key(), "youtube")
-
-    def test_cards_are_off_while_a_check_is_running(self) -> None:
-        page = self._page()
-
-        page._set_running(True)
-        self.assertFalse(page.quick_cards.isEnabled())
-        page._set_running(False)
-        self.assertTrue(page.quick_cards.isEnabled())
+        # Известные сервисы проверяет BlockCheck своими карточками; здесь — только свой домен или адрес.
+        self.assertEqual(page.findChildren(QuickServiceCards), [])
+        self.assertFalse(hasattr(page, "quick_cards"))
 
 
 if __name__ == "__main__":

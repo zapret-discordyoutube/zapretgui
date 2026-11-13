@@ -25,7 +25,6 @@ import dns.domain_lookup_plans as plans
 from app.ui_texts import tr as tr_catalog
 from blockcheck.ui.brand_icons import BrandIcon
 from blockcheck.ui.check_results import _HeightKeeper
-from blockcheck.ui.quick_service_cards import QuickServiceCards
 from blockcheck.ui.result_cards import CardsGrid, TilesGrid, plain_tile
 from blockcheck.ui.result_cards_model import Line
 from dns.ui import domain_lookup_cards as lookup_cards
@@ -252,11 +251,8 @@ class DomainLookupPage(BasePage):
         row.addWidget(self.report_button)
         self.control_card.add_layout(row)
 
-        # Известные сервисы одним нажатием: адрес подставляется и проверка запускается сразу.
-        self.quick_cards = QuickServiceCards(self.control_card, for_site_check=True)
-        self.quick_cards.picked.connect(self._on_quick_service)
-        self.target_input.textChanged.connect(self.quick_cards.set_target)
-        self.control_card.add_widget(self.quick_cards)
+        # Известные сервисы (YouTube, Discord…) проверяются карточками на вкладке BlockCheck:
+        # здесь — только свой домен или адрес, зато с подробным разбором.
 
         self.external_check = CheckBox("", self.control_card)
         self.external_check.setChecked(True)
@@ -369,7 +365,6 @@ class DomainLookupPage(BasePage):
         self.start_button.setEnabled(not running)
         self.stop_button.setVisible(running)
         self.target_input.setEnabled(not running)
-        self.quick_cards.setEnabled(not running)
         self.external_check.setEnabled(not running)
         self.report_button.setEnabled(self._report is not None and not running)
         self.progress_bar.setVisible(running)
@@ -384,13 +379,6 @@ class DomainLookupPage(BasePage):
             self.progress_bar.stop()
             self.ticker.stop()
         set_state_text(self.progress_bar, "Проверка домена: выполняется" if running else "Проверка домена: не выполняется")
-
-    def _on_quick_service(self, address: str) -> None:
-        """Карточка сервиса: подставить адрес и сразу проверить."""
-        if self._closed or self._running:
-            return
-        self.set_target(address)
-        self.start_lookup()
 
     def set_target(self, target: str) -> None:
         self.target_input.setText(str(target or ""))

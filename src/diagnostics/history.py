@@ -15,7 +15,7 @@ import json
 from datetime import datetime
 
 from diagnostics.levels import FAIL, UNKNOWN, WARN, is_open, level_rank, worst
-from diagnostics.services import SCOPE_TITLES
+from diagnostics.services import scope_title
 
 __all__ = [
     "KIND_BLOCKCHECK",
@@ -72,7 +72,7 @@ def blockcheck_entry(report: dict, *, log_file: str = "", when: datetime | None 
     return {
         "kind": KIND_BLOCKCHECK,
         "time": when.isoformat(timespec="seconds"),
-        "title": SCOPE_TITLES.get(str(report.get("scope") or ""), str(report.get("scope") or "")),
+        "title": scope_title(str(report.get("scope") or "")),
         "level": level,
         "headline": headline,
         "problems": problems,
