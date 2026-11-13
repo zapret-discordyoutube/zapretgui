@@ -22,6 +22,9 @@ YOUTUBE_PRESET = [
     "--name=Исключения домены (RU сайты)",
     "--filter-tcp=80,443-65535",
     "--hostlist=lists/netrogat.txt",
+    "--payload=tls_client_hello",
+    # Так профили-исключения устроены в настоящих пресетах: «pass» ничего не делает.
+    "--lua-desync=pass",
     "--new",
     "--name=YouTube · быстрый протокол QUIC",
     "--filter-udp=443",
@@ -72,6 +75,16 @@ class MatchRulesTests(unittest.TestCase):
 
         self.assertEqual((found.profile, found.strategy), ("Исключения домены (RU сайты)", False))
 
+    def test_pass_and_debug_are_not_strategies_but_any_real_function_is(self) -> None:
+        def strategy(*lines: str) -> bool:
+            return _preset(["--name=P", *lines]).covering("x.org").strategy
+
+        self.assertFalse(strategy("--lua-desync=pass"))
+        self.assertFalse(strategy("--lua-desync=pktdebug", "--lua-desync=pass"))
+        self.assertTrue(strategy("--lua-desync=pass", "--lua-desync=multisplit:pos=2"))
+        self.assertTrue(strategy("--lua-desync=drop"))
+        self.assertTrue(strategy("--dpi-desync=fake,multisplit"))
+
     def test_profile_without_any_filter_catches_everything(self) -> None:
         found = _preset(["--name=Всё подряд", "--lua-desync=fake"]).covering("example.org")
 
@@ -120,7 +133,11 @@ class RealPresetTests(unittest.TestCase):
             # Файл @… пишется так же, как в zapret2_runner: по аргументу в строке, в кавычках shell.
             at_file = Path(tmp) / "at.txt"
             at_file.write_text("\n".join(shlex.quote(arg) for arg in args) + "\n", encoding="utf-8")
-            lists = {"lists/youtube.txt": "youtube.com\nyoutubei.googleapis.com\n", "lists/googlevideo.txt": "googlevideo.com\n"}
+            lists = {
+                "lists/youtube.txt": "youtube.com\nyoutubei.googleapis.com\n",
+                "lists/googlevideo.txt": "googlevideo.com\n",
+                "lists/netrogat.txt": "ya.ru\n",
+            }
             # Остальные списки пресета у человека не пусты (пустой список ловил бы всё): здесь — заглушка.
             texts = {Path("/zapret") / name: text for name, text in lists.items()}
             preset = pc.parse_launch_args(
@@ -131,6 +148,9 @@ class RealPresetTests(unittest.TestCase):
 
         self.assertEqual(preset.covering("youtubei.googleapis.com", "172.217.112.4").profile, "YouTube · сайт и приложение")
         self.assertEqual(preset.covering("rr4---sn-x.googlevideo.com").profile, "YouTube · видео (googlevideo.com)")
+        # Исключения в настоящем пресете пропускают трафик через «pass»: это не стратегия.
+        excluded = preset.covering("ya.ru", "77.88.55.242")
+        self.assertEqual((excluded.profile, excluded.strategy), ("Исключения домены (RU сайты)", False))
 
 
 class RunningProcessTests(unittest.TestCase):

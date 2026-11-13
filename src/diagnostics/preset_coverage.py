@@ -44,6 +44,9 @@ _IPSET_EXCLUDE_FILES = ("--ipset-exclude",)
 _IPSET_INLINE = ("--ipset-ip",)
 _IPSET_EXCLUDE_INLINE = ("--ipset-exclude-ip",)
 _STRATEGY_PREFIXES = ("--lua-desync", "--dpi-desync")
+# Функции zapret2, которые ничего не меняют: ``pass`` только отмечает вызов (профили-исключения
+# пропускают им трафик без обхода), ``pktdebug`` пишет пакет в лог.
+_NO_OP_DESYNC = frozenset({"pass", "pktdebug", "none"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +231,9 @@ def parse_launch_args(
         elif name in _IPSET_EXCLUDE_INLINE:
             current.ips_exclude.extend(_networks(value.split(",")))
         elif name.startswith(_STRATEGY_PREFIXES):
-            current.strategy = True
+            function = value.split(":", 1)[0].strip().lower()
+            if function and function not in _NO_OP_DESYNC:
+                current.strategy = True
     return RunningPreset(tuple(profile for profile in profiles if not profile.template))
 
 
