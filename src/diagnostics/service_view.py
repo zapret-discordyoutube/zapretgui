@@ -220,7 +220,7 @@ def _coverage_row(coverage) -> ViewRow | None:
             "Профиль пресета",
             f"имя попадает в профиль {where}, а в нём нет стратегии: Zapret это соединение нарочно пропускает",
         )
-    return ViewRow(INFO, "Профиль пресета", f"имя попадает в профиль {where}, но его стратегия этот фильтр не обходит")
+    return ViewRow(INFO, "Профиль пресета", f"имя попадает в профиль {where}: Zapret применяет к нему стратегию этого профиля")
 
 
 def target_rows(item: dict) -> tuple[ViewRow, ...]:

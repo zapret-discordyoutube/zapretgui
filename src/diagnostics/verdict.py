@@ -309,6 +309,8 @@ class TargetOutcome:
     # Свой, доказанный пробами совет этого адреса (видеосервер, который стратегия не откроет).
     # Пусто — совет берётся по виду блокировки.
     cure: tuple[str, ...] = ()
+    # Подсказка, которая идёт после совета по виду блокировки, а не вместо него (не доказана пробами).
+    note: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -456,12 +458,13 @@ def _advice_for(
 
 
 def coverage_cure(coverage) -> tuple[str, ...]:
-    """Совет по профилю запущенного пресета, который ловит (или не ловит) закрытое имя.
+    """Совет, когда Zapret запущен, а закрытое имя его стратегия не трогает.
 
-    Zapret запущен, а имя закрыто: подбирать стратегию имеет смысл, только если имя попадает в профиль
-    со стратегией. Не попадает ни в один — Zapret его не трогает, и подбор не поможет.
+    Имя не попадает ни в один профиль или попадает в профиль без стратегии — подбор стратегии не
+    поможет, имя надо перенести в список профиля. Имя в профиле со стратегией — своего совета нет:
+    его даёт вид блокировки (по имени — подобрать стратегию, по адресу — DNS или VPN).
     """
-    if coverage is None:
+    if coverage is None or (coverage.profile and coverage.strategy):
         return ()
     # Имени адреса в совете нет: у нескольких адресов с одной бедой совет один, а имя каждого
     # стоит в его строке «Профиль пресета».
@@ -472,25 +475,24 @@ def coverage_cure(coverage) -> tuple[str, ...]:
             "(страница «Мои пресеты» → профиль → список доменов), или выберите пресет, где они уже есть.",
         )
     where = f"«{coverage.profile}»" + (f" ({coverage.via})" if coverage.via else "")
-    if not coverage.strategy:
-        return (
-            f"Закрытое имя попадает в профиль {where}, а в нём нет стратегии: Zapret нарочно пропускает это "
-            "соединение как есть. Уберите имя из списка этого профиля, чтобы его поймал профиль со стратегией.",
-        )
     return (
-        f"Закрытое имя попадает в профиль {where}, но стратегия этого профиля фильтр не обходит. "
-        "Подберите другую стратегию: вкладка «Подбор стратегии» найдёт рабочую для вашего провайдера.",
+        f"Закрытое имя попадает в профиль {where}, а в нём нет стратегии: Zapret нарочно пропускает это "
+        "соединение как есть. Уберите имя из списка этого профиля, чтобы его поймал профиль со стратегией.",
     )
 
 
 def _with_cures(items: list[TargetOutcome], advice: tuple[str, ...]) -> tuple[str, ...]:
-    """Совет по виду блокировки уступает доказанному совету адреса: у всех сломанных он свой — только он."""
+    """Совет по виду блокировки уступает доказанному совету адреса: у всех сломанных он свой — только он.
+
+    Подсказки (``note``) идут после всех советов.
+    """
     cures = tuple(dict.fromkeys(line for item in items for line in item.cure))
-    if not cures:
-        return advice
-    if all(item.cure for item in items):
-        return cures
-    return advice + tuple(line for line in cures if line not in advice)
+    if cures and all(item.cure for item in items):
+        advice = cures
+    elif cures:
+        advice = advice + tuple(line for line in cures if line not in advice)
+    notes = tuple(dict.fromkeys(line for item in items for line in item.note))
+    return advice + tuple(line for line in notes if line not in advice)
 
 
 def summarize_service(

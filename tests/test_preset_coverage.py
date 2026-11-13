@@ -176,16 +176,53 @@ class WordsTests(unittest.TestCase):
         rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {"profile": "", "via": "", "strategy": True}})}
         self.assertIn("ни в один профиль", rows["Профиль пресета"])
         rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {"profile": "YouTube", "via": "список youtube.txt", "strategy": True}})}
-        self.assertEqual(rows["Профиль пресета"], "имя попадает в профиль «YouTube» (список youtube.txt), но его стратегия этот фильтр не обходит")
+        # Строка не обещает, что виновата стратегия: при закрытом адресе дело не в ней.
+        self.assertEqual(rows["Профиль пресета"], "имя попадает в профиль «YouTube» (список youtube.txt): Zapret применяет к нему стратегию этого профиля")
         self.assertNotIn("Профиль пресета", {row.title for row in target_rows({"text": "x"})})
 
         self.assertIn("Добавьте эти имена", coverage_cure(pc.Coverage())[0])
-        self.assertIn("Подбор стратегии", coverage_cure(pc.Coverage("YouTube", "список youtube.txt"))[0])
         self.assertIn("нет стратегии", coverage_cure(pc.Coverage("Исключения", "список netrogat.txt", strategy=False))[0])
+        # Профиль со стратегией — своего совета нет: его даёт вид блокировки.
+        self.assertEqual(coverage_cure(pc.Coverage("YouTube", "список youtube.txt")), ())
         self.assertEqual(coverage_cure(None), ())
 
+
+class AdviceByBlockKindTests(unittest.TestCase):
+    """Совет по профилю не доказан пробами: он заменяет только «подберите стратегию»."""
+
+    @staticmethod
+    def _advice(reach: ReachState, coverage: pc.Coverage, kind: str = "") -> tuple[str, ...]:
+        from types import SimpleNamespace
+
+        from diagnostics import engine
+        from diagnostics.services import Service, Target
+
+        target = Target("rutracker.org", "сайт", main=True)
+        probe = SimpleNamespace(
+            host="rutracker.org", target=target, reach_state=reach, judgement=None, kind=kind,
+            hosts_stale=False, unstable="", dns=SimpleNamespace(ips=("1.2.3.4",)), hosts_ips=(),
+            video_node=None, coverage=coverage,
+        )
+        service = Service("rutracker", "RuTracker", (target,))
+        return engine._service_verdict(service, [probe], zapret_running=True).advice
+
+    def test_name_block_outside_every_profile_replaces_pick_a_strategy(self) -> None:
+        advice = self._advice(ReachState.DPI, pc.Coverage(), kind="sni")
+
+        self.assertEqual(advice, coverage_cure(pc.Coverage()))
+
+    def test_closed_address_keeps_its_advice_and_gets_the_profile_hint_after_it(self) -> None:
+        not_covered = self._advice(ReachState.IP_BLOCK, pc.Coverage(), kind="noconnect")
+        covered = self._advice(ReachState.IP_BLOCK, pc.Coverage("Cloudflare TCP", "адрес в ipset-cloudflare.txt"), kind="noconnect")
+
+        self.assertEqual(not_covered[1:], coverage_cure(pc.Coverage()))
+        self.assertNotIn("профиль", not_covered[0])
+        # Адрес ловит профиль со стратегией: «подберите другую стратегию» здесь был бы неправдой.
+        self.assertEqual(len(covered), 1)
+        self.assertNotIn("Подберите другую стратегию", covered[0])
+
     def test_advice_of_the_broken_part_names_the_profile(self) -> None:
-        cure = coverage_cure(pc.Coverage("YouTube · сайт и приложение", "список youtube.txt"))
+        cure = coverage_cure(pc.Coverage("Исключения домены (RU сайты)", "список netrogat.txt", strategy=False))
         verdict = summarize_service(
             "YouTube",
             [
@@ -196,8 +233,7 @@ class WordsTests(unittest.TestCase):
         )
 
         self.assertEqual(verdict.advice, cure)
-        self.assertIn("«YouTube · сайт и приложение»", verdict.advice[0])
-
+        self.assertIn("«Исключения домены (RU сайты)»", verdict.advice[0])
 
 if __name__ == "__main__":
     unittest.main()

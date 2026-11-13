@@ -582,9 +582,11 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
                 and not probe.dns.ips
                 and not probe.hosts_ips
             ),
-            # Совет видеосервера доказан пробами и точнее; иначе — совет по профилю запущенного пресета.
+            # Совет видеосервера доказан пробами. Совет по профилю пресета заменяет «подберите стратегию»
+            # у блокировки по имени, а у закрытого адреса идёт после совета про адрес.
             cure=(probe.video_node.advice if probe.video_node is not None else ())
-            or coverage_cure(probe.coverage),
+            or (coverage_cure(probe.coverage) if probe.reach_state in (ReachState.DPI, ReachState.FREEZE) else ()),
+            note=coverage_cure(probe.coverage) if probe.reach_state == ReachState.IP_BLOCK else (),
         )
         for probe in probes
     ]
