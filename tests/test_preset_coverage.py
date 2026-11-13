@@ -207,7 +207,7 @@ class PresetAndStrategyNameTests(unittest.TestCase):
         lists = {"youtube.txt": ["youtube.com", "youtubei.googleapis.com"], "googlevideo.txt": ["googlevideo.com"], "netrogat.txt": ["ya.ru"]}
         # Остальные списки у человека не пусты (пустой ловил бы всё): здесь — заглушка.
         running = pc.parse_launch_args(args, Path("/zapret"), read_lines=lambda path: lists.get(path.name, ["placeholder.invalid"]))
-        return pc.with_strategy_names(dataclasses.replace(running, preset="Default + YouTube no QUIC + wssize"), args, self.SRC)
+        return pc.with_strategy_names(dataclasses.replace(running, preset="Default + YouTube no QUIC + wssize"), "\n".join(args), self.SRC)
 
     def test_strategy_names_come_from_the_ready_strategy_lists(self) -> None:
         from winws_runtime.runners.preset_runner_support import launch_args_from_preset_text
@@ -227,6 +227,124 @@ class PresetAndStrategyNameTests(unittest.TestCase):
         own = ["--lua-desync=fake:blob=my_own_unlisted_blob:repeats=99" if arg.startswith("--lua-desync=multisplit:pos=2,midsld-2") else arg for arg in args]
         custom = self._running(own).covering("youtubei.googleapis.com", "172.217.112.4")
         self.assertEqual((custom.strategy_name, custom.custom_strategy), ("", True))
+        # Своя стратегия показывается как есть: видно, что именно работает.
+        self.assertEqual(custom.strategy_text, "--lua-desync=fake:blob=my_own_unlisted_blob:repeats=99")
+
+
+class Winws1PresetTests(unittest.TestCase):
+    """Zapret 1: название профиля в ``--comment``, полные пути в ``@…`` — а названия стратегий те же, что на странице профилей."""
+
+    BUILTIN = Path(__file__).resolve().parents[1] / "src/presets/builtin/winws1/alt1.txt"
+    CATALOGS = Path(__file__).resolve().parents[1] / "src/system/strategy_catalogs"
+
+    def _launch(self, base: Path, preset: Path) -> Path:
+        from types import SimpleNamespace
+
+        from winws_runtime.runners.runner_base import StrategyRunnerBase
+        from winws_runtime.runners.zapret1_runner import Winws1StrategyRunner
+
+        # Файл @… пишет сам zapret1_runner (с полными путями): если он поменяет запись, тест это заметит.
+        runner = SimpleNamespace(work_dir=str(base), lists_dir=str(base / "lists"), bin_dir=str(base / "bin"))
+        runner._resolve_file_paths = lambda args: StrategyRunnerBase._resolve_file_paths(runner, args)
+        runner._build_winws1_at_config_text = lambda text: Winws1StrategyRunner._build_winws1_at_config_text(runner, text)
+        runner._winws1_at_config_dir = lambda: Winws1StrategyRunner._winws1_at_config_dir(runner)
+        return Path(Winws1StrategyRunner._write_winws1_at_config(runner, str(preset), preset.read_text(encoding="utf-8")))
+
+    def test_named_and_own_strategies_of_a_running_zapret1_preset(self) -> None:
+        import shutil
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            preset = base / "presets" / "winws1_builtin" / "alt1.txt"
+            preset.parent.mkdir(parents=True)
+            preset.write_text(self.BUILTIN.read_text(encoding="utf-8"), encoding="utf-8")
+            shutil.copytree(self.CATALOGS / "winws1", base / "system" / "strategy_catalogs" / "winws1")
+            (base / "lists").mkdir()
+            for name in ("discord.txt", "ipset-discord.txt", "list-general.txt", "ipset-cloudflare.txt"):
+                (base / "lists" / name).write_text("placeholder.invalid\n", encoding="utf-8")
+            (base / "lists" / "discord.txt").write_text("discord.com\n", encoding="utf-8")
+            (base / "lists" / "ipset-discord.txt").write_text("162.159.130.0/24\n", encoding="utf-8")
+            config = self._launch(base, preset)
+            self.assertIn(str(base / "lists" / "discord.txt"), config.read_text(encoding="utf-8"))
+
+            running = pc.running_from_at_config(config, "winws.exe")
+            self.assertEqual(running.preset, "alt1")
+            voice = running.covering("discord.media", "162.159.130.234", protocol=pc.PROTOCOL_QUIC, port=50001)
+            self.assertEqual((voice.profile, voice.strategy_name), ("Discord · UDP (обычно не нужно)", "General ALT2 1.6.1"))
+            own = running.covering("discord.com", protocol=pc.PROTOCOL_QUIC)
+            self.assertTrue(own.custom_strategy)
+            self.assertEqual(
+                own.strategy_text,
+                "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=bin/quic_initial_www_google_com.bin",
+            )
+            # Полный путь (так его пишет программа) — только именем файла.
+            self.assertEqual(pc.strategy_text(["--dpi-desync-fake-tls=C:\\Zapret\\Dev\\bin\\tls.bin", "--x=/opt/z/bin/a.bin"]), "--dpi-desync-fake-tls=tls.bin --x=a.bin")
+
+            # Пресет поменяли после запуска: @… уже не из него — названий нет, гадать нельзя.
+            preset.write_text(preset.read_text(encoding="utf-8").replace("--dpi-desync-repeats=6", "--dpi-desync-repeats=7"), encoding="utf-8")
+            stale = pc.running_from_at_config(config, "winws.exe").covering("discord.media", "162.159.130.234", protocol=pc.PROTOCOL_QUIC, port=50001)
+            self.assertEqual((stale.profile, stale.strategy_name, stale.custom_strategy), ("Discord · UDP (обычно не нужно)", "", False))
+
+
+class OrchestraTests(unittest.TestCase):
+    """Оркестратор: строка говорит, какую стратегию он закрепил за именем, а не «своя стратегия»."""
+
+    SOURCE = (
+        "--wf-tcp-out=443\n"
+        "--lua-init=@lua/zapret-lib.lua\n"
+        "# Profile 1: TLS (HTTPS 443)\n"
+        "--filter-tcp=443\n"
+        "--hostlist-exclude=user/lua/whitelist.txt\n"
+        "--lua-desync=circular_quality:key=tls:fails=1:nld=3\n"
+        "--lua-desync=fake:blob=tls_google:repeats=2\n"
+        "--lua-desync=wssize:wsize=1:scale=1 --lua-desync=multidisorder:pos=1:seqovl=1\n"
+        "--new\n"
+        "# Profile 3: QUIC\n"
+        "--filter-udp=443\n"
+        "--filter-l7=quic\n"
+        "--payload=quic_initial\n"
+        "--lua-desync=circular_quality:key=quic:fails=3\n"
+        "--lua-desync=drop\n"
+    )
+
+    def test_locked_strategy_and_its_lines_are_named(self) -> None:
+        import tempfile
+
+        from orchestra.runtime_config import build_orchestra_runtime_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            # Файл, с которым оркестратор запускает winws2, — тем же сборщиком, что у orchestra_runner.
+            config = base / "user" / "lua" / pc.ORCHESTRA_AT_CONFIG_NAME
+            config.parent.mkdir(parents=True)
+            config.write_text(build_orchestra_runtime_config(self.SOURCE), encoding="utf-8")
+            (config.parent / "whitelist.txt").write_text("ya.ru\n", encoding="utf-8")
+            asked: list = []
+
+            def locks(keys):
+                asked.append(list(keys))
+                return {"tls": {"googleapis.com": 1, "youtubei.googleapis.com": 2}, "quic": {}}
+
+            running = pc.running_from_at_config(config, "winws2.exe", locks=locks)
+
+        self.assertEqual(asked, [["tls", "quic"]])
+        site = running.covering("youtubei.googleapis.com", "172.217.112.4")
+        self.assertEqual((site.orchestra, site.profile, site.locked_strategy), (True, "TLS", 2))
+        self.assertEqual(site.strategy_text, "--lua-desync=wssize:wsize=1:scale=1 --lua-desync=multidisorder:pos=1:seqovl=1")
+        self.assertEqual((site.custom_strategy, site.strategy_name, site.preset), (False, "", ""))
+        # Запись под родительским именем (nld) тоже находится; не закреплено — номер 0.
+        self.assertEqual(running.covering("www.googleapis.com").locked_strategy, 1)
+        self.assertEqual(running.covering("example.org").locked_strategy, 0)
+        self.assertEqual(running.covering("rr1.googlevideo.com", protocol=pc.PROTOCOL_QUIC).profile, "QUIC")
+        # Имя из белого списка оркестратор не трогает.
+        white = running.covering("ya.ru", "77.88.55.242")
+        self.assertEqual((white.covered, white.orchestra), (False, True))
+
+    def test_lock_lookup_needs_at_least_two_labels(self) -> None:
+        self.assertEqual(pc.locked_number({"b.example.com": 5}, "a.b.example.com"), 5)
+        self.assertEqual(pc.locked_number({"com": 5}, "example.com"), 0)
+        self.assertEqual(pc.locked_number({"example.com": "x"}, "example.com"), 0)
 
 
 class WordsTests(unittest.TestCase):
@@ -247,6 +365,9 @@ class WordsTests(unittest.TestCase):
         )
         rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {**full, "strategy_name": "", "custom_strategy": True}})}
         self.assertTrue(rows["Профиль пресета"].endswith("— своя, среди готовых стратегий её нет"))
+        own = {**full, "strategy_name": "", "custom_strategy": True, "strategy_text": "--dpi-desync=fake"}
+        rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": own})}
+        self.assertTrue(rows["Профиль пресета"].endswith("— своя, среди готовых стратегий её нет: --dpi-desync=fake"))
         rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {"profile": "", "preset": "Default"}})}
         self.assertIn("ни в один профиль запущенного пресета «Default»", rows["Профиль пресета"])
         self.assertIn("профиль пресета «Default»", coverage_cure(pc.Coverage(preset="Default"))[0])
@@ -256,6 +377,33 @@ class WordsTests(unittest.TestCase):
         # Профиль со стратегией — своего совета нет: его даёт вид блокировки.
         self.assertEqual(coverage_cure(pc.Coverage("YouTube", "список youtube.txt")), ())
         self.assertEqual(coverage_cure(None), ())
+
+    def test_orchestra_rows_and_advice(self) -> None:
+        locked = {"profile": "TLS", "via": "все сайты", "strategy": True, "orchestra": True, "locked_strategy": 265, "strategy_text": "--lua-desync=drop"}
+        rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": locked})}
+        self.assertEqual(
+            rows["Профиль пресета"],
+            "имя попадает в профиль «TLS» оркестратора (все сайты): оркестратор закрепил за этим именем стратегию №265 (--lua-desync=drop)",
+        )
+        rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {**locked, "locked_strategy": 0}})}
+        self.assertIn("пока нет — оркестратор ещё перебирает стратегии", rows["Профиль пресета"])
+        self.assertNotIn("пресета", rows["Профиль пресета"].split(":")[0].replace("Профиль пресета", ""))
+        rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {"profile": "", "orchestra": True}})}
+        self.assertIn("ни в один его профиль", rows["Профиль пресета"])
+        self.assertIn("Белый список", coverage_cure(pc.Coverage(orchestra=True))[0])
+        self.assertEqual(coverage_cure(pc.Coverage("TLS", "все сайты", orchestra=True, locked_strategy=3)), ())
+
+    def test_row_button_leads_where_it_is_fixed(self) -> None:
+        def action(coverage):
+            [row] = [row for row in target_rows({"text": "x", "host": "youtubei.googleapis.com", "coverage": coverage}) if row.title == "Профиль пресета"]
+            return row.action, row.target
+
+        self.assertEqual(action({"profile": "YouTube", "strategy": True}), ("strategy", "youtubei.googleapis.com"))
+        self.assertEqual(action({"profile": "", "strategy": True}), ("profiles", "youtubei.googleapis.com"))
+        self.assertEqual(action({"profile": "Исключения", "strategy": False}), ("profiles", "youtubei.googleapis.com"))
+        self.assertEqual(action({"profile": "TLS", "orchestra": True}), ("orchestra_settings", "youtubei.googleapis.com"))
+        # Кнопка только на экране: текст отчёта её не печатает.
+        self.assertTrue(all(not row.action for row in target_rows({"text": "x"})))
 
 
 class AdviceByBlockKindTests(unittest.TestCase):

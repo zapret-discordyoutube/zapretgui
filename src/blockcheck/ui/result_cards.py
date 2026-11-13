@@ -1772,6 +1772,8 @@ class _SectionBlock(QWidget):
     text_opened = pyqtSignal(str, str)
     # Нажали карточку раздела (сервер, находку, сервис): отчёт на уровень глубже.
     child_opened = pyqtSignal(object)
+    # Кнопка строки (например, «Подобрать стратегию» у «Профиль пресета»): (действие, цель).
+    action_requested = pyqtSignal(str, str)
 
     def __init__(
         self,
@@ -1849,6 +1851,10 @@ class _SectionBlock(QWidget):
             # Строки рисует один виджет: строка-виджет на каждое измерение делала отчёт тяжёлым.
             self.table = RowsTable(section.lines, [line_icon(line, section) for line in section.lines], name_width, self)
             layout.addWidget(self.table)
+        # Строки с кнопкой — кнопкой под таблицей: туда, где это чинится.
+        self.action_buttons: list[PushButton] = []
+        if self.table is not None:
+            self._add_action_buttons(layout, section.lines)
         # Длинный текст (таблица серверов, узлы по дороге) — в редакторе с подсветкой и своей
         # прокруткой. Одной надписью на сотни строк он перерисовывался целиком при каждой
         # прокрутке страницы, и страница заметно тормозила.
@@ -1882,6 +1888,26 @@ class _SectionBlock(QWidget):
             self.editor.setFixedHeight(lines * self.editor.fontMetrics().lineSpacing() + 28)
             layout.addWidget(self.editor)
             layout.addSpacing(8)
+
+    def _add_action_buttons(self, layout, lines) -> None:
+        row = None
+        for line in lines:
+            label, description = line_action_text(line)
+            if not label:
+                continue
+            if row is None:
+                row = QHBoxLayout()
+                row.setContentsMargins(0, 6, 0, 0)
+                row.setSpacing(8)
+                layout.addLayout(row)
+            button = PushButton(label, self)
+            set_control_accessibility(button, name=label, description=description)
+            set_tooltip(button, description)
+            button.clicked.connect(lambda _checked=False, a=line.action, t=line.target: self.action_requested.emit(a, t))
+            row.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
+            self.action_buttons.append(button)
+        if row is not None:
+            row.addStretch(1)
 
     def set_narrow(self) -> None:
         """Раздел стоит в столбце рядом с другими: полоса долей короче, чтобы заголовок помещался."""
@@ -1925,6 +1951,18 @@ def is_narrow_section(section: Section) -> bool:
     if section.text or not section.lines:
         return False
     return all(len(line.name) <= NARROW_NAME and len(line.text) <= NARROW_TEXT for line in section.lines)
+
+
+def line_action_text(line: Line) -> tuple[str, str]:
+    """Надпись и описание кнопки строки отчёта; пусто — у строки кнопки нет."""
+    from blockcheck.ui.check_results import _ACTION_DESCRIPTION, _ACTION_TEXT
+
+    label = _ACTION_TEXT.get(line.action, "")
+    if not label:
+        return "", ""
+    if line.action == "strategy" and line.target:
+        label = f"{label} для {line.target}"
+    return label, _ACTION_DESCRIPTION.get(line.action, "")
 
 
 class _BlocksFlow(QWidget):
@@ -2113,6 +2151,8 @@ class ResultDetailView(QWidget):
     root_requested = pyqtSignal()
     # Просят открыть длинный текст раздела страницей-редактором: (название, текст).
     text_opened = pyqtSignal(str, str)
+    # Кнопка строки отчёта: (действие, цель) — страница решает, куда вести.
+    action_requested = pyqtSignal(str, str)
     # Шаг внутри отчёта: True — вглубь (сервер из списка), False — назад к уровню выше.
     level_changed = pyqtSignal(bool)
     ROOT_KEY = "blockcheck"
@@ -2270,6 +2310,7 @@ class ResultDetailView(QWidget):
             )
             block.text_opened.connect(self.text_opened)
             block.child_opened.connect(self.open_child)
+            block.action_requested.connect(self.action_requested)
             self.blocks.append(block)
         for flow in self._flows:
             flow.setParent(None)

@@ -90,6 +90,9 @@ class Line:
     parts: FindingParts | None = None
     # Своя страница строки-плитки (ответ одного DNS-сервера): открывается по нажатию на плитку.
     page: Card | None = None
+    # Кнопка под строкой (как у проблем итога): действие и для чего оно — имя сайта.
+    action: str = ""
+    target: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,7 +348,7 @@ _BLOCK_ICONS = {
 def _line_of(row) -> Line:
     """Строка карточки по строке общего модуля слов; находка про DNS-серверы несёт свои части."""
     parts = read_finding_parts(row.extra) if isinstance(row.extra, dict) else None
-    return Line(row.level, row.title, row.text, parts=parts)
+    return Line(row.level, row.title, row.text, parts=parts, action=row.action, target=row.target)
 
 
 def _sections_from_view(sections) -> list[Section]:

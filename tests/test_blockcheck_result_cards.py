@@ -748,6 +748,34 @@ class CardsWidgetsTests(unittest.TestCase):
         view.show_card(Card("hostings", "fa5s.server", "Хостинги", "ok", "В порядке"))
         self.assertIsNone(view.road)
 
+    def test_preset_profile_row_has_a_button_that_asks_the_page_to_fix_it(self) -> None:
+        from qfluentwidgets import PushButton
+
+        coverage = {"profile": "YouTube", "via": "список youtube.txt", "strategy": True, "strategy_name": "MultiSplit Pattern 7", "preset": "Default"}
+        target = _target("youtubei.googleapis.com", ok=False, main=True, coverage=coverage)
+        service = _service("youtube", "YouTube", "fail", [target], kind="by_name", status="Блокировка по имени", tags=[])
+        [card] = [item for item in build_cards({"services": [service]}) if item.site]
+        view = ResultDetailView()
+        self.addCleanup(view.deleteLater)
+        view.resize(1000, 600)
+        view.show()
+        view.show_card(card)
+        asked: list = []
+        view.action_requested.connect(lambda action, host: asked.append((action, host)))
+
+        [button] = [item for item in view.findChildren(PushButton) if item.text().startswith("Подобрать стратегию")]
+        self.assertEqual(button.text(), "Подобрать стратегию для youtubei.googleapis.com")
+        button.click()
+        self.assertEqual(asked, [("strategy", "youtubei.googleapis.com")])
+
+        # Имя вне профилей: подбор не поможет, кнопка ведёт в «Профили пресета».
+        lost = _target("youtubei.googleapis.com", ok=False, main=True, coverage={"profile": "", "strategy": True})
+        [card] = [item for item in build_cards({"services": [_service("youtube", "YouTube", "fail", [lost], tags=[])]}) if item.site]
+        view.show_card(card)
+        texts = [item.text() for block in view.blocks for item in block.findChildren(PushButton)]
+        self.assertIn("Профили пресета", texts)
+        self.assertFalse(any(text.startswith("Подобрать стратегию") for text in texts))
+
     def test_card_shows_few_lines_and_says_how_many_are_hidden(self) -> None:
         view = ResultCardsView()
         self.addCleanup(view.deleteLater)

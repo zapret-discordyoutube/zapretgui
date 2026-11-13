@@ -21,9 +21,15 @@
 Шаблоны (``--template``) не рабочие профили и пропускаются; ``--import`` не разворачивается.
 
 Чтобы отчёт не заставлял гадать, строка называет и пресет, и стратегию профиля. Пресет узнаётся
-по имени файла ``@…``: zapret2_runner называет его ``winws2_at_<sha1(путь пресета, NUL, текст)>``,
-так что достаточно найти файл пресета, который даёт тот же отпечаток. Стратегия — по каталогам
-готовых стратегий рядом с программой, тем же поиском, что и на странице профилей.
+по имени файла ``@…``: zapret2_runner и zapret1_runner называют его
+``winws2_at_<sha1(путь пресета, NUL, текст)>`` (``winws1_at_…``), так что достаточно найти файл
+пресета, который даёт тот же отпечаток. Стратегия — по каталогам готовых стратегий рядом с
+программой, тем же поиском, что и на странице профилей; своя стратегия показывается кратко как есть.
+
+Оркестратор запускает winws2 как ``winws2.exe @<папка>/user/lua/circular-config.runtime.txt``:
+его профили перебирают пронумерованные стратегии, и для каждого сайта он сам закрепляет рабочую
+(настройки ``orchestra.locked.<tls|quic|…>``: имя → номер). Тогда строка говорит не про пресет,
+а какую стратегию оркестратор закрепил за этим именем — или что ещё перебирает.
 """
 
 from __future__ import annotations
@@ -33,8 +39,9 @@ import gzip
 import hashlib
 import ipaddress
 import os
+import re
 import shlex
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 
@@ -55,6 +62,18 @@ _STRATEGY_PREFIXES = ("--lua-desync", "--dpi-desync")
 # Функции zapret2, которые ничего не меняют: ``pass`` только отмечает вызов (профили-исключения
 # пропускают им трафик без обхода), ``pktdebug`` пишет пакет в лог.
 _NO_OP_DESYNC = frozenset({"pass", "pktdebug", "none"})
+# Оркестраторы zapret2: сами не обходят, а перебирают стратегии профиля с пометкой ``:strategy=N``.
+_ORCHESTRATOR_DESYNC = frozenset({"circular", "circular_quality"})
+_STRATEGY_NUMBER = re.compile(r":strategy=(\d+)(?=:|$)")
+# Папки в полных путях, которые программа пишет в ``@…`` (у winws): в отчёте хватит имени файла.
+_WINDOWS_DIRS = re.compile(r"[A-Za-z]:\\(?:[^\\\s:,]+\\)*")
+_POSIX_DIRS = re.compile(r"(?<=[=:,])/(?:[^/\s:,]+/)+")
+# Файл, с которым оркестратор запускает winws2 (orchestra_runner, ``runtime_config_path``).
+ORCHESTRA_AT_CONFIG_NAME = "circular-config.runtime.txt"
+# Своя стратегия показывается в строке кратко: длиннее — обрезается.
+_STRATEGY_TEXT_LIMIT = 160
+ENGINE_WINWS1 = "winws1"
+ENGINE_WINWS2 = "winws2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +94,12 @@ class Coverage:
     custom_strategy: bool = False
     # Название запущенного пресета; пусто — не узнали.
     preset: str = ""
+    # Стратегия профиля кратко, как написана (для своей стратегии и закреплённой оркестратором).
+    strategy_text: str = ""
+    # Имя ловит профиль оркестратора: стратегию для сайта выбирает он сам.
+    orchestra: bool = False
+    # Какую стратегию профиля оркестратор закрепил за этим именем; 0 — пока не закрепил.
+    locked_strategy: int = 0
 
     @property
     def covered(self) -> bool:
@@ -123,6 +148,11 @@ class _Profile:
     autohostlist: bool = False
     named_strategy: str = ""
     custom_strategy: bool = False
+    # Строки стратегии как есть (без ``pass``/``pktdebug``) — для своей стратегии в отчёте.
+    strategy_lines: list[str] = field(default_factory=list)
+    # Профиль оркестратора: ключ его записей (tls, quic, …) и стратегии по номерам.
+    orchestra_key: str = ""
+    numbered: dict[int, list[str]] = field(default_factory=dict)
     ips: list = field(default_factory=list)
     ips_exclude: list = field(default_factory=list)
     ip_files: list[str] = field(default_factory=list)
@@ -190,11 +220,28 @@ def _read_lines(path: Path) -> list[str]:
     return raw.decode("utf-8", errors="replace").splitlines()
 
 
+def _desync_param(value: str, key: str) -> str:
+    """Значение параметра функции из ``--lua-desync=функция:ключ=значение:…``; пусто — нет такого."""
+    for part in value.split(":")[1:]:
+        name, sep, param = part.partition("=")
+        if sep and name.strip().lower() == key:
+            return param.strip()
+    return ""
+
+
 def parse_launch_args(
-    args: Sequence[str], base_dir: Path, *, read_lines: Callable[[Path], list[str]] = _read_lines
+    args: Sequence[str],
+    base_dir: Path,
+    *,
+    engine: str = ENGINE_WINWS2,
+    read_lines: Callable[[Path], list[str]] = _read_lines,
 ) -> "RunningPreset":
-    """Профили из аргументов winws2. Пути списков — от рабочей папки winws2 (``base_dir``)."""
+    """Профили из аргументов winws2 (winws). Пути списков — от рабочей папки (``base_dir``).
+
+    У winws (Zapret 1) нет ``--name``: название профиля программа пишет в ``--comment``.
+    """
     profiles: list[_Profile] = [_Profile(index=1)]
+    named: set[int] = set()
 
     def resolve(value: str) -> Path:
         path = Path(value.strip().strip('"'))
@@ -206,6 +253,9 @@ def parse_launch_args(
         if name == "--new":
             profiles.append(_Profile(index=len(profiles) + 1))
         elif name == "--name":
+            current.name = value
+            named.add(current.index)
+        elif name == "--comment" and engine == ENGINE_WINWS1 and current.index not in named and not current.name:
             current.name = value
         elif name == "--template":
             current.template = True
@@ -248,15 +298,55 @@ def parse_launch_args(
             current.ips_exclude.extend(_networks(value.split(",")))
         elif name.startswith(_STRATEGY_PREFIXES):
             function = value.split(":", 1)[0].strip().lower()
-            if function and function not in _NO_OP_DESYNC:
+            if function in _ORCHESTRATOR_DESYNC:
                 current.strategy = True
+                current.orchestra_key = (_desync_param(value, "key") or function).lower()
+            elif function and function not in _NO_OP_DESYNC:
+                current.strategy = True
+                current.strategy_lines.append(arg.strip())
+                number = _STRATEGY_NUMBER.search(value)
+                if number is not None:
+                    current.numbered.setdefault(int(number.group(1)), []).append(arg.strip())
     return RunningPreset(tuple(profile for profile in profiles if not profile.template))
+
+
+def strategy_text(lines: Iterable[str]) -> str:
+    """Стратегия кратко, как написана: строки через пробел, пути — именами файлов, без номеров оркестратора."""
+    parts = []
+    for line in lines:
+        text = _STRATEGY_NUMBER.sub("", str(line or "").strip())
+        text = _POSIX_DIRS.sub("", _WINDOWS_DIRS.sub("", text))
+        if text:
+            parts.append(text)
+    joined = " ".join(parts)
+    return joined if len(joined) <= _STRATEGY_TEXT_LIMIT else joined[: _STRATEGY_TEXT_LIMIT - 1].rstrip() + "…"
+
+
+def locked_number(locked: Mapping[str, object], host: str) -> int:
+    """Номер стратегии, закреплённой оркестратором за именем; 0 — не закреплена.
+
+    Оркестратор хранит запись под именем сайта или под его последними уровнями (``nld``):
+    ищем само имя, затем его родителей — от длинного к короткому, но не короче двух уровней.
+    """
+    labels = str(host or "").strip().lower().rstrip(".").split(".")
+    for start in range(0, max(1, len(labels) - 1)):
+        key = ".".join(labels[start:])
+        value = locked.get(key) if key else None
+        try:
+            number = int(value) if value is not None else 0
+        except (TypeError, ValueError):
+            number = 0
+        if number > 0:
+            return number
+    return 0
 
 
 @dataclass(frozen=True, slots=True)
 class RunningPreset:
     profiles: tuple[_Profile, ...]
     preset: str = ""
+    # Закреплённые оркестратором стратегии: ключ профиля (tls, quic, …) → имя → номер.
+    locked: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
     def covering(self, host: str, ip: str = "", *, protocol: str = PROTOCOL_TLS, port: int = 443) -> Coverage:
         """Первый профиль, который winws2 выберет для соединения с этим именем и адресом."""
@@ -268,17 +358,30 @@ class RunningPreset:
         udp = protocol == PROTOCOL_QUIC
         for profile in self.profiles:
             via = self._match(profile, host, address, udp=udp, port=port, protocol=protocol)
-            if via is not None:
-                named = profile.strategy and not profile.custom_strategy
+            if via is None:
+                continue
+            if profile.orchestra_key:
+                number = locked_number(self.locked.get(profile.orchestra_key) or {}, host)
                 return Coverage(
-                    profile.title(),
+                    profile.name or profile.orchestra_key.upper(),
                     via,
-                    profile.strategy,
-                    strategy_name=profile.named_strategy if named else "",
-                    custom_strategy=profile.strategy and profile.custom_strategy,
-                    preset=self.preset,
+                    True,
+                    orchestra=True,
+                    locked_strategy=number,
+                    strategy_text=strategy_text(profile.numbered.get(number, ())) if number else "",
                 )
-        return Coverage(preset=self.preset)
+            named = profile.strategy and not profile.custom_strategy
+            custom = profile.strategy and profile.custom_strategy
+            return Coverage(
+                profile.title(),
+                via,
+                profile.strategy,
+                strategy_name=profile.named_strategy if named else "",
+                custom_strategy=custom,
+                preset=self.preset,
+                strategy_text=strategy_text(profile.strategy_lines) if custom else "",
+            )
+        return Coverage(preset=self.preset, orchestra=any(profile.orchestra_key for profile in self.profiles))
 
     @staticmethod
     def _match(profile: _Profile, host: str, address, *, udp: bool, port: int, protocol: str) -> str | None:
@@ -336,25 +439,60 @@ def _at_config_of(command_line: str) -> Path | None:
     return None
 
 
-def preset_name_of(config: Path, base_dir: Path) -> str:
-    """Название пресета, из которого написан файл ``@…``; пусто — такого файла пресета нет."""
+def preset_file_of(config: Path, base_dir: Path) -> Path | None:
+    """Файл пресета, из которого написан файл ``@…``; ``None`` — такого файла пресета нет."""
     digest = config.stem.rsplit("_", 1)[-1].lower()
     try:
         text = config.read_text(encoding="utf-8", errors="replace", newline="")
     except OSError:
-        return ""
+        return None
     presets_root = base_dir / "presets"
     for candidate in sorted(presets_root.rglob("*.txt")) if presets_root.is_dir() else ():
         if "replaced" in candidate.relative_to(presets_root).parts[:1]:
             continue
         source = f"{os.path.abspath(str(candidate))}\0{text}".encode("utf-8", "surrogatepass")
         if hashlib.sha1(source).hexdigest()[:20] == digest:
-            return candidate.stem
-    return ""
+            return candidate
+    return None
 
 
-def with_strategy_names(running: RunningPreset, args: Sequence[str], base_dir: Path) -> RunningPreset:
-    """Названия стратегий профилей — тем же поиском, что на странице профилей (только winws2).
+def preset_name_of(config: Path, base_dir: Path) -> str:
+    """Название пресета, из которого написан файл ``@…``; пусто — такого файла пресета нет."""
+    found = preset_file_of(config, base_dir)
+    return found.stem if found is not None else ""
+
+
+def winws1_source_text(config: Path, preset: Path | None, base_dir: Path) -> str:
+    """Текст пресета Zapret 1, если ``@…`` написан ровно из него; пусто — пресет с тех пор менялся.
+
+    zapret1_runner пишет в ``@…`` полные пути к спискам и файлам фейков, а готовые стратегии
+    в каталогах — с короткими. Сравнивать надо текст пресета, как на странице профилей, но
+    только убедившись, что из него получается тот самый ``@…``.
+    """
+    from utils.args_resolver import resolve_args_paths
+    from winws_runtime.runners.preset_runner_support import launch_args_from_preset_text
+
+    if preset is None:
+        return ""
+    try:
+        text = preset.read_text(encoding="utf-8", errors="replace")
+        config_text = config.read_text(encoding="utf-8", errors="replace", newline="")
+    except OSError:
+        return ""
+    args = resolve_args_paths(
+        launch_args_from_preset_text(text),
+        os.path.join(str(base_dir), "lists"),
+        os.path.join(str(base_dir), "bin"),
+        os.path.join(str(base_dir), "windivert.filter"),
+    )
+    rebuilt = "\n".join(shlex.quote(arg) for arg in args) + "\n" if args else ""
+    return text if rebuilt == config_text else ""
+
+
+def with_strategy_names(
+    running: RunningPreset, preset_text: str, base_dir: Path, *, engine: str = ENGINE_WINWS2
+) -> RunningPreset:
+    """Названия стратегий профилей — тем же поиском, что на странице профилей.
 
     Профили разбирает парсер пресетов программы; если его профили не совпали с нашими по
     названиям и порядку, названий нет — гадать нельзя.
@@ -364,10 +502,10 @@ def with_strategy_names(running: RunningPreset, args: Sequence[str], base_dir: P
     from profile.parser import parse_preset_text
     from profile.strategy_catalog import load_strategy_catalogs
 
-    catalogs = load_strategy_catalogs(AppPaths(user_root=base_dir, local_root=base_dir), "winws2")
+    catalogs = load_strategy_catalogs(AppPaths(user_root=base_dir, local_root=base_dir), engine)
     if not catalogs:
         return running
-    parsed = parse_preset_text("\n".join(args), engine="winws2", source_name="running").profiles
+    parsed = parse_preset_text(preset_text, engine=engine, source_name="running").profiles
     if [str(item.name or "") for item in parsed] != [profile.name for profile in running.profiles]:
         return running
     profiles = []
@@ -382,7 +520,14 @@ def with_strategy_names(running: RunningPreset, args: Sequence[str], base_dir: P
     return dataclasses.replace(running, profiles=tuple(profiles))
 
 
-def running_preset() -> RunningPreset | None:
+def orchestra_locks(keys: Iterable[str]) -> dict[str, dict[str, object]]:
+    """Закреплённые оркестратором стратегии по ключам его профилей (из настроек программы)."""
+    from settings.store import get_orchestra_locked_map
+
+    return {key: dict(get_orchestra_locked_map(key) or {}) for key in dict.fromkeys(keys) if key}
+
+
+def running_preset(*, locks: Callable[[Iterable[str]], Mapping] = orchestra_locks) -> RunningPreset | None:
     """Пресет, с которым сейчас работает winws2 (или winws). ``None`` — не запущен или узнать не удалось."""
     try:
         from settings.mode import ALL_WINWS_EXE_NAME_SET
@@ -395,18 +540,40 @@ def running_preset() -> RunningPreset | None:
         config = _at_config_of(process_command_line(pid))
         if config is None or not config.is_file():
             continue
-        # Файл лежит в <рабочая папка>/user/tmp/winws2_at_config: пути списков в нём — от рабочей папки.
-        parents = config.resolve().parents
-        base_dir = parents[3] if len(parents) > 3 else config.parent
-        args = read_at_config(config)
-        running = dataclasses.replace(parse_launch_args(args, base_dir), preset=preset_name_of(config, base_dir))
-        if str(name).lower().startswith("winws2"):
-            try:
-                running = with_strategy_names(running, args, base_dir)
-            except Exception:  # noqa: BLE001 — без названия стратегии строка всё равно верна
-                pass
-        return running
+        return running_from_at_config(config, str(name), locks=locks)
     return None
+
+
+def running_from_at_config(
+    config: Path, exe_name: str, *, locks: Callable[[Iterable[str]], Mapping] = orchestra_locks
+) -> RunningPreset:
+    """Что запущено по файлу ``@…``: пресет (с названиями стратегий) или оркестратор (с закреплёнными)."""
+    engine = ENGINE_WINWS2 if exe_name.lower().startswith("winws2") else ENGINE_WINWS1
+    parents = config.resolve().parents
+    args = read_at_config(config)
+    if config.name.lower() == ORCHESTRA_AT_CONFIG_NAME:
+        # <рабочая папка>/user/lua/circular-config.runtime.txt: пути списков — от рабочей папки.
+        base_dir = parents[2] if len(parents) > 2 else config.parent
+        running = parse_launch_args(args, base_dir, engine=engine)
+        try:
+            locked = dict(locks(profile.orchestra_key for profile in running.profiles))
+        except Exception:  # noqa: BLE001 — без закреплённых строка скажет «ещё перебирает»
+            locked = {}
+        return dataclasses.replace(running, locked=locked)
+    # Файл лежит в <рабочая папка>/user/tmp/winws2_at_config: пути списков — от рабочей папки.
+    base_dir = parents[3] if len(parents) > 3 else config.parent
+    preset = preset_file_of(config, base_dir)
+    running = dataclasses.replace(
+        parse_launch_args(args, base_dir, engine=engine), preset=preset.stem if preset is not None else ""
+    )
+    try:
+        if engine == ENGINE_WINWS2:
+            running = with_strategy_names(running, "\n".join(args), base_dir, engine=engine)
+        elif source := winws1_source_text(config, preset, base_dir):
+            running = with_strategy_names(running, source, base_dir, engine=engine)
+    except Exception:  # noqa: BLE001 — без названия стратегии строка всё равно верна
+        pass
+    return running
 
 
 def annotate(probes: Sequence, zapret_running: bool | None) -> None:

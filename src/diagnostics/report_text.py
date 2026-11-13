@@ -111,6 +111,9 @@ def target_report(probe: Probe) -> dict:
             "strategy_name": probe.coverage.strategy_name,
             "custom_strategy": probe.coverage.custom_strategy,
             "preset": probe.coverage.preset,
+            "strategy_text": probe.coverage.strategy_text,
+            "orchestra": probe.coverage.orchestra,
+            "locked_strategy": probe.coverage.locked_strategy,
         },
         # Что ответил сервер за рубежом: "up" — сайт жив, "down" — лежит и там. Пусто — не спрашивали.
         "outside": probe.outside,

@@ -576,11 +576,23 @@ class BlockCauseInReportTests(unittest.TestCase):
         # Zapret запущен, а discord.com не входит ни в один профиль: подбирать стратегию бесполезно.
         self.assertEqual(
             main["coverage"],
-            {"profile": "", "via": "", "strategy": True, "strategy_name": "", "custom_strategy": False, "preset": ""},
+            {
+                "profile": "",
+                "via": "",
+                "strategy": True,
+                "strategy_name": "",
+                "custom_strategy": False,
+                "preset": "",
+                "strategy_text": "",
+                "orchestra": False,
+                "locked_strategy": 0,
+            },
         )
         self.assertIn("❌ Профиль пресета: имя не попадает ни в один профиль запущенного пресета", "\n".join(lines))
         problem = next(item for item in result["problems"] if item["target"] == "discord.com")
         self.assertEqual(sum("не попадают ни в один профиль пресета" in line for line in problem["advice"]), 1)
+        # Подбор стратегии тут не поможет — и кнопка ведёт не в него, а в «Профили пресета».
+        self.assertEqual(problem["action"], "profiles")
 
     def test_working_site_is_not_probed_again(self) -> None:
         net = _Net()

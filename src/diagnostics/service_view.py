@@ -140,6 +140,9 @@ class ViewRow:
     text: str = ""
     # Данные для экрана, которые текст не показывает (например, находка про DNS-серверы по частям).
     extra: object = None
+    # Кнопка строки на экране (как у проблем итога: "strategy", "profiles", …) и для чего она.
+    action: str = ""
+    target: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,10 +204,49 @@ def _registry_text(item: dict) -> str:
     return "не значится — блокировать могут и без записи в реестре"
 
 
-def _coverage_row(coverage) -> ViewRow | None:
-    """Строка «Профиль пресета»: ловит ли запущенный пресет это имя и каким профилем."""
+# Кнопки строки «Профиль пресета»: подобрать стратегию для имени, перенести имя в профиль
+# (страница «Профили пресета») или посмотреть закреплённые оркестратором стратегии.
+COVERAGE_ACTION_STRATEGY = "strategy"
+COVERAGE_ACTION_PROFILES = "profiles"
+COVERAGE_ACTION_ORCHESTRA = "orchestra_settings"
+
+
+def _orchestra_coverage_row(coverage: dict, host: str) -> ViewRow:
+    """Строка «Профиль пресета», когда запущен оркестратор: стратегию для сайта выбирает он сам."""
+    profile = str(coverage.get("profile") or "")
+    if not profile:
+        return ViewRow(
+            FAIL,
+            "Профиль пресета",
+            "запущен оркестратор, но имя не попадает ни в один его профиль (например, оно в белом списке) — "
+            "оркестратор это соединение не трогает",
+            action=COVERAGE_ACTION_ORCHESTRA,
+            target=host,
+        )
+    via = str(coverage.get("via") or "")
+    where = f"«{profile}» оркестратора" + (f" ({via})" if via else "")
+    number = int(coverage.get("locked_strategy") or 0)
+    if number:
+        text = str(coverage.get("strategy_text") or "")
+        which = f"стратегию №{number}" + (f" ({text})" if text else "")
+        said = f"оркестратор закрепил за этим именем {which}"
+    else:
+        said = "закреплённой стратегии для этого имени пока нет — оркестратор ещё перебирает стратегии"
+    return ViewRow(
+        INFO, "Профиль пресета", f"имя попадает в профиль {where}: {said}", action=COVERAGE_ACTION_ORCHESTRA, target=host
+    )
+
+
+def _coverage_row(coverage, host: str = "") -> ViewRow | None:
+    """Строка «Профиль пресета»: ловит ли запущенный пресет это имя и каким профилем.
+
+    Кнопка ведёт туда, где это чинится: имя в профиле со стратегией — подбор стратегии для
+    этого имени; имя вне профилей или в профиле без стратегии — «Профили пресета».
+    """
     if not isinstance(coverage, dict):
         return None
+    if coverage.get("orchestra"):
+        return _orchestra_coverage_row(coverage, host)
     profile = str(coverage.get("profile") or "")
     preset = str(coverage.get("preset") or "")
     if not profile:
@@ -213,6 +255,8 @@ def _coverage_row(coverage) -> ViewRow | None:
             FAIL,
             "Профиль пресета",
             f"имя не попадает ни в один профиль запущенного пресета{named} — Zapret это соединение не трогает",
+            action=COVERAGE_ACTION_PROFILES,
+            target=host,
         )
     via = str(coverage.get("via") or "")
     where = f"«{profile}»" + (f" пресета «{preset}»" if preset else "") + (f" ({via})" if via else "")
@@ -221,16 +265,23 @@ def _coverage_row(coverage) -> ViewRow | None:
             WARN,
             "Профиль пресета",
             f"имя попадает в профиль {where}, а в нём нет стратегии: Zapret это соединение нарочно пропускает",
+            action=COVERAGE_ACTION_PROFILES,
+            target=host,
         )
     strategy = str(coverage.get("strategy_name") or "")
     if strategy:
         which = f" — «{strategy}»"
     elif coverage.get("custom_strategy"):
-        which = " — своя, среди готовых стратегий её нет"
+        text = str(coverage.get("strategy_text") or "")
+        which = " — своя, среди готовых стратегий её нет" + (f": {text}" if text else "")
     else:
         which = ""
     return ViewRow(
-        INFO, "Профиль пресета", f"имя попадает в профиль {where}: Zapret применяет к нему стратегию этого профиля{which}"
+        INFO,
+        "Профиль пресета",
+        f"имя попадает в профиль {where}: Zapret применяет к нему стратегию этого профиля{which}",
+        action=COVERAGE_ACTION_STRATEGY,
+        target=host,
     )
 
 
@@ -282,7 +333,7 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
         rows.append(ViewRow(_PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN), str(proto.get("title") or ""), str(proto.get("text") or "")))
     if item.get("kind_title"):
         rows.append(ViewRow(INFO, "Вид блокировки", str(item["kind_title"])))
-    coverage_row = _coverage_row(item.get("coverage"))
+    coverage_row = _coverage_row(item.get("coverage"), str(item.get("host") or ""))
     if coverage_row is not None:
         rows.append(coverage_row)
     if item.get("cause_text"):

@@ -63,6 +63,19 @@ def _zapret_action(zapret_running: bool | None) -> str:
     return "start_zapret" if zapret_running is False else "strategy"
 
 
+def _coverage_action(probes) -> str:
+    """Кнопка вместо «Подобрать стратегию», когда подбор не поможет; пусто — подбор и нужен.
+
+    Ни одно закрытое имя не ловит профиль со стратегией (``probe.coverage`` из «Профиль пресета»):
+    Zapret эти соединения не трогает, и совет — перенести имя в профиль. Кнопка ведёт туда же:
+    на «Профили пресета», а при оркестраторе — в его настройки (белый список).
+    """
+    coverages = [getattr(probe, "coverage", None) for probe in probes]
+    if not coverages or any(item is None or (item.covered and item.strategy) for item in coverages):
+        return ""
+    return "orchestra_settings" if any(item.orchestra for item in coverages) else "profiles"
+
+
 def burst_problems(burst) -> list[dict]:
     """Проблема «UDP замирает после первых пакетов». Пусто — заморозки нет или вывода нет."""
     if burst is None or burst.code != "freeze":
@@ -329,6 +342,13 @@ def collect_problems(
             action = ""
             if bypassable is not None:
                 action = _zapret_action(zapret_running)
+                if action == "strategy":
+                    action = (
+                        _coverage_action(
+                            [probe for probe in broken if probe.reach_state in BYPASSABLE and probe.kind != block_kind.KIND_DOWN]
+                        )
+                        or action
+                    )
             target = (bypassable or broken[0]).host
             if stale:
                 action = "hosts"

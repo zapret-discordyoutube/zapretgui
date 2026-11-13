@@ -1111,6 +1111,7 @@ class BlockcheckPage(BasePage):
             self._detail_view.closed.connect(self._close_card_detail)
             self._detail_view.root_requested.connect(self._close_card_detail_to_tab)
             self._detail_view.text_opened.connect(self._open_section_text)
+            self._detail_view.action_requested.connect(self._on_problem_action)
             self._detail_view.level_changed.connect(self._on_detail_level_changed)
             self._detail_view.setVisible(False)
             self.add_widget(self._detail_view)
@@ -1465,6 +1466,7 @@ class BlockcheckPage(BasePage):
             self._past_cards_view.closed.connect(self._close_over_tabs)
             self._past_cards_view.card_opened.connect(self._open_card_detail)
             self._past_cards_view.text_opened.connect(self._open_section_text)
+            self._past_cards_view.action_requested.connect(self._on_problem_action)
             self._past_cards_view.setVisible(False)
             self.add_widget(self._past_cards_view)
         tab_item = self._tabs_pivot.items.get(self.TAB_ORDER[self._active_tab_index])
@@ -1551,8 +1553,8 @@ class BlockcheckPage(BasePage):
         self._open_log_report(LogReport(title=title, text=text, root_title="BlockCheck"))
 
     def _on_problem_action(self, action: str, target: str) -> None:
-        """Кнопки у проблем в итоге: подбор стратегии с нужной целью, запуск
-        Zapret, настройка DNS или редактор hosts."""
+        """Кнопки у проблем в итоге и у строк отчёта: подбор стратегии с нужной целью, запуск
+        Zapret, настройка DNS, редактор hosts, профили пресета или настройки оркестратора."""
         if action == "start_zapret":
             if self._start_zapret is not None:
                 # Кнопка называется «Запустить» — запускаем, а не отправляем искать кнопку дальше.
@@ -1587,6 +1589,20 @@ class BlockcheckPage(BasePage):
             from ui.window_adapter import show_page
 
             show_page(self.window(), PageName.TELEGRAM_PROXY)
+            return
+        if action == "profiles":
+            # Имя не ловит ни один профиль со стратегией: его добавляют в список профиля выбранного пресета.
+            from ui.window_adapter import show_page
+            from ui.workflows.common import get_current_launch_method
+            from ui.workflows.mode import resolve_navigation_page_for_preset_setup
+
+            show_page(self.window(), resolve_navigation_page_for_preset_setup(get_current_launch_method(default="")))
+            return
+        if action == "orchestra_settings":
+            from app.page_names import PageName
+            from ui.window_adapter import show_page
+
+            show_page(self.window(), PageName.ORCHESTRA_SETTINGS)
             return
         if action in ("youtube_block_caches", "youtube_unblock_caches", "youtube_preset"):
             self._on_youtube_fix(action, target)

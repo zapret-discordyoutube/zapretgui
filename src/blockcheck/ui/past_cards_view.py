@@ -29,6 +29,8 @@ class PastCardsView(QWidget):
     card_opened = pyqtSignal(object)
     # Просят открыть текст той проверки страницей-редактором: (название, текст).
     text_opened = pyqtSignal(str, str)
+    # Кнопка строки отчёта (например, «Подобрать стратегию» у «Профиль пресета»): (действие, цель).
+    action_requested = pyqtSignal(str, str)
     ROOT_KEY = "root"
     RUN_KEY = "run"
 
@@ -143,6 +145,7 @@ class PastCardsView(QWidget):
         report.breadcrumb.setVisible(False)
         report.child_handler = self.card_opened.emit
         report.text_opened.connect(self.text_opened)
+        report.action_requested.connect(self.action_requested)
         self._reports_layout.addWidget(report)
         report.show_card(card)
         self._reports.append(report)

@@ -92,6 +92,8 @@ _ACTION_TEXT = {
     "youtube_block_caches": "Закрыть кэши YouTube",
     "youtube_unblock_caches": "Вернуть кэши YouTube",
     "youtube_preset": "Включить пресет без QUIC",
+    "profiles": "Профили пресета",
+    "orchestra_settings": "Настройки оркестратора",
 }
 _ACTION_DESCRIPTION = {
     "strategy": "Открывает подбор стратегии",
@@ -103,6 +105,8 @@ _ACTION_DESCRIPTION = {
     "youtube_block_caches": "Закрывает в файле hosts молчащие кэши YouTube у провайдера: плеер перейдёт на серверы Google",
     "youtube_unblock_caches": "Убирает из файла hosts закрытые кэши YouTube",
     "youtube_preset": "Включает пресет «Default + YouTube no QUIC + wssize»: малое окно приёма для видео и без QUIC",
+    "profiles": "Открывает «Профили пресета»: закрытое имя не ловит ни один профиль со стратегией, его надо добавить в список профиля",
+    "orchestra_settings": "Открывает «Настройки оркестратора»: закреплённые за сайтами стратегии и белый список",
 }
 
 
@@ -200,6 +204,8 @@ _ACTION_ICONS = {
     "youtube_block_caches": "fa5s.ban",
     "youtube_unblock_caches": "fa5s.undo",
     "youtube_preset": "fa5s.exchange-alt",
+    "profiles": "fa5s.list-ul",
+    "orchestra_settings": "fa5s.sliders-h",
 }
 
 
