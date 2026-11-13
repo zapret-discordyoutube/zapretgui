@@ -163,6 +163,14 @@ class PageTests(unittest.TestCase):
         page.refresh()  # не падает
         self.assertEqual(page.table.rowCount(), 0)
 
+    def test_an_answer_that_is_not_a_snapshot_reads_as_no_journal(self) -> None:
+        """Ответ не словарём (как у заглушки при сборке страниц) — это «журнала нет», а не падение на числах."""
+        from unittest.mock import MagicMock
+
+        page, _, state = self._page(MagicMock())
+        self.assertEqual(page.table.rowCount(), 0)
+        self.assertIn("ещё не запускалась", page.status_labels[0].text())
+
     def test_breadcrumb_goes_back_to_servers_and_timer_runs_only_while_shown(self) -> None:
         page, calls, _ = self._page({"available": False})
         page._on_breadcrumb_item_changed("servers")

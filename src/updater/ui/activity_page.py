@@ -152,6 +152,9 @@ class SharingActivityPage(BasePage):
             snapshot = self._feature.sharing_activity()
         except Exception:  # noqa: BLE001 — страница не должна падать из-за журнала
             snapshot = {"available": False}
+        if not isinstance(snapshot, dict):
+            # Не снимок журнала — значит, журнала нет; иначе страница упала бы на первом числе.
+            snapshot = {"available": False}
         events = list(snapshot.get("events", ()))[:ROWS_SHOWN]
         signature = (
             tuple(snapshot.get("notes", ())), snapshot.get("lan_port"), snapshot.get("internet_running"),
