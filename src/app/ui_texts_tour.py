@@ -517,14 +517,20 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "Вверху главный вывод и условия: был ли включён Zapret. Полоса и плитки под ней делят сайты "
             "по виду блокировки. Ниже — группы проблем: что это за блокировка простыми словами и что "
             "с ней делать. В примере Discord и X закрыты по имени сайта — это лечится стратегией, — "
-            "а у YouTube закрыт только QUIC."
+            "а у YouTube закрыт только QUIC.\n\n"
+            "Если видео YouTube тормозит, здесь же появятся кнопки исправления: закрыть молчащие кэши "
+            "провайдера в hosts или перейти на пресет без QUIC. После нажатия проверьте ещё раз — программа "
+            "сравнит видеосерверы до и после и скажет, помогло ли."
         ),
         "en": (
             "You may not have run any checks yet, so the tour shows an example. It disappears afterwards.\n\n"
             "At the top is the main conclusion and the conditions: whether Zapret was on. The bar and the "
             "tiles under it split sites by the kind of block. Below are problem groups: what this block "
             "is in plain words and what to do about it. In the example Discord and X are blocked by site "
-            "name — a strategy fixes that — and YouTube only has QUIC closed."
+            "name — a strategy fixes that — and YouTube only has QUIC closed.\n\n"
+            "If YouTube video stalls, fix buttons appear here too: close silent provider caches in hosts or "
+            "switch to a preset without QUIC. After pressing one, check again — the program compares the "
+            "video servers before and after and tells you whether it helped."
         ),
     },
     "onboarding.step.blockcheck_cards.title": {"ru": "Карточки сайтов", "en": "Site cards"},

@@ -45,6 +45,10 @@ TAB_HISTORY_LIMIT = 20
 TAB_HISTORY_KEYS = ("domain_history", "dns_history", "servers_history")
 # Ограничения на одну запись истории: настройки читаются целиком, раздувать их нельзя.
 CHECK_HISTORY_TEXT_LIMIT = 400
+# Журнал исправлений видео YouTube (diagnostics.video_fix_journal): что нажимали и помогло ли.
+VIDEO_FIX_JOURNAL_LIMIT = 30
+VIDEO_FIX_ACTIONS = frozenset({"youtube_block_caches", "youtube_unblock_caches", "youtube_preset"})
+VIDEO_FIX_VERDICTS = frozenset({"", "helped", "worse", "same"})
 CHECK_HISTORY_PROBLEMS_LIMIT = 12
 CHECK_HISTORY_STATES_LIMIT = 80
 CHECK_HISTORY_LEVELS = frozenset({"ok", "warn", "fail", "unknown"})
@@ -302,6 +306,7 @@ def default_blockcheck() -> dict[str, Any]:
         "domain_history": [],
         "dns_history": [],
         "servers_history": [],
+        "video_fix_journal": [],
     }
 
 

@@ -916,6 +916,20 @@ def add_check_history_run(entry: dict[str, Any]) -> list[dict[str, Any]]:
 
     return copy.deepcopy(update_blockcheck_settings(_append)["check_history"])
 
+def get_video_fix_journal() -> list[dict[str, Any]]:
+    """Журнал исправлений видео YouTube, от старых записей к новым (``diagnostics.video_fix_journal``)."""
+    return copy.deepcopy(_read_path_value(("blockcheck", "video_fix_journal"), []))
+
+
+def set_video_fix_journal(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Записывает журнал исправлений видео целиком и возвращает его после очистки."""
+
+    def _replace(section: dict[str, Any]) -> None:
+        section["video_fix_journal"] = [_as_dict(item) for item in entries]
+
+    return copy.deepcopy(update_blockcheck_settings(_replace)["video_fix_journal"])
+
+
 def add_tab_history_run(key: str, entry: dict[str, Any]) -> list[dict[str, Any]]:
     """Дописывает итог проверки вкладки (``domain_history`` / ``dns_history``) и возвращает её историю."""
     if key not in schema.TAB_HISTORY_KEYS:

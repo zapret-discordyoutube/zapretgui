@@ -89,6 +89,9 @@ _ACTION_TEXT = {
     "dns": "Настройка DNS",
     "hosts": "Редактор hosts",
     "telegram_proxy": "Telegram Proxy",
+    "youtube_block_caches": "Закрыть кэши YouTube",
+    "youtube_unblock_caches": "Вернуть кэши YouTube",
+    "youtube_preset": "Включить пресет без QUIC",
 }
 _ACTION_DESCRIPTION = {
     "strategy": "Открывает подбор стратегии",
@@ -97,6 +100,9 @@ _ACTION_DESCRIPTION = {
     "dns": "Открывает раздел «Настройка DNS», где включается DNS с шифрованием",
     "hosts": "Открывает «Редактор hosts», где сервису включается DNS-профиль",
     "telegram_proxy": "Открывает «Telegram Proxy»: Telegram закрыт по адресу, и обход Zapret ему обычно не помогает",
+    "youtube_block_caches": "Закрывает в файле hosts молчащие кэши YouTube у провайдера: плеер перейдёт на серверы Google",
+    "youtube_unblock_caches": "Убирает из файла hosts закрытые кэши YouTube",
+    "youtube_preset": "Включает пресет «Default + YouTube no QUIC + wssize»: малое окно приёма для видео и без QUIC",
 }
 
 
@@ -191,6 +197,9 @@ _ACTION_ICONS = {
     "dns": "fa5s.network-wired",
     "hosts": "fa5s.edit",
     "telegram_proxy": "fa5b.telegram-plane",
+    "youtube_block_caches": "fa5s.ban",
+    "youtube_unblock_caches": "fa5s.undo",
+    "youtube_preset": "fa5s.exchange-alt",
 }
 
 

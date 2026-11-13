@@ -252,6 +252,8 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
     if item.get("cause_text"):
         rows.append(ViewRow(FAIL, "Как блокируют", str(item["cause_text"])))
     rows.extend(video_node_rows(item.get("video_node")))
+    rows.extend(video_sweep_rows(item.get("video_sweep")))
+    rows.extend(video_fix_rows(item.get("video_fixes")))
     if "registry" in item:
         rows.append(ViewRow(INFO, "Реестр РКН", _registry_text(item)))
     if item.get("seconds"):
@@ -292,6 +294,78 @@ def video_node_rows(node: object) -> tuple[ViewRow, ...]:
         )
     if node.get("text"):
         rows.append(ViewRow(shown_level(node.get("level")), "Вывод по видеосерверу", str(node["text"])))
+    return tuple(rows)
+
+
+# Код узла из ``video_sweep``: (уровень, слова).
+_SWEEP_WORDS = {
+    "ok": (OK, "ответ сервера приходит"),
+    "cut_window": (WARN, "ответ сервера режут; с окном приёма в 1 байт приходит — поможет wssize"),
+    "silent": (FAIL, "соединение есть, а ответ сервера не приходит"),
+    "reset": (FAIL, "соединение сбрасывают"),
+    "no_route": (FAIL, "соединение не устанавливается"),
+    "unclear": (UNKNOWN, "проверить не удалось"),
+}
+
+
+# Слова исправлений из ``video_fixes``: ключ -> (заголовок, слова). ``{groups}`` — группы узлов через запятую.
+_FIX_WORDS = {
+    "block_caches": (
+        "Можно сделать: закрыть молчащие кэши провайдера",
+        "Кэш YouTube у вашего провайдера ({groups}) не отвечает, а серверы Google отвечают. Если закрыть эти кэши в файле "
+        "hosts, плеер перейдёт на серверы Google. Помогает не всем: если видео станет хуже, верните как было. После "
+        "изменения перезапустите браузер.",
+    ),
+    "quic_off": (
+        "Можно сделать: выключить QUIC для YouTube",
+        "Видео может идти по QUIC (UDP), а на нём приёмы Zapret и малое окно приёма не действуют. Без QUIC браузер "
+        "возьмёт обычное соединение TCP.",
+    ),
+    "wssize_preset": (
+        "Можно сделать: пресет с малым окном приёма",
+        "Ответ видеосервера режут, но с окном приёма в 1 байт он приходит. Пресет «Default + YouTube no QUIC + wssize» "
+        "включает такое окно для видео YouTube и выключает для него QUIC.",
+    ),
+    "prefer_ipv6": (
+        "Можно сделать: пользоваться IPv6",
+        "Видеосерверы отвечают по IPv6, а по IPv4 нет. Не отключайте IPv6 в настройках сети: браузер сам возьмёт его.",
+    ),
+    "wait_reload": (
+        "Если ролик всё равно грузится долго",
+        "YouTube сам выбирает видеосервер для каждого ролика, а фильтр закрывает серверы по одному: плеер пробует их по "
+        "очереди, поэтому видео может начаться не сразу. Если ролика нет в кэше вашего провайдера (по сообщениям "
+        "пользователей, чаще у зарубежных и новых видео), кэш забирает его из-за границы, и этот путь настройками Zapret "
+        "не исправить: помогает подождать несколько минут и обновить страницу.",
+    ),
+}
+
+
+def video_fix_rows(fixes: object) -> tuple[ViewRow, ...]:
+    """Что можно сделать с видео (``video_fixes.recommend``): строка на исправление. ``extra`` — ключ и данные для кнопки."""
+    rows = []
+    for fix in fixes or ():
+        if not isinstance(fix, dict) or str(fix.get("key")) not in _FIX_WORDS:
+            continue
+        title, words = _FIX_WORDS[str(fix["key"])]
+        groups = ", ".join(str(group) for group in fix.get("groups") or ())
+        rows.append(ViewRow(INFO, title, words.format(groups=groups), extra=dict(fix)))
+    return tuple(rows)
+
+
+def video_sweep_rows(sweep: object) -> tuple[ViewRow, ...]:
+    """Обход всех найденных видеосерверов: сколько открывается и чем закрыты остальные, по IPv4 и IPv6.
+
+    Показывается, когда узлов (с учётом IPv4 и IPv6) больше одного: один узел и так описан выше.
+    """
+    nodes = [node for node in (sweep or ()) if isinstance(node, dict)]
+    if len(nodes) < 2:
+        return ()
+    working = [node for node in nodes if node.get("code") == "ok"]
+    level = OK if len(working) == len(nodes) else (WARN if working else FAIL)
+    rows = [ViewRow(level, "Видеосерверы YouTube", f"отвечают {len(working)} из {len(nodes)} проверенных адресов")]
+    for node in nodes:
+        node_level, words = _SWEEP_WORDS.get(str(node.get("code")), _SWEEP_WORDS["unclear"])
+        rows.append(ViewRow(node_level, f"Видеосервер {node.get('host', '')} ({node.get('family', '')})", f"{node.get('ip', '')}: {words}"))
     return tuple(rows)
 
 

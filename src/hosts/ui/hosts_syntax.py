@@ -16,6 +16,7 @@ from hosts.hosts_blocks import (
     BLOCK_STATE_MEDIA,
     BLOCK_TELEGRAM,
     BLOCK_USER,
+    BLOCK_YOUTUBE_CACHE,
     BLOCK_ZAPRETGUI,
     ROLE_BLANK,
     ROLE_COMMENT,
@@ -32,6 +33,7 @@ _OWNER_COLORS: dict[str, tuple[str, str]] = {
     BLOCK_TELEGRAM: ("#8fa8ff", "#3451b2"),
     BLOCK_MAX: ("#ffab70", "#b54708"),
     BLOCK_STATE_MEDIA: ("#ff7a7a", "#c42b1c"),
+    BLOCK_YOUTUBE_CACHE: ("#ff8fb3", "#b4235a"),
     BLOCK_ADOBE: ("#d08cff", "#8a3ab9"),
 }
 
@@ -57,7 +59,7 @@ class HostsSyntaxHighlighter(BaseSyntaxHighlighter):
         super()._rebuild_formats()
         theme = self.theme
         self._owner_formats: dict[tuple[str | None, str], QTextCharFormat] = {}
-        for kind in (BLOCK_ZAPRETGUI, BLOCK_TELEGRAM, BLOCK_MAX, BLOCK_STATE_MEDIA, BLOCK_ADOBE, BLOCK_USER, None):
+        for kind in (BLOCK_ZAPRETGUI, BLOCK_TELEGRAM, BLOCK_MAX, BLOCK_STATE_MEDIA, BLOCK_YOUTUBE_CACHE, BLOCK_ADOBE, BLOCK_USER, None):
             color = owner_color(kind, theme)
             entry = QTextCharFormat()
             entry.setForeground(color)

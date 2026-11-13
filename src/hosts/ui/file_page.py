@@ -29,6 +29,7 @@ from hosts.hosts_blocks import (
     BLOCK_STATE_MEDIA,
     BLOCK_TELEGRAM,
     BLOCK_USER,
+    BLOCK_YOUTUBE_CACHE,
     BLOCK_ZAPRETGUI,
     parse_hosts_blocks,
 )
@@ -49,6 +50,7 @@ _OWNER_TITLES = {
     BLOCK_TELEGRAM: ("page.hosts_file.owner.telegram", "Telegram Proxy"),
     BLOCK_MAX: ("page.hosts_file.owner.max", "Блокировка MAX"),
     BLOCK_STATE_MEDIA: ("page.hosts_file.owner.state_media", "Блокировка госСМИ"),
+    BLOCK_YOUTUBE_CACHE: ("page.hosts_file.owner.youtube_cache", "Кэши YouTube"),
     BLOCK_ADOBE: ("page.hosts_file.owner.adobe", "Adobe"),
     BLOCK_USER: ("page.hosts_file.owner.user", "Ваши строки"),
 }

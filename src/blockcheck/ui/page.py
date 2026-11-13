@@ -152,6 +152,7 @@ class BlockcheckPage(BasePage):
         zapret_is_running=None,
         stop_zapret=None,
         notify=None,
+        activate_preset=None,
     ):
         super().__init__(
             title=tr_catalog("page.blockcheck.title", default="BlockCheck"),
@@ -175,6 +176,8 @@ class BlockcheckPage(BasePage):
         self._notify = notify
         self._start_zapret = start_zapret
         self._stop_zapret = stop_zapret
+        # Перейти на встроенный пресет: (file_name) -> (удалось, название). None — кнопки пресета нет.
+        self._activate_preset = activate_preset
         # «С обходом и без»: две проверки подряд с переключением Zapret между ними. Без управления Zapret кнопки нет.
         self._paired = (
             paired_run.PairedRun(is_running=zapret_is_running, start=start_zapret, stop=stop_zapret)
@@ -1566,6 +1569,9 @@ class BlockcheckPage(BasePage):
 
             show_page(self.window(), PageName.TELEGRAM_PROXY)
             return
+        if action in ("youtube_block_caches", "youtube_unblock_caches", "youtube_preset"):
+            self._on_youtube_fix(action, target)
+            return
         if action not in ("strategy", "strategy_voice"):
             return
         self.switch_to_tab(self.TAB_STRATEGY_SCAN)
@@ -1573,6 +1579,77 @@ class BlockcheckPage(BasePage):
         prefill = getattr(page, "prefill_target", None)
         if callable(prefill):
             prefill(target, protocol=PROTOCOL_STUN_VOICE if action == "strategy_voice" else PROTOCOL_TCP_HTTPS)
+
+    def _ask(self, title: str, body: str, yes: str, no: str) -> bool:
+        """Вопрос перед изменением системы: да — только по явному нажатию."""
+        try:
+            from ui.fluent_dialog import MessageBox
+            from ui.message_box_accessibility import set_message_box_button_accessibility
+
+            box = MessageBox(title, body, self.window())
+            box.yesButton.setText(yes)
+            box.cancelButton.setText(no)
+            set_message_box_button_accessibility(box, yes_name=yes, yes_description=body, cancel_name=no, cancel_description=no)
+            return bool(box.exec())
+        except Exception:
+            logger.exception("BlockCheck question failed")
+            return False
+
+    def _on_youtube_fix(self, action: str, target: str) -> None:
+        """Кнопки исправления видео YouTube из итога: кэши в hosts и пресет без QUIC. Каждая спрашивает и записывается
+        в журнал исправлений: следующая проверка сравнит видеосерверы до и после (``diagnostics.video_fix_journal``)."""
+        from diagnostics import video_fix_journal
+        from hosts import youtube_cache_block
+
+        if action == "youtube_block_caches":
+            groups = [item for item in str(target or "").split(",") if item]
+            if not groups or not self._ask(
+                "Закрыть кэши YouTube в hosts?",
+                f"Кэши провайдера {', '.join(groups)} не отвечают. Их имена в файле hosts поведут на 127.0.0.2, "
+                "и плеер перейдёт на серверы Google.\n\nПомогает не всем. Если видео станет хуже, нажмите "
+                "«Вернуть кэши YouTube» после следующей проверки. После изменения перезапустите браузер.",
+                "Закрыть кэши",
+                "Не трогать",
+            ):
+                return
+            ok, message = youtube_cache_block.block_groups(groups)
+        elif action == "youtube_unblock_caches":
+            if not self._ask("Вернуть кэши YouTube?", "Записи ZapretGUI о кэшах YouTube уйдут из файла hosts.", "Вернуть", "Оставить"):
+                return
+            ok, message = youtube_cache_block.unblock_all()
+        else:
+            if self._activate_preset is None:
+                return
+            if not self._ask(
+                "Включить пресет без QUIC?",
+                "Будет выбран пресет «Default + YouTube no QUIC + wssize»: для видео YouTube малое окно приёма, а QUIC "
+                "к YouTube выключен, и видео пойдёт по TCP. Прежний пресет остаётся в списке — вернуться к нему можно "
+                "в любой момент.",
+                "Включить",
+                "Не включать",
+            ):
+                return
+            try:
+                ok, name = self._activate_preset(target)
+            except Exception:
+                logger.exception("BlockCheck preset switch failed")
+                ok, name = False, ""
+            message = (
+                f"Выбран пресет «{name}». Если Zapret запущен, он перезапустится сам."
+                if ok
+                else "Пресет переключить не удалось: выберите его на странице пресетов."
+            )
+        if ok:
+            # Что было до исправления: следующая проверка сравнит и скажет, помогло ли.
+            sweep = video_fix_journal.sweep_from_report(self._last_report)
+            try:
+                video_fix_journal.record(
+                    action, target, before=video_fix_journal.summary(sweep), network=video_fix_journal.network_key(sweep)
+                )
+            except Exception:
+                logger.exception("BlockCheck fix journal write failed")
+        show = InfoBarHelper.success if ok else InfoBarHelper.warning
+        show(self.window(), "Готово" if ok else "Не получилось", f"{message} Потом нажмите «Проверить» — будет видно, помогло ли.")
 
     def _reset_ui(self):
         reset_blockcheck_running_ui(

@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from diagnostics import block_kind, path_report, protocol_probe, service_view, telegram_check
+from diagnostics import block_kind, path_report, protocol_probe, service_view, telegram_check, video_fixes, video_sweep
 from diagnostics.run_context import Probe
 from diagnostics.services import (
     STEP_DNS_SERVERS,
@@ -56,6 +56,7 @@ def probe_lines(probe: Probe, *, full: bool) -> list[str]:
 
 
 def target_report(probe: Probe) -> dict:
+    sweep = [node.as_dict() for node in video_sweep.judge(probe.video_sweep)]
     return {
         "host": probe.host,
         "purpose": probe.target.purpose,
@@ -79,6 +80,10 @@ def target_report(probe: Probe) -> dict:
         "cause_text": service_view.sentence(probe.cause.text) if probe.cause else "",
         # Видеосервер не открылся: ступени до него, чья сеть, запрос через другие адреса Google и вывод.
         "video_node": probe.video_node.as_dict() if probe.video_node is not None else None,
+        # Обход всех найденных видеосерверов по IPv4 и IPv6: код каждого узла (``video_sweep.SWEEP_*``).
+        "video_sweep": sweep,
+        # Что можно сделать с видео по итогам обхода: ключ исправления и его данные (``video_fixes.FIX_*``).
+        "video_fixes": video_fixes.recommend(sweep, quic=probe.quic.code if probe.quic else ""),
         "quic": probe.quic.code if probe.quic else "",
         "quic_text": probe.quic.text if probe.quic else "",
         # Тот же адрес по TLS 1.2, TLS 1.3, «как Chrome» и HTTP отдельно.

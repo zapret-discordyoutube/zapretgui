@@ -13,6 +13,7 @@ BLOCK_ZAPRETGUI = "zapretgui"
 BLOCK_TELEGRAM = "telegram"
 BLOCK_MAX = "max"
 BLOCK_STATE_MEDIA = "state_media"
+BLOCK_YOUTUBE_CACHE = "youtube_cache"
 BLOCK_ADOBE = "adobe"
 BLOCK_USER = "user"
 
@@ -21,13 +22,14 @@ BLOCK_ORDER = (
     BLOCK_TELEGRAM,
     BLOCK_MAX,
     BLOCK_STATE_MEDIA,
+    BLOCK_YOUTUBE_CACHE,
     BLOCK_ADOBE,
     BLOCK_USER,
 )
 
 # Маркеры повторяют то, что пишут владельцы блоков:
 # hosts/hosts.py, telegram_proxy/telegram_hosts.py, windows_features/max_blocker.py,
-# windows_features/state_media_blocker.py.
+# windows_features/state_media_blocker.py, hosts/youtube_cache_block.py.
 _BEGIN_END_MARKERS = {
     "# >>> zapretgui:hosts managed begin >>>": ("# <<< zapretgui:hosts managed end <<<", BLOCK_ZAPRETGUI),
     "# MAX BLOCKED BY ZAPRET GUI": ("# END MAX BLOCK", BLOCK_MAX),
@@ -35,6 +37,7 @@ _BEGIN_END_MARKERS = {
         "# <<< zapretgui:russian-state-media-block end <<<",
         BLOCK_STATE_MEDIA,
     ),
+    "# >>> zapretgui:youtube-cache-block begin >>>": ("# <<< zapretgui:youtube-cache-block end <<<", BLOCK_YOUTUBE_CACHE),
 }
 # У этих блоков нет строки конца: блок — это идущие подряд записи после заголовка.
 _HEADER_ONLY_MARKERS = {
@@ -156,6 +159,7 @@ __all__ = [
     "BLOCK_MAX",
     "BLOCK_ORDER",
     "BLOCK_STATE_MEDIA",
+    "BLOCK_YOUTUBE_CACHE",
     "BLOCK_TELEGRAM",
     "BLOCK_USER",
     "BLOCK_ZAPRETGUI",

@@ -184,7 +184,7 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
     ),
     PageName.BLOCKCHECK: PageDepsSpec(
         build_blockcheck_page_kwargs,
-        features=("blockcheck", "dns", "runtime"),
+        features=("blockcheck", "dns", "runtime", "presets"),
         actions=("show_page", "notify"),
     ),
     PageName.WINWS_LOG_ANALYZER: PageDepsSpec(build_winws_log_analyzer_page_kwargs),

@@ -324,6 +324,7 @@ def build_blockcheck_page_kwargs(
     blockcheck_feature,
     dns_feature,
     runtime_feature,
+    presets_feature=None,
     show_page=None,
     notify=None,
 ) -> dict:
@@ -361,9 +362,28 @@ def build_blockcheck_page_kwargs(
             return STRATEGY_ZAPRET_RESTARTING
         return STRATEGY_ZAPRET_STARTED if runtime_feature.start() else STRATEGY_ZAPRET_FAILED
 
+    def _activate_preset(file_name: str) -> tuple[bool, str]:
+        """Кнопка исправления видео в итоге: перейти на встроенный пресет Zapret 2.
+
+        Если сейчас выбран пресет «(game filter)», берётся такой же вариант нового пресета:
+        человек не теряет игровой фильтр. Работающий Zapret сам перезапустится с новым пресетом.
+        """
+        from settings.mode import ZAPRET2_MODE
+
+        if presets_feature is None:
+            return False, ""
+        name = str(file_name or "").strip()
+        current = str(presets_feature.get_selected_source_preset_file_name(ZAPRET2_MODE) or "")
+        if "(game filter)" in current and name.endswith(".txt") and "(game filter)" not in name:
+            name = f"{name[:-4]} (game filter).txt"
+        presets_feature.activate_preset_file(ZAPRET2_MODE, name)
+        return True, name[:-4] if name.endswith(".txt") else name
+
     return {
         "blockcheck_feature": blockcheck_feature,
         "dns_feature": dns_feature,
+        # Кнопка «Включить пресет без QUIC» у строки итога про видео YouTube.
+        "activate_preset": _activate_preset if presets_feature is not None else None,
         # Уведомления окна с кнопками: проверка после «Применить» предлагает исправить найденное.
         "notify": notify,
         "create_strategy_scan_worker": _create_strategy_scan_worker,

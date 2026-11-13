@@ -1834,6 +1834,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Блокировка госСМИ",
         "en": "State media blocking",
     },
+    "page.hosts_file.owner.youtube_cache": {
+        "ru": "Кэши YouTube",
+        "en": "YouTube caches",
+    },
     "page.hosts_file.owner.adobe": {
         "ru": "Adobe",
         "en": "Adobe",

@@ -27,6 +27,9 @@ from diagnostics import (
     subnet_whitelist,
     system_state,
     telegram_check,
+    video_fix_journal,
+    video_fixes,
+    video_sweep,
 )
 from diagnostics.run_context import Probe
 from diagnostics.services import Service
@@ -231,6 +234,8 @@ def collect_problems(
     system: tuple[system_state.SystemItem, ...] = (),
     telegram: telegram_check.TelegramReport | None = None,
     subnets: subnet_whitelist.SubnetVerdict | None = None,
+    cache_block: tuple[str, ...] = (),
+    fix_journal: list[dict] | None = None,
 ) -> tuple[list[dict], list[str], list[str]]:
     """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS.
 
@@ -520,8 +525,175 @@ def collect_problems(
                 section=SECTION_DNS,
             )
         )
+    if not offline:
+        problems.extend(video_fix_problems(collected, cache_block=cache_block, journal=fix_journal or []))
     problems.sort(key=lambda item: level_rank(item["level"]))
     return problems, working, spoofed
+
+
+# Пресет, на который ведёт кнопка исправления видео; вариант «(game filter)» выбирает страница по текущему пресету.
+YOUTUBE_FIX_PRESET = "Default + YouTube no QUIC + wssize.txt"
+YOUTUBE_SITE = "youtube"
+
+
+# Названия кнопок исправлений видео — те же, что на кнопках итога (``check_results._ACTION_TEXT``).
+_FIX_ACTION_NAMES = {
+    "youtube_block_caches": "Закрыть кэши YouTube",
+    "youtube_unblock_caches": "Вернуть кэши YouTube",
+    "youtube_preset": "Включить пресет без QUIC",
+}
+# Какое действие стоит за исправлением: по нему журнал помнит, что в этой сети уже не помогло.
+_FIX_ACTION = {
+    video_fixes.FIX_BLOCK_CACHES: "youtube_block_caches",
+    video_fixes.FIX_QUIC_OFF: "youtube_preset",
+    video_fixes.FIX_WSSIZE_PRESET: "youtube_preset",
+}
+
+
+def _video_probes(collected: dict[str, list[Probe]]) -> list[Probe]:
+    """Пробы видеосервера YouTube, у которых был обход. Итог собирают и из неполных данных — поля читаются бережно."""
+    return [
+        probe
+        for probes in collected.values()
+        for probe in probes
+        if getattr(getattr(probe, "target", None), "discover_googlevideo", False) and getattr(probe, "video_sweep", ())
+    ]
+
+
+def video_sweep_of(collected: dict[str, list[Probe]]) -> list[dict]:
+    """Обход видеосерверов этой проверки строками отчёта (как ``report_text.target_report["video_sweep"]``)."""
+    return [node.as_dict() for probe in _video_probes(collected) for node in video_sweep.judge(probe.video_sweep)]
+
+
+def load_video_fix_journal() -> list[dict]:
+    """Журнал исправлений видео из настроек (``video_fix_journal.load``)."""
+    return video_fix_journal.load()
+
+
+def settle_video_fix(collected: dict[str, list[Probe]], journal: list[dict]) -> None:
+    """Записать итог прошлого исправления видео: в этой сети не предлагать то, что не помогло."""
+    _entry, verdict, _after = journal_verdict(collected, journal)
+    if verdict:
+        try:
+            video_fix_journal.settle(verdict)
+        except Exception:
+            pass
+
+
+def journal_verdict(collected: dict[str, list[Probe]], journal: list[dict]) -> tuple[dict | None, str, dict]:
+    """(исправление без итога, итог, что стало). Итог пустой — сравнить не с чем: видео не проверяли или сеть другая."""
+    entry = video_fix_journal.pending(journal)
+    sweep = video_sweep_of(collected)
+    after = video_fix_journal.summary(sweep)
+    if entry is None:
+        return None, "", after
+    network = video_fix_journal.network_key(sweep)
+    if entry.get("network") and network and entry["network"] != network:
+        return entry, "", after
+    return entry, video_fix_journal.judge(entry.get("before") or {}, after), after
+
+
+def _verdict_problem(entry: dict, verdict: str, after: dict) -> dict | None:
+    name = _FIX_ACTION_NAMES.get(str(entry.get("action")), "исправления")
+    before = entry.get("before") or {}
+    counts = f"отвечает {after['answering']} из {after['total']} адресов видеосерверов (было {before.get('answering', 0)} из {before.get('total', 0)})"
+    if verdict == video_fix_journal.VERDICT_HELPED:
+        return problem(Level.OK, f"После «{name}» {counts}: помогло", title="Исправление видео помогло", site=YOUTUBE_SITE)
+    if verdict == video_fix_journal.VERDICT_WORSE:
+        undo = entry.get("action") == "youtube_block_caches"
+        return problem(
+            Level.WARN,
+            f"После «{name}» {counts}: стало хуже",
+            ("Верните кэши кнопкой ниже." if undo else "Верните прежний пресет на странице пресетов.",),
+            action="youtube_unblock_caches" if undo else "",
+            title="Исправление видео не помогло",
+            site=YOUTUBE_SITE,
+        )
+    if verdict == video_fix_journal.VERDICT_SAME:
+        return problem(
+            Level.UNKNOWN,
+            f"После «{name}» {counts}: без перемен. В этой сети программа больше его не предложит",
+            title="Исправление видео ничего не изменило",
+            site=YOUTUBE_SITE,
+        )
+    return None
+
+
+def video_fix_problems(
+    collected: dict[str, list[Probe]], *, cache_block: tuple[str, ...] = (), journal: list[dict] | None = None
+) -> list[dict]:
+    """Строки итога с кнопками по исправлениям видео (``video_fixes``), итог прошлого исправления и «вернуть кэши».
+
+    Что предложить, решает та же чистая функция, что и строки «Можно сделать» в карточке
+    (``video_fixes.recommend``): кнопки итога и подробности не расходятся. Журнал (``video_fix_journal``)
+    добавляет урок: что в этой сети уже не помогло, второй раз не предлагается.
+    """
+    journal = journal or []
+    rows: list[dict] = []
+    entry, verdict, after = journal_verdict(collected, journal)
+    if entry is not None and verdict:
+        row = _verdict_problem(entry, verdict, after)
+        if row is not None:
+            rows.append(row)
+        # Итог этой проверки уже известен: урок действует сразу, не дожидаясь записи.
+        journal = [*journal[:-1], {**journal[-1], "verdict": verdict}] if journal and journal[-1] is entry else journal
+    offered: set[str] = set()
+    network = video_fix_journal.network_key(video_sweep_of(collected))
+    for probe in _video_probes(collected):
+        sweep = [node.as_dict() for node in video_sweep.judge(probe.video_sweep)]
+        for fix in video_fixes.recommend(sweep, quic=probe.quic.code if probe.quic else ""):
+            key = str(fix["key"])
+            if video_fix_journal.tried_without_luck(journal, _FIX_ACTION.get(key, ""), network):
+                continue
+            if key == video_fixes.FIX_BLOCK_CACHES and key not in offered:
+                groups = ", ".join(fix["groups"])
+                rows.append(
+                    problem(
+                        Level.WARN,
+                        f"Кэши YouTube у провайдера ({groups}) не отвечают, а серверы Google отвечают: "
+                        "их можно закрыть в hosts, и плеер перейдёт на серверы Google",
+                        (
+                            "Помогает не всем: если видео станет хуже, верните кэши кнопкой «Вернуть кэши YouTube».",
+                            "После изменения перезапустите браузер.",
+                        ),
+                        action="youtube_block_caches",
+                        target=",".join(fix["groups"]),
+                        title="Молчат кэши YouTube у провайдера",
+                        site=YOUTUBE_SITE,
+                    )
+                )
+                offered.add(key)
+            elif key in (video_fixes.FIX_QUIC_OFF, video_fixes.FIX_WSSIZE_PRESET) and "preset" not in offered:
+                window = any(item["key"] == video_fixes.FIX_WSSIZE_PRESET for item in video_fixes.recommend(sweep))
+                rows.append(
+                    problem(
+                        Level.WARN,
+                        "Ответ видеосервера режут, но с малым окном приёма он приходит"
+                        if window
+                        else "QUIC до видеосерверов YouTube режут",
+                        (
+                            "Пресет «Default + YouTube no QUIC + wssize» включает малое окно приёма для видео YouTube "
+                            "и выключает для него QUIC: видео пойдёт по TCP.",
+                        ),
+                        action="youtube_preset",
+                        target=YOUTUBE_FIX_PRESET,
+                        title="Видео YouTube: нужен пресет без QUIC",
+                        site=YOUTUBE_SITE,
+                    )
+                )
+                offered.add("preset")
+    if cache_block:
+        rows.append(
+            problem(
+                Level.OK,
+                f"Кэши YouTube закрыты в hosts ({', '.join(cache_block)}). Если видео стало хуже, их можно вернуть",
+                ("После изменения перезапустите браузер.",),
+                action="youtube_unblock_caches",
+                title="Кэши YouTube закрыты",
+                site=YOUTUBE_SITE,
+            )
+        )
+    return rows
 
 
 def blocked_references(reference: list[dict]) -> list[dict]:

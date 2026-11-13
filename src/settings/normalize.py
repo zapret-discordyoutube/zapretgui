@@ -893,6 +893,33 @@ def normalize_check_history(data: object) -> list[dict[str, Any]]:
     return runs[-schema.CHECK_HISTORY_LIMIT :]
 
 
+def normalize_video_fix_journal(data: object) -> list[dict[str, Any]]:
+    """Журнал исправлений видео: только известные действия и итоги, счётчики — неотрицательные целые, последние записи."""
+
+    def _count(value: object) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1000 else 0
+
+    entries: list[dict[str, Any]] = []
+    for raw in data if isinstance(data, list) else ():
+        item = as_dict(raw)
+        action = as_clean_str(item.get("action"))
+        time_text = as_clean_str(item.get("time"))
+        if action not in schema.VIDEO_FIX_ACTIONS or not time_text:
+            continue
+        before = as_dict(item.get("before"))
+        entries.append(
+            {
+                "action": action,
+                "target": _history_text(item.get("target")),
+                "time": time_text[:40],
+                "network": as_clean_str(item.get("network"))[:120],
+                "before": {"answering": _count(before.get("answering")), "total": _count(before.get("total"))},
+                "verdict": as_str_in(item.get("verdict"), schema.VIDEO_FIX_VERDICTS, ""),
+            }
+        )
+    return entries[-schema.VIDEO_FIX_JOURNAL_LIMIT :]
+
+
 def normalize_blockcheck(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     return {
@@ -903,6 +930,7 @@ def normalize_blockcheck(data: object) -> dict[str, Any]:
         ],
         "strategy_history": normalize_blockcheck_strategy_history(raw.get("strategy_history")),
         "check_history": normalize_check_history(raw.get("check_history")),
+        "video_fix_journal": normalize_video_fix_journal(raw.get("video_fix_journal")),
         **{
             key: normalize_check_history(raw.get(key))[-schema.TAB_HISTORY_LIMIT :]
             for key in schema.TAB_HISTORY_KEYS

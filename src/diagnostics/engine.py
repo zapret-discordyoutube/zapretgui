@@ -59,9 +59,11 @@ from diagnostics import (
     transfer_probe,
     video_node_check,
     video_nodes,
+    video_sweep,
     volume_probe,
 )
 from diagnostics import problems as problem_rules
+from hosts import youtube_cache_block
 from diagnostics.levels import level_rank
 from diagnostics.limits import (
     DNS_ATTEMPTS,
@@ -207,6 +209,8 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool, volume
             run, target, service, host, f"{nodes.note}; первый видеосервер не ответил, проверен запасной", full=full, volume=volume
         )
     best = probe if probe.reach_state == ReachState.OK else first
+    if full and len(nodes.hosts) > 1 and not run.dns_cancelled():
+        best.video_sweep = video_sweep.collect(run, nodes.hosts)
     if full and best.reach is not None and best.reach.ip and best.reach_state != ReachState.OK and not run.dns_cancelled():
         # Видеосервер не открылся: чей он и отдаёт ли он видео через другие адреса Google.
         best.video_facts = video_node_check.collect(run, best.host, best.reach, best.cause_facts)
@@ -819,6 +823,7 @@ def run_blockcheck(
             if problem_rules.whitelist_suspected(services, verdicts, collected, reference) and not run.dns_cancelled()
             else None
         )
+        fix_journal = problem_rules.load_video_fix_journal()
         problems, working, spoofed = problem_rules.collect_problems(
             services,
             verdicts,
@@ -832,7 +837,10 @@ def run_blockcheck(
             system=system,
             telegram=telegram,
             subnets=subnets,
+            cache_block=youtube_cache_block.read_blocked_groups(),
+            fix_journal=fix_journal,
         )
+        problem_rules.settle_video_fix(collected, fix_journal)
         problems = _with_section_problems(
             problems, burst=burst, dns_servers=dns_servers, speed=speed, crowd=crowd, zapret_running=zapret_running
         )

@@ -19,7 +19,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from diagnostics import block_cause, block_kind, protocol_probe, quic_probe, transfer_probe, video_node_check, volume_probe
+from diagnostics import block_cause, block_kind, protocol_probe, quic_probe, transfer_probe, video_node_check, video_sweep, volume_probe
 from diagnostics.outside_check import OUTSIDE_DOWN
 from diagnostics.limits import NET_AT_ONCE, NET_AT_ONCE_WEAK, REFERENCE_AT_ONCE, RUN_DEADLINE, SITE_START_GAP_S
 from diagnostics.services import Target
@@ -79,6 +79,8 @@ class Probe:
     cause_facts: block_cause.CauseFacts | None = None
     # Видеосервер YouTube не открылся: владелец его сети и запрос через другие адреса Google.
     video_facts: video_node_check.NodeFacts | None = None
+    # Обход всех найденных видеосерверов по IPv4 и IPv6 (``video_sweep.collect``). Пусто — не обходили.
+    video_sweep: tuple[video_sweep.SweepFacts, ...] = ()
     # Сайт открылся, но не каждый раз или не по каждому адресу: что именно шатается. Пусто — стабилен.
     unstable: str = ""
     # Кто ответил вместо сайта, когда сертификат не прошёл проверку (``cert_owner.CertVerdict``).
