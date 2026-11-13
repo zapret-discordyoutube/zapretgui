@@ -574,7 +574,10 @@ class BlockCauseInReportTests(unittest.TestCase):
         [discord] = result["services"]
         main = next(item for item in discord["targets"] if item["main"])
         # Zapret запущен, а discord.com не входит ни в один профиль: подбирать стратегию бесполезно.
-        self.assertEqual(main["coverage"], {"profile": "", "via": "", "strategy": True})
+        self.assertEqual(
+            main["coverage"],
+            {"profile": "", "via": "", "strategy": True, "strategy_name": "", "custom_strategy": False, "preset": ""},
+        )
         self.assertIn("❌ Профиль пресета: имя не попадает ни в один профиль запущенного пресета", "\n".join(lines))
         problem = next(item for item in result["problems"] if item["target"] == "discord.com")
         self.assertEqual(sum("не попадают ни в один профиль пресета" in line for line in problem["advice"]), 1)

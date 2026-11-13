@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
 from pathlib import Path, PureWindowsPath
 
@@ -171,6 +172,63 @@ class RunningProcessTests(unittest.TestCase):
             self.assertEqual(pc.read_at_config(path), ["--name=YouTube · сайт и приложение", "--filter-tcp=80,443"])
 
 
+class PresetAndStrategyNameTests(unittest.TestCase):
+    """Строка называет пресет и стратегию — отчёт не заставляет гадать, что именно не сработало."""
+
+    BUILTIN = Path(__file__).resolve().parents[1] / "src/presets/builtin/winws2/Default + YouTube no QUIC + wssize.txt"
+    SRC = Path(__file__).resolve().parents[1] / "src"
+
+    def test_preset_is_found_by_the_at_file_name_the_runner_writes(self) -> None:
+        import tempfile
+        from types import SimpleNamespace
+
+        from winws_runtime.runners.zapret2_runner import Winws2StrategyRunner
+
+        text = self.BUILTIN.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            mine = base / "presets" / "winws2_builtin" / "Мой пресет.txt"
+            other = base / "presets" / "winws2" / "Другой.txt"
+            stale = base / "presets" / "replaced" / "winws2" / "Мой пресет.txt"
+            for path in (mine, other, stale):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            # Файл @… пишет сам zapret2_runner: если он поменяет имя файла, тест это заметит.
+            runner = SimpleNamespace(work_dir=str(base))
+            runner._build_winws2_at_config_text = lambda prepared: Winws2StrategyRunner._build_winws2_at_config_text(runner, prepared)
+            runner._winws2_at_config_dir = lambda: Winws2StrategyRunner._winws2_at_config_dir(runner)
+            config = Path(Winws2StrategyRunner._write_winws2_at_config(runner, str(mine), text))
+
+            self.assertEqual(pc.preset_name_of(config, config.resolve().parents[3]), "Мой пресет")
+            config.rename(config.with_name("winws2_at_00000000000000000000.txt"))
+            self.assertEqual(pc.preset_name_of(config.with_name("winws2_at_00000000000000000000.txt"), base), "")
+
+    def _running(self, args: list[str]) -> pc.RunningPreset:
+        lists = {"youtube.txt": ["youtube.com", "youtubei.googleapis.com"], "googlevideo.txt": ["googlevideo.com"], "netrogat.txt": ["ya.ru"]}
+        # Остальные списки у человека не пусты (пустой ловил бы всё): здесь — заглушка.
+        running = pc.parse_launch_args(args, Path("/zapret"), read_lines=lambda path: lists.get(path.name, ["placeholder.invalid"]))
+        return pc.with_strategy_names(dataclasses.replace(running, preset="Default + YouTube no QUIC + wssize"), args, self.SRC)
+
+    def test_strategy_names_come_from_the_ready_strategy_lists(self) -> None:
+        from winws_runtime.runners.preset_runner_support import launch_args_from_preset_text
+
+        args = launch_args_from_preset_text(self.BUILTIN.read_text(encoding="utf-8"))
+        running = self._running(args)
+
+        site = running.covering("youtubei.googleapis.com", "172.217.112.4")
+        self.assertEqual((site.profile, site.strategy_name, site.preset), ("YouTube · сайт и приложение", "MultiSplit Pattern 7", "Default + YouTube no QUIC + wssize"))
+        video = running.covering("rr4---sn-x.googlevideo.com")
+        self.assertEqual(video.strategy_name, "MultiDisorder Complex + WSSize 1:1 · из googlevideo.com")
+        quic = running.covering("rr4---sn-x.googlevideo.com", protocol=pc.PROTOCOL_QUIC)
+        self.assertEqual(quic.strategy_name, "Drop · выключить QUIC")
+        # Профиль-исключение без стратегии: названия нет, есть только «нет стратегии».
+        self.assertEqual(running.covering("ya.ru", "77.88.55.242").strategy_name, "")
+
+        own = ["--lua-desync=fake:blob=my_own_unlisted_blob:repeats=99" if arg.startswith("--lua-desync=multisplit:pos=2,midsld-2") else arg for arg in args]
+        custom = self._running(own).covering("youtubei.googleapis.com", "172.217.112.4")
+        self.assertEqual((custom.strategy_name, custom.custom_strategy), ("", True))
+
+
 class WordsTests(unittest.TestCase):
     def test_row_and_advice_say_what_to_do_in_each_case(self) -> None:
         rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {"profile": "", "via": "", "strategy": True}})}
@@ -179,6 +237,19 @@ class WordsTests(unittest.TestCase):
         # Строка не обещает, что виновата стратегия: при закрытом адресе дело не в ней.
         self.assertEqual(rows["Профиль пресета"], "имя попадает в профиль «YouTube» (список youtube.txt): Zapret применяет к нему стратегию этого профиля")
         self.assertNotIn("Профиль пресета", {row.title for row in target_rows({"text": "x"})})
+        # Пресет и стратегия названы — отчёт с другой сети читается без вопросов «какой пресет, какая стратегия».
+        full = {"profile": "YouTube", "via": "список youtube.txt", "strategy": True, "strategy_name": "MultiSplit Pattern 7", "preset": "Default"}
+        rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": full})}
+        self.assertEqual(
+            rows["Профиль пресета"],
+            "имя попадает в профиль «YouTube» пресета «Default» (список youtube.txt): "
+            "Zapret применяет к нему стратегию этого профиля — «MultiSplit Pattern 7»",
+        )
+        rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {**full, "strategy_name": "", "custom_strategy": True}})}
+        self.assertTrue(rows["Профиль пресета"].endswith("— своя, среди готовых стратегий её нет"))
+        rows = {row.title: row.text for row in target_rows({"text": "x", "coverage": {"profile": "", "preset": "Default"}})}
+        self.assertIn("ни в один профиль запущенного пресета «Default»", rows["Профиль пресета"])
+        self.assertIn("профиль пресета «Default»", coverage_cure(pc.Coverage(preset="Default"))[0])
 
         self.assertIn("Добавьте эти имена", coverage_cure(pc.Coverage())[0])
         self.assertIn("нет стратегии", coverage_cure(pc.Coverage("Исключения", "список netrogat.txt", strategy=False))[0])

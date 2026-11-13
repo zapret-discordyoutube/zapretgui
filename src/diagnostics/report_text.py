@@ -104,7 +104,14 @@ def target_report(probe: Probe) -> dict:
         # Какой профиль запущенного пресета ловит имя: profile пусто — ни один. None — не проверяли.
         "coverage": None
         if probe.coverage is None
-        else {"profile": probe.coverage.profile, "via": probe.coverage.via, "strategy": probe.coverage.strategy},
+        else {
+            "profile": probe.coverage.profile,
+            "via": probe.coverage.via,
+            "strategy": probe.coverage.strategy,
+            "strategy_name": probe.coverage.strategy_name,
+            "custom_strategy": probe.coverage.custom_strategy,
+            "preset": probe.coverage.preset,
+        },
         # Что ответил сервер за рубежом: "up" — сайт жив, "down" — лежит и там. Пусто — не спрашивали.
         "outside": probe.outside,
         # Сайт открылся, но через раз или не по каждому адресу: что именно шатается. Пусто — стабилен.

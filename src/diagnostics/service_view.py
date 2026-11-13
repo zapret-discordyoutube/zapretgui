@@ -206,21 +206,32 @@ def _coverage_row(coverage) -> ViewRow | None:
     if not isinstance(coverage, dict):
         return None
     profile = str(coverage.get("profile") or "")
+    preset = str(coverage.get("preset") or "")
     if not profile:
+        named = f" «{preset}»" if preset else ""
         return ViewRow(
             FAIL,
             "Профиль пресета",
-            "имя не попадает ни в один профиль запущенного пресета — Zapret это соединение не трогает",
+            f"имя не попадает ни в один профиль запущенного пресета{named} — Zapret это соединение не трогает",
         )
     via = str(coverage.get("via") or "")
-    where = f"«{profile}»" + (f" ({via})" if via else "")
+    where = f"«{profile}»" + (f" пресета «{preset}»" if preset else "") + (f" ({via})" if via else "")
     if not coverage.get("strategy", True):
         return ViewRow(
             WARN,
             "Профиль пресета",
             f"имя попадает в профиль {where}, а в нём нет стратегии: Zapret это соединение нарочно пропускает",
         )
-    return ViewRow(INFO, "Профиль пресета", f"имя попадает в профиль {where}: Zapret применяет к нему стратегию этого профиля")
+    strategy = str(coverage.get("strategy_name") or "")
+    if strategy:
+        which = f" — «{strategy}»"
+    elif coverage.get("custom_strategy"):
+        which = " — своя, среди готовых стратегий её нет"
+    else:
+        which = ""
+    return ViewRow(
+        INFO, "Профиль пресета", f"имя попадает в профиль {where}: Zapret применяет к нему стратегию этого профиля{which}"
+    )
 
 
 def target_rows(item: dict) -> tuple[ViewRow, ...]:

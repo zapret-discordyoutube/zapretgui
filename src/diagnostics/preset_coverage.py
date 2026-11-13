@@ -19,12 +19,20 @@
   выбирается при любом имени.
 
 Шаблоны (``--template``) не рабочие профили и пропускаются; ``--import`` не разворачивается.
+
+Чтобы отчёт не заставлял гадать, строка называет и пресет, и стратегию профиля. Пресет узнаётся
+по имени файла ``@…``: zapret2_runner называет его ``winws2_at_<sha1(путь пресета, NUL, текст)>``,
+так что достаточно найти файл пресета, который даёт тот же отпечаток. Стратегия — по каталогам
+готовых стратегий рядом с программой, тем же поиском, что и на странице профилей.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import gzip
+import hashlib
 import ipaddress
+import os
 import shlex
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -61,6 +69,12 @@ class Coverage:
     profile: str = ""
     via: str = ""
     strategy: bool = True
+    # Название готовой стратегии профиля; пусто — не узнали (или стратегии нет).
+    strategy_name: str = ""
+    # Стратегия профиля не совпала ни с одной готовой («своя стратегия»).
+    custom_strategy: bool = False
+    # Название запущенного пресета; пусто — не узнали.
+    preset: str = ""
 
     @property
     def covered(self) -> bool:
@@ -107,6 +121,8 @@ class _Profile:
     hosts_exclude: _Hosts = field(default_factory=_Hosts)
     host_files: list[str] = field(default_factory=list)
     autohostlist: bool = False
+    named_strategy: str = ""
+    custom_strategy: bool = False
     ips: list = field(default_factory=list)
     ips_exclude: list = field(default_factory=list)
     ip_files: list[str] = field(default_factory=list)
@@ -240,6 +256,7 @@ def parse_launch_args(
 @dataclass(frozen=True, slots=True)
 class RunningPreset:
     profiles: tuple[_Profile, ...]
+    preset: str = ""
 
     def covering(self, host: str, ip: str = "", *, protocol: str = PROTOCOL_TLS, port: int = 443) -> Coverage:
         """Первый профиль, который winws2 выберет для соединения с этим именем и адресом."""
@@ -252,8 +269,16 @@ class RunningPreset:
         for profile in self.profiles:
             via = self._match(profile, host, address, udp=udp, port=port, protocol=protocol)
             if via is not None:
-                return Coverage(profile.title(), via, profile.strategy)
-        return Coverage()
+                named = profile.strategy and not profile.custom_strategy
+                return Coverage(
+                    profile.title(),
+                    via,
+                    profile.strategy,
+                    strategy_name=profile.named_strategy if named else "",
+                    custom_strategy=profile.strategy and profile.custom_strategy,
+                    preset=self.preset,
+                )
+        return Coverage(preset=self.preset)
 
     @staticmethod
     def _match(profile: _Profile, host: str, address, *, udp: bool, port: int, protocol: str) -> str | None:
@@ -311,6 +336,52 @@ def _at_config_of(command_line: str) -> Path | None:
     return None
 
 
+def preset_name_of(config: Path, base_dir: Path) -> str:
+    """Название пресета, из которого написан файл ``@…``; пусто — такого файла пресета нет."""
+    digest = config.stem.rsplit("_", 1)[-1].lower()
+    try:
+        text = config.read_text(encoding="utf-8", errors="replace", newline="")
+    except OSError:
+        return ""
+    presets_root = base_dir / "presets"
+    for candidate in sorted(presets_root.rglob("*.txt")) if presets_root.is_dir() else ():
+        if "replaced" in candidate.relative_to(presets_root).parts[:1]:
+            continue
+        source = f"{os.path.abspath(str(candidate))}\0{text}".encode("utf-8", "surrogatepass")
+        if hashlib.sha1(source).hexdigest()[:20] == digest:
+            return candidate.stem
+    return ""
+
+
+def with_strategy_names(running: RunningPreset, args: Sequence[str], base_dir: Path) -> RunningPreset:
+    """Названия стратегий профилей — тем же поиском, что на странице профилей (только winws2).
+
+    Профили разбирает парсер пресетов программы; если его профили не совпали с нашими по
+    названиям и порядку, названий нет — гадать нельзя.
+    """
+    from core.paths import AppPaths
+    from profile.derived_cache import basic_strategy_entries, resolve_strategy
+    from profile.parser import parse_preset_text
+    from profile.strategy_catalog import load_strategy_catalogs
+
+    catalogs = load_strategy_catalogs(AppPaths(user_root=base_dir, local_root=base_dir), "winws2")
+    if not catalogs:
+        return running
+    parsed = parse_preset_text("\n".join(args), engine="winws2", source_name="running").profiles
+    if [str(item.name or "") for item in parsed] != [profile.name for profile in running.profiles]:
+        return running
+    profiles = []
+    for profile, item in zip(running.profiles, parsed):
+        strategy_id, name = resolve_strategy(item, basic_strategy_entries(item, catalogs))
+        if strategy_id == "none":
+            profiles.append(profile)
+        elif strategy_id == "custom":
+            profiles.append(dataclasses.replace(profile, custom_strategy=True))
+        else:
+            profiles.append(dataclasses.replace(profile, named_strategy=str(name or "")))
+    return dataclasses.replace(running, profiles=tuple(profiles))
+
+
 def running_preset() -> RunningPreset | None:
     """Пресет, с которым сейчас работает winws2 (или winws). ``None`` — не запущен или узнать не удалось."""
     try:
@@ -327,7 +398,14 @@ def running_preset() -> RunningPreset | None:
         # Файл лежит в <рабочая папка>/user/tmp/winws2_at_config: пути списков в нём — от рабочей папки.
         parents = config.resolve().parents
         base_dir = parents[3] if len(parents) > 3 else config.parent
-        return parse_launch_args(read_at_config(config), base_dir)
+        args = read_at_config(config)
+        running = dataclasses.replace(parse_launch_args(args, base_dir), preset=preset_name_of(config, base_dir))
+        if str(name).lower().startswith("winws2"):
+            try:
+                running = with_strategy_names(running, args, base_dir)
+            except Exception:  # noqa: BLE001 — без названия стратегии строка всё равно верна
+                pass
+        return running
     return None
 
 
