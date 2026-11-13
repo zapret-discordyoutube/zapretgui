@@ -42,9 +42,13 @@ def site_road(card: Card) -> tuple[tuple[RoadStage, ...], int]:
     stages = [RoadStage("Вы", "", "ok", "fa5s.desktop")]
     stages.append(RoadStage("DNS", dns.word if dns else "—", dns.state if dns else "unknown", "fa5s.exchange-alt"))
 
-    reached = [mark for mark in card.marks if mark.label not in ("DNS", "QUIC") and mark.word not in ("нет связи", "—")]
+    # Дорога «неизвестно» — ответа не было («нет соединения», «не ответил»): до сервера она не доказывает.
+    reached = [mark for mark in card.marks if mark.label not in ("DNS", "QUIC") and mark.state != "unknown"]
     if card.kind == "ip" or (card.marks and not reached and card.level == "fail"):
         stages.append(RoadStage("Сервер", "адрес закрыт", "fail", "fa5s.server"))
+    elif card.kind == "noconnect" and not reached:
+        # Не ответил ни один адрес, но что закрыт именно адрес — не доказано: не «отвечает» и не «закрыт».
+        stages.append(RoadStage("Сервер", "не отвечает", "warn", "fa5s.server"))
     else:
         stages.append(RoadStage("Сервер", "отвечает" if reached or card.level == "ok" else "—", "ok" if reached or card.level == "ok" else "unknown", "fa5s.server"))
 
@@ -59,7 +63,9 @@ def site_road(card: Card) -> tuple[tuple[RoadStage, ...], int]:
     elif failed:
         stages.append(RoadStage("TLS", "частично", "warn", "fa5s.lock"))
     else:
-        stages.append(RoadStage("TLS", "проходит" if tls else "—", "ok" if tls else "unknown", "fa5s.lock"))
+        # «Проходит» — только если какая-то из проверок TLS действительно прошла, а не просто была.
+        passed = any(mark.state == "ok" for mark in tls)
+        stages.append(RoadStage("TLS", "проходит" if passed else "—", "ok" if passed else "unknown", "fa5s.lock"))
 
     cut = any("16" in text for text, _state in card.tags)
     if card.level == "ok":

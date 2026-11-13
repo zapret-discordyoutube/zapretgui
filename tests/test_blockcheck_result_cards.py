@@ -716,6 +716,24 @@ class CardsWidgetsTests(unittest.TestCase):
         [whole_card] = [item for item in build_cards({"services": [whole]}) if item.site]
         self.assertNotIn("частично", [stage.word for stage in site_road(whole_card)[0]])
 
+        # Как у RuTracker под правилом брандмауэра (21.1.7.254): ни один адрес не ответил. Было
+        # «Сервер отвечает» (из-за «HTTP: не ответил») и «TLS проходит» (раз проверки TLS были).
+        silent_roads = [
+            {"key": "tls12", "label": "TLS 1.2", "word": "нет соединения", "state": "unknown"},
+            {"key": "tls13", "label": "TLS 1.3", "word": "нет соединения", "state": "unknown"},
+            {"key": "browser", "label": "Chrome", "word": "нет соединения", "state": "unknown"},
+            {"key": "http", "label": "HTTP", "word": "не ответил", "state": "unknown"},
+            {"key": "quic", "label": "QUIC", "word": "—", "state": "unknown"},
+            {"key": "dns", "label": "DNS", "word": "честный", "state": "ok"},
+        ]
+        silent = _service(
+            "rutracker", "RuTracker", "warn", [_target("rutracker.org", ok=False, main=True)],
+            kind="noconnect", status="Нет соединения", roads=silent_roads, tags=[],
+        )
+        [silent_card] = [item for item in build_cards({"services": [silent]}) if item.site]
+        stages, _broken = site_road(silent_card)
+        self.assertEqual([(stage.word, stage.state) for stage in stages[2:4]], [("не отвечает", "warn"), ("—", "unknown")])
+
         view = ResultDetailView()
         self.addCleanup(view.deleteLater)
         view.resize(1000, 600)
