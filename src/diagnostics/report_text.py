@@ -23,7 +23,7 @@ from diagnostics.services import (
     STEP_SYSTEM,
     STEP_VOICE,
 )
-from diagnostics.verdict import ReachState
+from diagnostics.verdict import DnsState, ReachState
 
 STEP_TITLES = {
     STEP_SITES: "сайты",
@@ -101,6 +101,10 @@ def target_report(probe: Probe) -> dict:
         "hosts_stale": probe.hosts_stale,
         # Повторная проверка поодиночке: "opened" — открылся со второго раза, "same" — сбой повторился.
         "rechecked": probe.rechecked,
+        # Какой профиль запущенного пресета ловит имя: profile пусто — ни один. None — не проверяли.
+        "coverage": None
+        if probe.coverage is None
+        else {"profile": probe.coverage.profile, "via": probe.coverage.via, "strategy": probe.coverage.strategy},
         # Что ответил сервер за рубежом: "up" — сайт жив, "down" — лежит и там. Пусто — не спрашивали.
         "outside": probe.outside,
         # Сайт открылся, но через раз или не по каждому адресу: что именно шатается. Пусто — стабилен.
@@ -265,3 +269,20 @@ def system_report(system) -> list[dict]:
         {"key": item.key, "title": item.title, "level": item.level, "text": item.text, "advice": item.advice}
         for item in system
     ]
+
+
+def dns_check_verdict(collected: dict[str, list[Probe]]) -> tuple[bool, list[str]]:
+    """Итог вкладки «Проверка DNS подмены»: есть ли подмена и строки вывода."""
+    probes = [probe for items in collected.values() for probe in items if probe.judgement is not None]
+    spoofed = [probe for probe in probes if probe.judgement.state == DnsState.SPOOFED]
+    if spoofed:
+        return True, [
+            "❌ Обнаружена DNS подмена:",
+            *(f"   • {probe.host} — {probe.judgement.reason}" for probe in spoofed),
+            "Браузер с защищённым DNS этого не замечает, а программы, которые спрашивают адрес "
+            "у Windows, получат неверный ответ.",
+            "👉 Откройте «Настройка DNS» и включите DNS с шифрованием (DoH) — его провайдер перехватить не сможет.",
+        ]
+    if any(probe.judgement.state == DnsState.UNKNOWN for probe in probes):
+        return False, ["✅ Явной подмены не найдено. Часть адресов (❔) отличается от эталона, а проверить их не удалось — для CDN это обычно нормально."]
+    return False, ["✅ DNS работает честно. Если сайты не открываются — дело не в DNS, а в блокировке соединения."]

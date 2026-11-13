@@ -5,6 +5,7 @@ import socket
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import diagnostics.engine as engine
@@ -21,6 +22,7 @@ from diagnostics.tls_probe import (
 from utils.chrome_https import chrome_get
 from diagnostics.verdict import (
     ADVICE_HOSTS_STALE,
+    DnsJudgement,
     DnsState,
     Level,
     ReachState,
@@ -557,6 +559,25 @@ class BlockCauseInReportTests(unittest.TestCase):
         self.assertTrue(problem["advice"][0].startswith("Блокировка по имени сайта"))
         # От блокировки по имени стратегия помогает: кнопка подбора остаётся.
         self.assertEqual(problem["action"], "strategy")
+
+    def test_blocked_name_says_which_profile_of_the_running_preset_catches_it(self) -> None:
+        from diagnostics import preset_coverage
+
+        running = preset_coverage.parse_launch_args(
+            ["--name=YouTube", "--filter-tcp=443", "--hostlist-domains=youtube.com", "--lua-desync=fake"], Path("/zapret")
+        )
+        lines: list[str] = []
+        net = _Net(https=self._reset_on_hello)
+        with patch.object(preset_coverage, "running_preset", return_value=running):
+            result = net.run(engine.run_blockcheck, "service:discord", emit=lines.append)
+
+        [discord] = result["services"]
+        main = next(item for item in discord["targets"] if item["main"])
+        # Zapret запущен, а discord.com не входит ни в один профиль: подбирать стратегию бесполезно.
+        self.assertEqual(main["coverage"], {"profile": "", "via": "", "strategy": True})
+        self.assertIn("❌ Профиль пресета: имя не попадает ни в один профиль запущенного пресета", "\n".join(lines))
+        problem = next(item for item in result["problems"] if item["target"] == "discord.com")
+        self.assertEqual(sum("не попадают ни в один профиль пресета" in line for line in problem["advice"]), 1)
 
     def test_working_site_is_not_probed_again(self) -> None:
         net = _Net()
@@ -2332,6 +2353,29 @@ class IcmpAddressTests(unittest.TestCase):
         for ip in ("142.251.150.4", "162.159.137.232"):
             with self.subTest(ip=ip):
                 self.assertEqual(struct.pack("<I", _ipv4_to_dword(ip)), socket.inet_aton(ip))
+
+
+class DnsCheckVerdictTests(unittest.TestCase):
+    """Итог вкладки «Проверка DNS подмены»: три исхода, подменённые имена перечислены."""
+
+    def test_three_outcomes(self) -> None:
+        from types import SimpleNamespace
+
+        from diagnostics.report_text import dns_check_verdict
+
+        def probe(host: str, state: DnsState | None) -> SimpleNamespace:
+            return SimpleNamespace(host=host, judgement=None if state is None else DnsJudgement(state, f"причина {host}"))
+
+        spoofed, lines = dns_check_verdict({"a": [probe("ok.ru", DnsState.OK), probe("bad.com", DnsState.SPOOFED)], "b": [probe("x.org", None)]})
+        self.assertTrue(spoofed)
+        self.assertEqual(lines[:2], ["❌ Обнаружена DNS подмена:", "   • bad.com — причина bad.com"])
+        self.assertIn("DoH", lines[-1])
+
+        spoofed, lines = dns_check_verdict({"a": [probe("ok.ru", DnsState.OK), probe("cdn.net", DnsState.UNKNOWN)]})
+        self.assertEqual((spoofed, lines[0][:27]), (False, "✅ Явной подмены не найдено."))
+
+        spoofed, lines = dns_check_verdict({"a": [probe("ok.ru", DnsState.OK), probe("x.org", None)]})
+        self.assertEqual((spoofed, lines), (False, ["✅ DNS работает честно. Если сайты не открываются — дело не в DNS, а в блокировке соединения."]))
 
 
 if __name__ == "__main__":

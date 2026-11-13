@@ -153,6 +153,51 @@ def iter_process_records_winapi() -> list[tuple[int, str]]:
         return []
 
 
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+# NtQueryInformationProcess: командная строка процесса (Windows 8.1 и новее).
+_PROCESS_COMMAND_LINE_INFORMATION = 60
+
+
+class _UNICODE_STRING(ctypes.Structure):
+    _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", ctypes.c_void_p)]
+
+
+def process_command_line(pid: int) -> str:
+    """Командная строка процесса по его PID. Пусто — не удалось (нет прав, процесс завершился, не Windows).
+
+    Нужна, чтобы узнать, с каким файлом ``@...`` запущен winws2: в нём ровно то, что сейчас работает.
+    """
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ntdll = ctypes.WinDLL("ntdll")
+    except (AttributeError, OSError):
+        return ""
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    query = ntdll.NtQueryInformationProcess
+    query.restype = ctypes.c_long
+    query.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG))
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        return ""
+    try:
+        needed = wintypes.ULONG(0)
+        query(handle, _PROCESS_COMMAND_LINE_INFORMATION, None, 0, ctypes.byref(needed))
+        size = max(int(needed.value), ctypes.sizeof(_UNICODE_STRING))
+        if size > 1 << 20:
+            return ""
+        buffer = ctypes.create_string_buffer(size)
+        if query(handle, _PROCESS_COMMAND_LINE_INFORMATION, buffer, size, ctypes.byref(needed)) != 0:
+            return ""
+        text = _UNICODE_STRING.from_buffer(buffer)
+        if not text.Buffer or not text.Length:
+            return ""
+        return ctypes.wstring_at(text.Buffer, text.Length // 2)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def iter_process_module_paths_winapi(pid: int, *, max_snapshot_attempts: int = 3) -> list[str]:
     """Перечисляет полные пути модулей процесса через Toolhelp Snapshot.
 

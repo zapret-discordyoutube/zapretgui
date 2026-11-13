@@ -201,6 +201,28 @@ def _registry_text(item: dict) -> str:
     return "не значится — блокировать могут и без записи в реестре"
 
 
+def _coverage_row(coverage) -> ViewRow | None:
+    """Строка «Профиль пресета»: ловит ли запущенный пресет это имя и каким профилем."""
+    if not isinstance(coverage, dict):
+        return None
+    profile = str(coverage.get("profile") or "")
+    if not profile:
+        return ViewRow(
+            FAIL,
+            "Профиль пресета",
+            "имя не попадает ни в один профиль запущенного пресета — Zapret это соединение не трогает",
+        )
+    via = str(coverage.get("via") or "")
+    where = f"«{profile}»" + (f" ({via})" if via else "")
+    if not coverage.get("strategy", True):
+        return ViewRow(
+            WARN,
+            "Профиль пресета",
+            f"имя попадает в профиль {where}, а в нём нет стратегии: Zapret это соединение нарочно пропускает",
+        )
+    return ViewRow(INFO, "Профиль пресета", f"имя попадает в профиль {where}, но его стратегия этот фильтр не обходит")
+
+
 def target_rows(item: dict) -> tuple[ViewRow, ...]:
     """Все измерения одного адреса сайта, в одном порядке для экрана и для текста."""
     rows = [ViewRow(_target_level(item), "Соединение", str(item.get("text") or ""))]
@@ -249,6 +271,9 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
         rows.append(ViewRow(_PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN), str(proto.get("title") or ""), str(proto.get("text") or "")))
     if item.get("kind_title"):
         rows.append(ViewRow(INFO, "Вид блокировки", str(item["kind_title"])))
+    coverage_row = _coverage_row(item.get("coverage"))
+    if coverage_row is not None:
+        rows.append(coverage_row)
     if item.get("cause_text"):
         rows.append(ViewRow(FAIL, "Как блокируют", str(item["cause_text"])))
     rows.extend(video_node_rows(item.get("video_node")))

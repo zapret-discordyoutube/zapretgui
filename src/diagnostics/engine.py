@@ -49,6 +49,7 @@ from diagnostics import (
     cert_owner,
     cut_window,
     net_access,
+    preset_coverage,
     protocol_probe,
     quic_probe,
     registry,
@@ -120,6 +121,7 @@ from diagnostics.verdict import (
     ReachState,
     ServiceVerdict,
     TargetOutcome,
+    coverage_cure,
     judge_dns,
     judge_reach,
     summarize_service,
@@ -418,6 +420,7 @@ def _run_probes(
     on_done: Callable[[int, int], None] | None = None,
     on_probe: Callable[[str, _Probe], None] | None = None,
     ask_outside: bool = False,
+    zapret_running: bool | None = None,
 ) -> dict[str, list[_Probe]]:
     """Запускает все цели сразу и печатает их блоки по порядку.
 
@@ -475,6 +478,8 @@ def _run_probes(
         done_probes = _recheck_failed(run, services, done_probes)
         if ask_outside:
             sections.ask_outside(run, services, done_probes)
+        # До печати: строка «Профиль пресета» должна попасть и в текст, и на карточку.
+        preset_coverage.annotate([probe for _key, _target, probe, _error in done_probes if probe is not None], zapret_running)
 
     collected: dict[str, list[_Probe]] = {key: [] for key in services}
     current_service = ""
@@ -577,7 +582,9 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
                 and not probe.dns.ips
                 and not probe.hosts_ips
             ),
-            cure=probe.video_node.advice if probe.video_node is not None else (),
+            # Совет видеосервера доказан пробами и точнее; иначе — совет по профилю запущенного пресета.
+            cure=(probe.video_node.advice if probe.video_node is not None else ())
+            or coverage_cure(probe.coverage),
         )
         for probe in probes
     ]
@@ -749,7 +756,9 @@ def run_blockcheck(
         # Сервис уходит на экран, как только проверены все его адреса, а не когда кончатся все сайты.
         on_probe = sections.live_services(services, verdict_of, lambda ready: live.put(services=ready))
         on_done = functools.partial(step, STEP_SITES)
-        collected = _run_probes(run, services, full=True, emit=emit, on_done=on_done, on_probe=on_probe, ask_outside=ask_outside)
+        collected = _run_probes(
+            run, services, full=True, emit=emit, on_done=on_done, on_probe=on_probe, ask_outside=ask_outside, zapret_running=zapret_running
+        )
         verdicts = {key: verdict_of(service, collected[key]) for key, service in services.items()}
         services_report = report_text.services_report(services, verdicts, collected)
         live.put(services=services_report)
@@ -900,7 +909,7 @@ def check_site(host: str, *, should_stop: ShouldStop | None = None, emit: Emit |
     try:
         zapret_running, _line = sections.zapret_status()
         registry_wait = sections.start_registry()
-        collected = _run_probes(run, services, full=True, emit=emit or (lambda _line: None))
+        collected = _run_probes(run, services, full=True, emit=emit or (lambda _line: None), zapret_running=zapret_running)
         verdicts = {key: _service_verdict(item, collected[key], zapret_running=zapret_running) for key, item in services.items()}
         report = report_text.services_report(services, verdicts, collected)
         # Сайт может открываться, а поток к нему — придерживаться или обрываться по имени (так «крутит
@@ -946,29 +955,12 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
 
         collected = _run_probes(run, services, full=False, emit=emit)
 
-        spoofed = _has_spoofing(collected)
+        spoofed, verdict_lines = report_text.dns_check_verdict(collected)
         emit("━━━━━━━━ 📊 Итог ━━━━━━━━")
         if run.timed_out:
             emit(report_text.timed_out_line(run.deadline_seconds))
-        if spoofed:
-            emit("❌ Обнаружена DNS подмена:")
-            for probes in collected.values():
-                for probe in probes:
-                    if probe.judgement is not None and probe.judgement.state == DnsState.SPOOFED:
-                        emit(f"   • {probe.host} — {probe.judgement.reason}")
-            emit(
-                "Браузер с защищённым DNS этого не замечает, а программы, которые спрашивают адрес "
-                "у Windows, получат неверный ответ."
-            )
-            emit("👉 Откройте «Настройка DNS» и включите DNS с шифрованием (DoH) — его провайдер перехватить не сможет.")
-        elif any(
-            probe.judgement and probe.judgement.state == DnsState.UNKNOWN
-            for probes in collected.values()
-            for probe in probes
-        ):
-            emit("✅ Явной подмены не найдено. Часть адресов (❔) отличается от эталона, а проверить их не удалось — для CDN это обычно нормально.")
-        else:
-            emit("✅ DNS работает честно. Если сайты не открываются — дело не в DNS, а в блокировке соединения.")
+        for line in verdict_lines:
+            emit(line)
         reference = run.reference_report()
         for item in problem_rules.blocked_references(reference):
             emit(f"⚠️ {problem_rules.reference_text(item)}")
@@ -993,11 +985,3 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
         return {"summary": {"dns_poisoning_detected": False}, "stopped": True}
     finally:
         run.close()
-
-
-def _has_spoofing(collected: dict[str, list[_Probe]]) -> bool:
-    return any(
-        probe.judgement is not None and probe.judgement.state == DnsState.SPOOFED
-        for probes in collected.values()
-        for probe in probes
-    )
