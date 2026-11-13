@@ -70,6 +70,8 @@ class UpdateReleaseResolutionTests(unittest.TestCase):
             patch("updater.download.flow.lookup_latest_release", return_value=lookup),
             patch("updater.download.flow.APP_VERSION", "21.1.5.79"),
             patch("updater.release.forgejo.fetch_latest_release") as forgejo_refetch,
+            # Выбор рабочего имени (гонка по сети) проверяют свои тесты: здесь адрес остаётся как есть.
+            patch("utils.site_links.resolve_probed", side_effect=lambda url: url),
         ):
             try:
                 return resolve_artifact(**kwargs), forgejo_refetch

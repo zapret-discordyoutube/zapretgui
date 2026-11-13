@@ -54,6 +54,16 @@ def _host(url: str) -> str:
         return ""
 
 
+def _probed(url: str) -> str:
+    """Адрес сайта проекта под рабочим именем; при любой ошибке — как есть."""
+    try:
+        from utils.site_links import resolve_probed
+
+        return resolve_probed(url) or url
+    except Exception:
+        return url
+
+
 def build_download_sources(metadata: ReleaseArtifactMetadata) -> tuple[DownloadSource, ...]:
     """Источник из ответа выпуска и зеркала того же проверенного файла; первым — GitHub.
 
@@ -63,11 +73,15 @@ def build_download_sources(metadata: ReleaseArtifactMetadata) -> tuple[DownloadS
     """
     from ..release.forgejo import GITHUB_SOURCE, github_asset_url
 
-    primary_host = _host(metadata.update_url)
-    sources = [DownloadSource(metadata.update_url, metadata.verify_ssl)]
+    # Адрес Forgejo — под именем, до которого дошла сама программа (``site_links.resolve_probed``,
+    # список имён раздаёт служба zapret-links): основное имя git.zapret.moe часто закрыто, и без этого
+    # каждая попытка сначала ждала бы его. Вызов идёт из фонового потока обновления.
+    primary_url = _probed(metadata.update_url)
+    primary_host = _host(primary_url)
+    sources = [DownloadSource(primary_url, metadata.verify_ssl)]
     for mirror in mirrors.download_sources(metadata.file_name):
         if mirror.host == primary_host:
-            sources[0] = DownloadSource(metadata.update_url, metadata.verify_ssl, name=mirror.name)
+            sources[0] = DownloadSource(primary_url, metadata.verify_ssl, name=mirror.name)
             continue
         sources.append(
             DownloadSource(mirror.https_url, mirror.verify_ssl, name=mirror.name, fallback_url=mirror.http_url)

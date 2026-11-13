@@ -324,16 +324,37 @@ class UpdaterDownloadContractTests(unittest.TestCase):
              "sha256": "ab" * 32, "verify_ssl": True}
         )
 
-        with patch.object(mirrors, "VPS_SERVERS", []):
+        working = url.replace("git2.zapret.moe", "git3.zapret.moe")
+        with patch.object(mirrors, "VPS_SERVERS", []), patch("utils.site_links.resolve_probed", return_value=working):
             sources = build_download_sources(metadata)
 
         self.assertEqual(
             [(source.name, source.url) for source in sources],
             [
                 ("GitHub", "https://github.com/zapret-discordyoutube/zapretgui/releases/download/22.0.0.0/Zapret2Setup_22_0_0_0.exe"),
-                ("", url),
+                ("", working),
             ],
         )
+
+    def test_forgejo_address_goes_under_the_name_the_program_reached(self) -> None:
+        """Основное имя git.zapret.moe часто закрыто: файл качается под рабочим именем из списка zapret-links."""
+        url = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/releases/download/22.0.0.0/a.exe"
+        metadata = ReleaseArtifactMetadata.from_mapping(
+            {"version": "22.0.0.0", "update_url": url, "file_name": "a.exe", "file_size": 10, "sha256": "ab" * 32, "verify_ssl": True}
+        )
+        with patch.object(mirrors, "VPS_SERVERS", []), patch("utils.site_links.resolve_probed", return_value=url.replace("git.", "git3.")):
+            urls = [source.url for source in build_download_sources(metadata)]
+        self.assertIn(url.replace("git.", "git3."), urls)
+        self.assertNotIn(url, urls)
+
+    def test_failed_name_choice_keeps_the_original_address(self) -> None:
+        url = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/releases/download/22.0.0.0/a.exe"
+        metadata = ReleaseArtifactMetadata.from_mapping(
+            {"version": "22.0.0.0", "update_url": url, "file_name": "a.exe", "file_size": 10, "sha256": "ab" * 32, "verify_ssl": True}
+        )
+        with patch.object(mirrors, "VPS_SERVERS", []), patch("utils.site_links.resolve_probed", side_effect=OSError("no net")):
+            urls = [source.url for source in build_download_sources(metadata)]
+        self.assertIn(url, urls)
 
     def test_github_address_only_for_the_same_forgejo_file(self) -> None:
         from updater.release.forgejo import github_asset_url
