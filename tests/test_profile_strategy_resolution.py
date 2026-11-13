@@ -174,10 +174,13 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                 composite = profile_strategy_shape(profile).composite
                 unresolved.append(
                     f"{path.name}:{index}: {profile.display_name} "
-                    f"({catalog}/{profile_list_type(profile)}; composite={composite})"
+                    f"({catalog}/{profile_list_type(profile)}; composite={composite}): "
+                    + " ".join(profile_strategy_shape(profile).lua_lines)
                 )
 
-        self.assertEqual(unresolved, [])
+        # Новый пресет со своей стратегией: та же стратегия добавляется в каталог
+        # src/system/strategy_catalogs/winws2/<catalog>.txt тем же коммитом.
+        self.assertFalse(unresolved, "Нет в каталогах готовых стратегий:\n" + "\n".join(unresolved))
 
     def test_every_builtin_preset_has_domain_and_ip_ru_exclusions_with_pass(self) -> None:
         expected_profiles = {

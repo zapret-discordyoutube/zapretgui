@@ -472,6 +472,13 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=fake:blob=zero64:repeats=10
 --lua-desync=fake:blob=fake_dbankcloud:repeats=10
 
+[drop]
+name = Drop · выключить QUIC
+author = builtin
+label = stock
+description = Отбрасывает пакеты QUIC: браузер и приложение сами переходят на обычное TCP-соединение, которое обходит TCP-профиль. Из пресетов Default + YouTube no QUIC + wssize.
+--lua-desync=drop
+
 # --- end missing builtin strategy coverage ---
 
 # --- Составные стратегии встроенных пресетов (несколько веток --payload) ---

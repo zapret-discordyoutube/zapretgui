@@ -3305,6 +3305,23 @@ author = Flowseal
 label = experimental
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up
 
+# --- Default + YouTube no QUIC + wssize ---
+[wssize_1_1_multidisorder_complex]
+name = MultiDisorder Complex + WSSize 1:1 · из googlevideo.com
+author = builtin
+label = experimental
+description = Для узлов googlevideo, которые принимают приветствие и не отвечают: окно TCP 1:1 до первых данных, потом MultiDisorder Complex. Работает только по TCP, поэтому QUIC для YouTube выключают. Из пресета Default + YouTube no QUIC + wssize.
+--lua-desync=wssize:wsize=1:scale=1
+--lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
+[wssize_1_1_multisplit_complex]
+name = MultiSplit Complex + WSSize 1:1 · из googlevideo.com
+author = builtin
+label = experimental
+description = Для узлов googlevideo, которые принимают приветствие и не отвечают: окно TCP 1:1 до первых данных, потом MultiSplit Complex. Работает только по TCP, поэтому QUIC для YouTube выключают. Из пресета Default + YouTube no QUIC + wssize (game filter).
+--lua-desync=wssize:wsize=1:scale=1
+--lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
 # --- Составные стратегии встроенных пресетов (несколько веток --payload) ---
 # Одна запись — одна стратегия целиком: строки --payload разделяют ветки для
 # разных типов пакетов, --in-range/--out-range допустимы только после первой
