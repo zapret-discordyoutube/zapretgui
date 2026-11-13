@@ -213,6 +213,53 @@ def test_builder_drops_a_broken_bsdiff_maker_result(tmp_path, monkeypatch) -> No
     assert any("не прошла проверку" in message for message in messages)
 
 
+def test_builder_makes_patches_from_previous_releases_at_once_in_serial_order(tmp_path, monkeypatch) -> None:
+    """Заплатки от трёх прежних версий делаются одновременно, итог как при поочерёдной сборке."""
+    pytest.importorskip("compression.zstd", reason="сжатие zstd есть только в Python 3.14")
+    import threading
+
+    from zapret_update import builder
+
+    rng = random.Random(5)
+    base = rng.randbytes(300_000)
+    versions = [bytes((b + shift) & 255 for b in base) for shift in range(4)]
+    for number, data in enumerate(versions):
+        (tmp_path / str(number)).mkdir()
+        (tmp_path / str(number) / "Zapret.exe").write_bytes(data)
+    layout = lambda number: {"_internal/Zapret.exe": tmp_path / str(number) / "Zapret.exe"}  # noqa: E731
+    seed_cache = tmp_path / "seed"
+    previous = [
+        manifest.parse(_payload(files=builder.build_store(layout=layout(number), cache_dir=seed_cache).files))
+        for number in (2, 1, 0)
+    ]
+    monkeypatch.setattr(builder, "BSDIFF_WHEN_ZSTD_FROM", 0)
+
+    def run(cache_name: str, workers: int, make):
+        cache = tmp_path / cache_name
+        cache.mkdir()
+        for blob in seed_cache.glob("*.zst"):
+            (cache / blob.name).write_bytes(blob.read_bytes())
+        return builder.build_store(
+            layout=layout(3), cache_dir=cache, previous=previous, make_bsdiff=make, patch_workers=workers
+        )
+
+    serial = run("serial", 1, _same_length_patch)
+    # Барьер пропускает, только когда все три заплатки bsdiff делаются разом.
+    barrier = threading.Barrier(3, timeout=10)
+
+    def together(old_bytes: bytes, new_bytes: bytes) -> bytes:
+        barrier.wait()
+        return _same_length_patch(old_bytes, new_bytes)
+
+    parallel = run("parallel", 3, together)
+
+    assert len(serial.patches) == 3 and all(item.get("kind") == "bsdiff" for item in serial.patches)
+    assert parallel.patches == serial.patches
+    assert parallel.names == serial.names
+    assert (parallel.files, parallel.patched) == (serial.files, serial.patched)
+    assert not list((tmp_path / "parallel").glob("*.tmp"))
+
+
 # ── что программа умеет распаковать ─────────────────────────────────────────
 
 

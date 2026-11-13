@@ -18,8 +18,11 @@
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Callable, Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from . import store
@@ -29,6 +32,9 @@ from .manifest import Manifest, file_sha256, safe_relative_path
 PATCH_WORTH_SHARE = 0.8
 # bsdiff пробуется, только если заплатка zstd не меньше этого.
 BSDIFF_WHEN_ZSTD_FROM = 1024 * 1024
+# Сколько заплаток делать одновременно: по одной на прежнюю версию. Больше не
+# надо — bsdiff на 90 МБ берёт больше гигабайта памяти.
+PATCH_WORKERS = store.PATCH_FROM_VERSIONS
 
 
 @dataclass
@@ -43,7 +49,8 @@ class StoreBuild:
 
 
 def _write_atomic(path: Path, data: bytes) -> None:
-    temporary = path.with_name(path.name + ".tmp")
+    # Своё временное имя у каждого потока: заплатки пишутся одновременно.
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     temporary.write_bytes(data)
     os.replace(temporary, path)
 
@@ -62,6 +69,82 @@ def _old_bytes(cache_dir: Path, sha256: str, size: int, read_old) -> bytes | Non
     return read_old(sha256, size) if read_old is not None else None
 
 
+@dataclass
+class _BasePatches:
+    """Заплатки одного файла от одной прежней версии: собираются в своём потоке."""
+
+    patches: list[dict] = field(default_factory=list)
+    names: list[str] = field(default_factory=list)
+    patched: int = 0
+    messages: list[str] = field(default_factory=list)
+
+
+def _patches_from_base(
+    *,
+    cache: Path,
+    path: str,
+    base,
+    sha256: str,
+    size: int,
+    zsize: int,
+    new_bytes: Callable[[], bytes],
+    read_old,
+    make_bsdiff,
+) -> _BasePatches:
+    """Заплатка zstd и, если она большая, bsdiff — от прежней версии ``base``.
+
+    Ничего общего не меняет: всё возвращается, итог собирает ``build_store`` в
+    прежнем порядке, поэтому от прежних версий заплатки делаются одновременно.
+    """
+    out = _BasePatches()
+    old_bytes: bytes | None = None
+    name = store.patch_name(base.sha256, sha256)
+    patch_path = cache / name
+    if not patch_path.is_file():
+        old_bytes = _old_bytes(cache, base.sha256, base.size, read_old)
+        if old_bytes is None:
+            out.messages.append(f"заплатка для {path} от {base.sha256[:12]} не сделана: прежнего файла нет")
+            return out
+        _write_atomic(patch_path, store.make_patch(old_bytes, new_bytes()))
+        out.patched += 1
+    patch_size = patch_path.stat().st_size
+    if patch_size < zsize * PATCH_WORTH_SHARE:
+        out.patches.append({"from": base.sha256, "to": sha256, "size": patch_size})
+        out.names.append(name)
+    if make_bsdiff is None or patch_size < BSDIFF_WHEN_ZSTD_FROM:
+        return out
+    bs_name = store.patch_name(base.sha256, sha256, "bsdiff")
+    bs_path = cache / bs_name
+    if not bs_path.is_file():
+        if old_bytes is None:
+            old_bytes = _old_bytes(cache, base.sha256, base.size, read_old)
+        if old_bytes is None:
+            return out
+        try:
+            made = make_bsdiff(old_bytes, new_bytes())
+        except Exception as exc:  # noqa: BLE001 — без bsdiff выпуск всё равно годен
+            out.messages.append(f"заплатка bsdiff для {path} от {base.sha256[:12]} не сделана: {exc}")
+            return out
+        # Сборка проверяет заплатку тем же кодом, что программа.
+        try:
+            store.apply_patch(old_bytes, made, sha256=sha256, size=size, kind="bsdiff")
+        except store.StoreError as exc:
+            out.messages.append(f"заплатка bsdiff для {path} от {base.sha256[:12]} не прошла проверку: {exc}")
+            return out
+        _write_atomic(bs_path, made)
+        out.patched += 1
+    bs_size = bs_path.stat().st_size
+    if bs_size < min(patch_size, zsize) * PATCH_WORTH_SHARE:
+        # Заплатка zstd той же пары больше никому не нужна: программы, которые
+        # умеют zstd (Zapret 2 GUI 158+, Zapret KVN 0.8.27+), умеют и bsdiff и
+        # берут меньшую. Не выкладываем лишние мегабайты.
+        out.patches = [item for item in out.patches if item.get("kind", "zstd") != "zstd"]
+        out.names = [item for item in out.names if item != name]
+        out.patches.append({"from": base.sha256, "to": sha256, "size": bs_size, "kind": "bsdiff"})
+        out.names.append(bs_name)
+    return out
+
+
 def build_store(
     *,
     layout: Mapping[str, Path],
@@ -70,12 +153,20 @@ def build_store(
     read_old: Callable[[str, int], bytes | None] | None = None,
     make_bsdiff: Callable[[bytes, bytes], bytes] | None = None,
     log: Callable[[str], None] = lambda _message: None,
+    patch_workers: int = PATCH_WORKERS,
 ) -> StoreBuild:
-    """Файлы выпуска с ``zsize`` и заплатки; файлы хранилища — в ``cache_dir``."""
+    """Файлы выпуска с ``zsize`` и заплатки; файлы хранилища — в ``cache_dir``.
+
+    Заплатки (zstd уровня 19 и bsdiff, по полминуты каждая на большом exe) от
+    разных прежних версий делаются одновременно в ``patch_workers`` потоках:
+    zstd отпускает GIL, bsdiff идёт отдельным процессом. Порядок итога тот же,
+    что при поочерёдной сборке.
+    """
     cache = Path(cache_dir)
     cache.mkdir(parents=True, exist_ok=True)
     result = StoreBuild()
     earlier = list(previous)[: store.PATCH_FROM_VERSIONS]
+    jobs: list[Callable[[], _BasePatches]] = []
 
     for relative in sorted(layout):
         source = Path(layout[relative])
@@ -97,62 +188,51 @@ def build_store(
             old = next((entry for entry in manifest.files if entry.path == path), None)
             if old is not None and old.sha256 != sha256 and old.sha256 not in {base.sha256 for base in bases}:
                 bases.append(old)
-        new_bytes: bytes | None = None
+        if not bases:
+            continue
+        new_bytes = _lazy_bytes(source)
         for base in bases:
-            old_bytes: bytes | None = None
-            name = store.patch_name(base.sha256, sha256)
-            patch_path = cache / name
-            if not patch_path.is_file():
-                old_bytes = _old_bytes(cache, base.sha256, base.size, read_old)
-                if old_bytes is None:
-                    log(f"заплатка для {path} от {base.sha256[:12]} не сделана: прежнего файла нет")
-                    continue
-                if new_bytes is None:
-                    new_bytes = source.read_bytes()
-                _write_atomic(patch_path, store.make_patch(old_bytes, new_bytes))
-                result.patched += 1
-            patch_size = patch_path.stat().st_size
-            if patch_size < zsize * PATCH_WORTH_SHARE:
-                result.patches.append({"from": base.sha256, "to": sha256, "size": patch_size})
-                result.names.add(name)
-            if make_bsdiff is None or patch_size < BSDIFF_WHEN_ZSTD_FROM:
-                continue
-            bs_name = store.patch_name(base.sha256, sha256, "bsdiff")
-            bs_path = cache / bs_name
-            if not bs_path.is_file():
-                if old_bytes is None:
-                    old_bytes = _old_bytes(cache, base.sha256, base.size, read_old)
-                if old_bytes is None:
-                    continue
-                if new_bytes is None:
-                    new_bytes = source.read_bytes()
-                try:
-                    made = make_bsdiff(old_bytes, new_bytes)
-                except Exception as exc:  # noqa: BLE001 — без bsdiff выпуск всё равно годен
-                    log(f"заплатка bsdiff для {path} от {base.sha256[:12]} не сделана: {exc}")
-                    continue
-                # Сборка проверяет заплатку тем же кодом, что программа.
-                try:
-                    store.apply_patch(old_bytes, made, sha256=sha256, size=size, kind="bsdiff")
-                except store.StoreError as exc:
-                    log(f"заплатка bsdiff для {path} от {base.sha256[:12]} не прошла проверку: {exc}")
-                    continue
-                _write_atomic(bs_path, made)
-                result.patched += 1
-            bs_size = bs_path.stat().st_size
-            if bs_size < min(patch_size, zsize) * PATCH_WORTH_SHARE:
-                result.patches.append({"from": base.sha256, "to": sha256, "size": bs_size, "kind": "bsdiff"})
-                result.names.add(bs_name)
-                # Заплатка zstd той же пары больше никому не нужна: программы,
-                # которые умеют zstd (Zapret 2 GUI 158+, Zapret KVN 0.8.27+),
-                # умеют и bsdiff и берут меньшую. Не выкладываем лишние мегабайты.
-                result.patches = [
-                    item
-                    for item in result.patches
-                    if not (item["from"] == base.sha256 and item["to"] == sha256 and item.get("kind", "zstd") == "zstd")
-                ]
-                result.names.discard(name)
+            jobs.append(
+                partial(
+                    _patches_from_base,
+                    cache=cache,
+                    path=path,
+                    base=base,
+                    sha256=sha256,
+                    size=size,
+                    zsize=zsize,
+                    new_bytes=new_bytes,
+                    read_old=read_old,
+                    make_bsdiff=make_bsdiff,
+                )
+            )
+
+    if len(jobs) > 1 and patch_workers > 1:
+        with ThreadPoolExecutor(max_workers=min(patch_workers, len(jobs)), thread_name_prefix="store-patch") as pool:
+            done = list(pool.map(lambda job: job(), jobs))
+    else:
+        done = [job() for job in jobs]
+    for item in done:
+        for message in item.messages:
+            log(message)
+        result.patches.extend(item.patches)
+        result.names.update(item.names)
+        result.patched += item.patched
     return result
+
+
+def _lazy_bytes(source: Path) -> Callable[[], bytes]:
+    """Новый файл читается один раз и только если заплатку правда надо делать."""
+    lock = threading.Lock()
+    loaded: list[bytes] = []
+
+    def read() -> bytes:
+        with lock:
+            if not loaded:
+                loaded.append(source.read_bytes())
+            return loaded[0]
+
+    return read
 
 
 def prune_cache(cache_dir: Path, keep: Iterable[str]) -> int:
