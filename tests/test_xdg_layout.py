@@ -30,7 +30,7 @@ def test_windows_layout_is_unchanged(tmp_path) -> None:
     assert paths.premium_database == root / "user" / "premium.sqlite3"
     assert paths.logs_dir == root / "user" / "logs" and paths.crash_logs_dir == root / "user" / "logs" / "crashes"
     assert paths.tmp_dir == root / "user" / "tmp" and paths.update_cache_dir == root / "user" / "update_cache"
-    assert paths.lists_user_dir == root / "lists" / "user"
+    assert paths.lists_user_dir == root / "lists" / "user" and paths.lists_dir == root / "lists" == paths.lists_base_dir.parent
     assert paths.presets_dir == root / "presets" == paths.shipped_presets_dir
     assert paths.user_data_root == root
     assert paths.user_lua_dir == root / "user" / "lua" and paths.engine_state_dir == root / "user" / "winws2"
@@ -74,6 +74,7 @@ def test_every_writable_thing_leaves_the_read_only_program_folder(tmp_path) -> N
         "user fakes": paths.user_fakes_dir,
         "engine state": paths.engine_state_dir,
         "user lists": paths.lists_user_dir,
+        "final lists": paths.lists_dir,
         "presets": paths.presets_dir,
     }
     for name, path in writable.items():
@@ -88,7 +89,8 @@ def test_settings_and_state_live_in_their_own_xdg_folders(tmp_path) -> None:
     assert paths.settings_database == paths.config_root / "settings.sqlite3"
     assert paths.logs_dir == paths.state_root / "logs"
     assert paths.tmp_dir == paths.cache_root / "tmp"
-    assert paths.lists_user_dir == paths.data_root / "lists"
+    assert paths.lists_dir == paths.data_root / "lists" and paths.lists_user_dir == paths.data_root / "lists" / "user"
+    assert paths.lists_base_dir == paths.root / "lists" / "base"  # shipped, read-only
     assert paths.presets_dir == paths.data_root / "presets"
 
 

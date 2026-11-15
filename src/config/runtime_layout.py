@@ -202,16 +202,16 @@ class ApplicationPaths:
 
     @property
     def lists_dir(self) -> Path:
-        return self.root / "lists"
+        """Папка списков, куда программа пишет итоговые ``<имя>.txt``; в Linux это данные пользователя.
+        Поставляемые списки (``base``) всегда лежат в корне программы и только читаются."""
+        return (self.data_root if self.data_root is not None else self.root) / "lists"
 
     @property
     def lists_base_dir(self) -> Path:
-        return self.lists_dir / "base"
+        return self.root / "lists" / "base"
 
     @property
     def lists_user_dir(self) -> Path:
-        if self.data_root is not None:
-            return self.data_root / "lists"
         return self.lists_dir / "user"
 
     @property
