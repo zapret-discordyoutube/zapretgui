@@ -276,6 +276,8 @@ class _Net:
         # Что «показал» QUIC: по умолчанию проверку будто сняли — вывода нет.
         self.quic_facts = None
         self.quic_asked: list[tuple[str, str]] = []
+        # Через какие VPN-адаптеры идёт интернет: по умолчанию узнать не удалось (None), как у проверки без доступа к адаптерам.
+        self.routed = None
         # Что «показал» набор объёма по одному соединению: по умолчанию обрыва нет.
         self.volume_facts = None
         self.volume_asked: list[str] = []
@@ -390,6 +392,9 @@ class _Net:
             patch.object(engine.cert_owner, "collect", side_effect=self._cert),
             patch.object(net_access, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(sections, "zapret_status", return_value=(True, "✅ Zapret запущен")),
+            # Адаптеры читаются из самой системы: тесту нужен один и тот же ответ на любой машине (на Linux
+            # с Platform.dns список настоящий, и «VPN запущен, но не подключён» появлялось само).
+            patch.object(sections.system_state, "_read_tunnels_routed", side_effect=self._routed),
             # Список реестра РКН качается из сети и лежит на диске: в сценариях движка его нет.
             patch.object(sections, "start_registry", return_value=lambda _seconds, _cancel: self.registry),
             # Пробы «как работает фильтр» шлют свои приветствия в сеть.
@@ -409,6 +414,11 @@ class _Net:
     def _crowd(self, _run, _collected, _services, *, tools=()):
         self.crowd_tools = list(tools)
         return self.crowd
+
+    def _routed(self):
+        if self.routed is None:
+            raise OSError("адаптеры в тесте не читаются")
+        return self.routed
 
     def _cert(self, host, ip, **_kwargs):
         self.cert_asked.append((host, ip))
