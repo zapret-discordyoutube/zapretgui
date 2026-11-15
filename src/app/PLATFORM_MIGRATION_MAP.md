@@ -174,6 +174,9 @@ Probe script (not in the repository): `/tmp/zg-baseline/tools/probe_launch.py`.
   ```
   (`QT_QPA_PLATFORM=offscreen` for no screen; the virtual X screen `xvfb-run` still ends in a Qt segfault, see below.)
 
+- 2026-11-15 Linux engine, step 1: `platforms/linux/capture_rules.py` translates a preset's `--wf-*` capture options into an nftables script (see the Phase 3 notes in the task file). It is not used by anything yet; the engine interface, the Linux runner and the root helper come next.
+- 2026-11-15 Windows verification: scripts run with the build Python 3.14 on win10 pass for backend selection, capabilities, UAC state, BFE service, mutex, show-event signal and watcher, launch-gate import; a published Dev (21.1.7.266) runs with 0 log errors; a full trial build compiles and bundles only the Windows modules of `platforms`.
+
 ## Second probe, after `launch` / `privileges` / `single_instance` (2026-11-15)
 
 Run: skip the two source-start checks, start with Qt `offscreen`, grab the main window after 9 s, no fake `windll`. Probe script (not in the repository): `/tmp/zg-baseline/tools/probe_shot.py`. Screenshot of the result: `/root/.agent-todo/zapretgui/2026-11-15-linux-gui-first-screenshot.png`.
