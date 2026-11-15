@@ -38,6 +38,7 @@ sys.excepthook = _qt_slot_excepthook
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_network: do not replace the platform network probes with the safe stub")
+    config.addinivalue_line("markers", "real_engine: keep the engine of the running platform (not the shared Windows runner factory)")
 
 
 @pytest.fixture(autouse=True)
@@ -64,6 +65,23 @@ def _tests_do_not_measure_the_real_network(monkeypatch, request):
         "tcp_server_window",
     ):
         monkeypatch.setattr(probe, name, getattr(stub.netprobe, name), raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _tests_use_the_shared_runner_factory_outside_windows(monkeypatch, request):
+    """Most runtime tests are about the Windows runner logic and patch ``runner_factory``. Outside Windows they get the
+    shared factory as the engine of the platform; tests of the Linux engine itself mark ``real_engine``."""
+    if sys.platform == "win32" or request.node.get_closest_marker("real_engine"):
+        yield
+        return
+    from platforms import current
+    from platforms.factory_engine import FactoryEngine
+
+    engine = current().engine
+    factory = FactoryEngine()
+    for name in ("runner", "current_runner", "reset_runner", "invalidate_runner"):
+        monkeypatch.setattr(engine, name, getattr(factory, name), raising=False)
     yield
 
 

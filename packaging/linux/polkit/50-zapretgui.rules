@@ -1,0 +1,9 @@
+// Members of the group "zapretgui" start, stop and restart the Zapret helper without a password.
+// Nothing else is allowed here: the rule names the one unit.
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "zapretgui-helper.service" &&
+        subject.isInGroup("zapretgui")) {
+        return polkit.Result.YES;
+    }
+});

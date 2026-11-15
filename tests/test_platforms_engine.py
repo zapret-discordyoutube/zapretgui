@@ -1,8 +1,10 @@
-"""The ``engine`` interface: every backend hands out the runner of the shared factory (until the Linux runner exists)."""
+"""The ``engine`` interface: Windows and the stub hand out the runner of the shared factory; Linux has its own."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from platforms.linux import PLATFORM as LINUX
 from platforms.stub import PLATFORM as STUB
@@ -17,7 +19,7 @@ def test_every_backend_has_an_engine() -> None:
 
 def test_engine_calls_reach_the_factory_at_call_time() -> None:
     runner = MagicMock()
-    for backend in (WINDOWS, LINUX, STUB):
+    for backend in (WINDOWS, STUB):
         with (
             patch("winws_runtime.runners.runner_factory.get_strategy_runner", return_value=runner) as get,
             patch("winws_runtime.runners.runner_factory.get_current_runner", return_value=runner) as current,
@@ -53,3 +55,24 @@ def test_direct_network_works_without_a_runner() -> None:
     fake.engine.current_runner.return_value = None
     with patch("platforms.current", return_value=fake):
         assert direct_network.direct_network_pause_needed() is False
+
+
+@pytest.mark.real_engine
+def test_linux_engine_keeps_one_runner_and_forgets_it_on_reset() -> None:
+    from platforms.linux.engine import LinuxEngine
+    from platforms.linux.runner import LinuxStrategyRunner
+
+    engine = LinuxEngine()
+    assert engine.current_runner() is None
+    runner = engine.runner("/opt/zapretgui/exe/winws2.exe")
+    assert isinstance(runner, LinuxStrategyRunner) and engine.runner("anything") is runner
+    assert engine.current_runner() is runner
+    with patch.object(runner, "stop") as stop:
+        engine.reset_runner()
+    stop.assert_called_once_with()
+    assert engine.current_runner() is None
+    runner = engine.runner("x")
+    with patch.object(runner, "stop_background_watchers") as watchers:
+        engine.invalidate_runner()
+    watchers.assert_called_once_with()
+    assert engine.current_runner() is None

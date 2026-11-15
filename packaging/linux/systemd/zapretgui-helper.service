@@ -1,0 +1,34 @@
+[Unit]
+Description=Zapret helper: firewall rules and the nfqws2 engine for the Zapret window
+Documentation=https://wiki.zapret.moe/
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=simple
+# The wrapper starts: python -m platforms.linux.helper (source layout) or the bundled program in helper mode.
+ExecStart=/opt/zapretgui/bin/zapretgui-helper
+# The helper removes its own firewall table on every way out. These two lines are the second net, for the case
+# that the helper was killed (kill -9, out of memory): the table is never left behind to cut the internet.
+ExecStartPre=-/usr/sbin/nft delete table inet zapretgui
+ExecStopPost=-/usr/sbin/nft delete table inet zapretgui
+Restart=on-failure
+RestartSec=2
+# /run/zapretgui: the socket (root:zapretgui 0660, created by the helper), the state file and the engine log.
+RuntimeDirectory=zapretgui
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=no
+# The engine gives up root itself and continues as the person who asked; the helper needs no more than this.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SETUID CAP_SETGID CAP_SYS_NICE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_DAC_OVERRIDE CAP_SYS_ADMIN
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+LockPersonality=yes
+# Leaving is quick: stop() removes the rules first and the engine second.
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
