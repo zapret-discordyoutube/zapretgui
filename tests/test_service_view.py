@@ -215,10 +215,30 @@ class ReportRegressionTests(unittest.TestCase):
         row = next(row for row in view.target_rows(_target(tried=tried)) if row.title == "Какие адреса пробовали")
 
         self.assertEqual(row.level, "warn")
-        self.assertIn("1.1.1.1 не пустили", row.text)
-        self.assertIn("3.3.3.3 пустил", row.text)
+        self.assertIn("Адрес 1.1.1.1 не пустил соединение", row.text)
+        self.assertIn("а 3.3.3.3 пустил:", row.text)
         # Строка адреса не знает, успела ли таблица «имя × адрес»: обещать её «ниже» нельзя (отчёт с МТС без таблицы).
         self.assertNotIn("таблиц", row.text)
+
+    def test_address_words_agree_with_how_many_addresses(self) -> None:
+        # Отчёт с МТС на 273: «Адреса 142.251.153.4 не пустили …, а 142.251.151.4, … пустил» — число перепутано.
+        tried = [
+            {"address": "1.1.1.1", "result": "reset"},
+            {"address": "3.3.3.3", "result": "ok"},
+            {"address": "4.4.4.4", "result": "ok"},
+        ]
+        row = next(row for row in view.target_rows(_target(tried=tried)) if row.title == "Какие адреса пробовали")
+        self.assertIn("Адрес 1.1.1.1 не пустил соединение", row.text)
+        self.assertIn("а 3.3.3.3, 4.4.4.4 пустили:", row.text)
+
+        tried = [
+            {"address": "1.1.1.1", "result": "reset"},
+            {"address": "2.2.2.2", "result": "timeout"},
+            {"address": "3.3.3.3", "result": "ok"},
+        ]
+        row = next(row for row in view.target_rows(_target(tried=tried)) if row.title == "Какие адреса пробовали")
+        self.assertIn("Адреса 1.1.1.1, 2.2.2.2 не пустили соединение", row.text)
+        self.assertIn("а 3.3.3.3 пустил:", row.text)
 
     def test_consistent_addresses_stay_a_reference(self) -> None:
         tried = [{"address": "1.1.1.1", "result": "ok"}, {"address": "2.2.2.2", "result": "ok"}]

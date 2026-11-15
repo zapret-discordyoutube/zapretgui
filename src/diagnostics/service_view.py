@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from diagnostics.block_kind import KIND_OTHER, KINDS, kind_info
 from diagnostics import block_kind, protocol_probe, quic_probe, transfer_probe, volume_probe
 from diagnostics.video_sweep import FAR_RTT_MS
-from diagnostics.limits import DNS_ATTEMPTS, HTTPS_TIMEOUT, SOURCE_HOSTS, SOURCE_REFERENCE
+from diagnostics.limits import DNS_ATTEMPTS, SOURCE_HOSTS, SOURCE_REFERENCE
 from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe
 from diagnostics.verdict import DnsState, Level, ReachState, describe_reach
 
@@ -291,6 +291,15 @@ def _coverage_row(coverage, host: str = "") -> ViewRow | None:
     )
 
 
+def _addresses_verb(steps: list, verb: str, *, capital: bool = True) -> str:
+    """«Адрес X не пустил» / «Адреса X, Y не пустили»: число слова и глагола — по числу адресов."""
+    names = ", ".join(str(step.get("address", "")) for step in steps)
+    many = len(steps) > 1
+    noun = ("Адреса" if many else "Адрес") if capital else ""
+    words = f"{noun} {names}" if noun else names
+    return f"{words} {verb}{'и' if many else ''}"
+
+
 def target_rows(item: dict) -> tuple[ViewRow, ...]:
     """Все измерения одного адреса сайта, в одном порядке для экрана и для текста."""
     rows = [ViewRow(_target_level(item), "Соединение", str(item.get("text") or ""))]
@@ -303,8 +312,8 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
         broken = [step for step in tried if step.get("result") != "ok"]
         if opened and broken:
             words += (
-                f". Адреса {', '.join(str(step.get('address', '')) for step in broken)} не пустили соединение с именем сайта, "
-                f"а {', '.join(str(step.get('address', '')) for step in opened)} пустил: результат зависит от адреса. "
+                f". {_addresses_verb(broken, 'не пустил')} соединение с именем сайта, "
+                f"а {_addresses_verb(opened, 'пустил', capital=False)}: результат зависит от адреса. "
                 "Браузер перебирает адреса и в итоге открывает сайт, но часть попыток уходит впустую, а программы, "
                 "которые берут первый адрес, могут не открыть его"
             )
@@ -798,7 +807,7 @@ def fail_text(probe: Probe) -> str:
         return f"{probe.volume.text} — так провайдер обрывает загрузку"
     if probe.reach_state == ReachState.CERT and probe.cert is not None:
         return probe.cert.text
-    return describe_reach(probe.reach, timeout=HTTPS_TIMEOUT)
+    return describe_reach(probe.reach)
 
 
 SOURCE_NOTE = {

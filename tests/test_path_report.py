@@ -12,7 +12,8 @@ from diagnostics import block_cause, engine, path_report, report_text
 from diagnostics import protocol_probe as pp
 from diagnostics import quic_probe, volume_probe
 from diagnostics import transfer_probe as tp
-from diagnostics.tls_probe import KIND_CERT, KIND_CONNECT, KIND_OK, KIND_RESET, ProbeResult
+from diagnostics.limits import HTTPS_TIMEOUT
+from diagnostics.tls_probe import KIND_CERT, KIND_CONNECT, KIND_OK, KIND_RESET, KIND_TIMEOUT, ProbeResult
 from diagnostics.verdict import DnsJudgement, DnsState, ReachState
 
 S = tp.RequestSample
@@ -104,6 +105,14 @@ class BrokenPathTests(unittest.TestCase):
         probe = _probe(reach=ProbeResult(ip=IP, kind=KIND_RESET), reach_state=ReachState.DPI)
 
         self.assertEqual(_by_key(probe)["tls"].confidence, tp.CONFIDENCE_MEDIUM)
+
+    def test_silent_tls_names_the_real_wait_not_zero(self) -> None:
+        # Отчёт с МТС на 273: строка «Соединение» писала «за 5 с», а шаг TLS того же адреса — «за 0 с».
+        probe = _probe(reach=ProbeResult(ip=IP, kind=KIND_TIMEOUT), reach_state=ReachState.DPI)
+        text = _by_key(probe)["tls"].text
+
+        self.assertIn(f"не ответил за {HTTPS_TIMEOUT:.0f} с", text)
+        self.assertNotIn("за 0 с", text)
 
     def test_closed_address_breaks_tcp_and_leaves_tls_unknown(self) -> None:
         probe = _probe(

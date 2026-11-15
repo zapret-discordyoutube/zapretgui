@@ -47,6 +47,7 @@ from diagnostics.tls_probe import (
     ProbeResult,
 )
 from diagnostics import cut_window
+from diagnostics.limits import HTTPS_TIMEOUT
 from utils.address_kinds import AddressKind, address_kind, is_stub_address
 from platforms.netprobe_types import DNS_STATUS_NAME_ERROR, DNS_STATUS_NO_RECORDS
 
@@ -247,7 +248,7 @@ def judge_reach(result: ProbeResult | None) -> ReachState:
     return ReachState.UNKNOWN
 
 
-def describe_reach(result: ProbeResult | None, *, timeout: float = 0.0) -> str:
+def describe_reach(result: ProbeResult | None, *, timeout: float = HTTPS_TIMEOUT) -> str:
     """Короткое объяснение, почему адрес не открылся."""
     state = judge_reach(result)
     if result is None or state == ReachState.NO_ADDRESS:
