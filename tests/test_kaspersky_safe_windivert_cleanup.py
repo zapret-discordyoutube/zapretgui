@@ -121,6 +121,14 @@ class DriverReleaseKasperskySafeTests(unittest.TestCase):
     драйвер остаётся загруженным на любом пути, где программа его выгружает.
     """
 
+    def setUp(self) -> None:
+        """These scenarios are about the Windows antivirus probe: give them a platform that has it."""
+        from types import SimpleNamespace
+
+        patcher = patch("platforms.current", return_value=SimpleNamespace(has=lambda _capability: True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _release(self, *, kaspersky=False, kaspersky_error=None, engines=()):
         from winws_runtime.engine import winapi
         from winws_runtime.runtime import system_ops

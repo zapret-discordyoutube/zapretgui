@@ -31,5 +31,16 @@ PLATFORM = Platform(
     system_settings=WindowsSystemSettings(),
     engine=WindowsEngine(),
     working_set=WindowsWorkingSet(),
-    capabilities=frozenset({Cap.BFE, Cap.SELF_UPDATE, Cap.WINDOWS_STARTUP_CHECKS, Cap.WORKING_SET}),
+    capabilities=frozenset(
+        {
+            Cap.BFE,
+            Cap.SELF_UPDATE,
+            Cap.WINDOWS_STARTUP_CHECKS,
+            Cap.WORKING_SET,
+            Cap.DEFENDER,
+            Cap.MAX_BLOCKER,
+            Cap.ANTIVIRUS_PROBE,
+            Cap.NETWORK_RESET,
+        }
+    ),
 )

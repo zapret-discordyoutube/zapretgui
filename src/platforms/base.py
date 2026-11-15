@@ -357,6 +357,10 @@ class Cap:
     BFE = "windows_bfe"  # Base Filtering Engine: the Windows service WinDivert depends on
     SELF_UPDATE = "self_update"  # the program replaces itself from a downloaded installer
     WINDOWS_STARTUP_CHECKS = "windows_startup_checks"  # advisories about Windows software and settings at start
+    DEFENDER = "windows_defender"  # the program can switch Windows Defender off and on
+    MAX_BLOCKER = "max_blocker"  # blocking the MAX messenger through Explorer policies
+    ANTIVIRUS_PROBE = "antivirus_probe"  # looking for antivirus programs that disturb the driver (Kaspersky ...)
+    NETWORK_RESET = "windows_network_reset"  # "reset the Windows network stack" quick action
     WORKING_SET = "working_set"  # the system pages out a hidden window's memory and the program can hold it
 
 

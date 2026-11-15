@@ -217,6 +217,10 @@ def _read_bypass_tools() -> tuple[str, ...]:
 
 
 def _read_antivirus() -> str:
+    from platforms import Cap, current as current_platform
+
+    if not current_platform().has(Cap.ANTIVIRUS_PROBE):
+        return ""
     from winws_runtime.health.antivirus_detection import _detect_active_antivirus
 
     return str(_detect_active_antivirus() or "")

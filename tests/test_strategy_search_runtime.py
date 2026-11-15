@@ -182,6 +182,14 @@ class UdpProbeTests(unittest.TestCase):
 
 
 class RealEnvironmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        """These scenarios are about the Windows antivirus probe: give them a platform that has it."""
+        from types import SimpleNamespace
+
+        patcher = patch("platforms.current", return_value=SimpleNamespace(has=lambda _capability: True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def make_env(self, shutdown=None):
         from blockcheck.strategy_search.environment import RealEnvironment
 

@@ -64,6 +64,10 @@ def config_path_value(path: str, root: str) -> str:
 def strategy_pause_seconds() -> float:
     """Пауза между стратегиями: без Kaspersky не нужна, с ним — обязательна."""
     try:
+        from platforms import Cap, current as current_platform
+
+        if not current_platform().has(Cap.ANTIVIRUS_PROBE):
+            return 0.0  # no antivirus probe on this system: nothing slows the driver down
         from utils.antivirus_probe import is_kaspersky_present
 
         if is_kaspersky_present():

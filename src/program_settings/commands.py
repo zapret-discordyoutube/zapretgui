@@ -139,6 +139,16 @@ def set_defender_disabled(
     *,
     status_callback: Callable[[str], None] | None = None,
 ) -> ProgramSettingActionResult:
+    from platforms import Cap, current as current_platform
+
+    if not current_platform().has(Cap.DEFENDER):
+        return ProgramSettingActionResult(
+            level="warning",
+            title="Недоступно в этой системе",
+            content="Этот переключатель работает только в Windows.",
+            revert_checked=None,
+            final_status="",
+        )
     try:
         from windows_features.defender_manager import WindowsDefenderManager
         from windows_features.defender_manager import set_defender_disabled as remember_defender_disabled
@@ -208,6 +218,16 @@ def set_max_block_enabled(
     *,
     status_callback: Callable[[str], None] | None = None,
 ) -> ProgramSettingActionResult:
+    from platforms import Cap, current as current_platform
+
+    if not current_platform().has(Cap.MAX_BLOCKER):
+        return ProgramSettingActionResult(
+            level="warning",
+            title="Недоступно в этой системе",
+            content="Этот переключатель работает только в Windows.",
+            revert_checked=None,
+            final_status="",
+        )
     try:
         from windows_features.max_blocker import MaxBlockerManager
 
