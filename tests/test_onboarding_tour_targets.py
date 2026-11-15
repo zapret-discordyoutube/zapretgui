@@ -247,6 +247,7 @@ NAMES_OUTSIDE_THE_HIGHLIGHT: dict[str, dict[str, str]] = {
     "log_analyzer_source": {"Включить лог-файл (--debug)": "выключатель на главной странице"},
     # ── появляется при настоящем состоянии программы ──
     "dns_now": {"Применять к": "строка адаптеров видна, когда программа нашла сетевые адаптеры"},
+    "dns_now_basic": {"Применять к": "строка адаптеров видна, когда программа нашла сетевые адаптеры"},
     "telegram_hosts": {"Убрать": "так называется кнопка «Прописать» после того, как адреса прописаны"},
     "blockcheck_history": {"Показать все": "кнопка появляется, когда проверок больше шести"},
     "strategy_choice": {"Советуем для этого сервиса": "группа есть, когда стратегия стоит в готовых пресетах"},
@@ -259,6 +260,10 @@ NAMES_OUTSIDE_THE_HIGHLIGHT: dict[str, dict[str, str]] = {
     },
     # ── нарисовано на плитках, отдельных надписей-виджетов нет ──
     "dns_providers": {
+        "Автоматически": "плитка сетки серверов",
+        "Zapret DNS": "рекламная плитка сетки серверов",
+    },
+    "dns_providers_basic": {
         "Автоматически": "плитка сетки серверов",
         "Zapret DNS": "рекламная плитка сетки серверов",
     },
@@ -369,7 +374,10 @@ class TourPointsAtWhatItTalksAboutTests(unittest.TestCase):
             "задумано — тогда запишите название в NAMES_OUTSIDE_THE_HIGHLIGHT с причиной. " + SKILL_HINT,
         )
         self.assertEqual(stale, {}, "Название теперь есть в подсветке — уберите его из NAMES_OUTSIDE_THE_HIGHLIGHT.")
-        unknown_steps = sorted(set(NAMES_OUTSIDE_THE_HIGHLIGHT) - set(self.records))
+        from ui.onboarding.steps import ALL_TOUR_STEPS
+
+        # Both variants of a step ("dns_now" and "dns_now_basic") are known; only this system's one is on screen.
+        unknown_steps = sorted(set(NAMES_OUTSIDE_THE_HIGHLIGHT) - {step.key for step in ALL_TOUR_STEPS})
         self.assertEqual(unknown_steps, [], "В NAMES_OUTSIDE_THE_HIGHLIGHT остались шаги, которых больше нет.")
         for key, names in NAMES_OUTSIDE_THE_HIGHLIGHT.items():
             self.assertEqual(sorted(set(names) - set(step_quotes(key))), [], f"{key}: шаг больше не упоминает это название")

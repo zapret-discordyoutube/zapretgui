@@ -602,6 +602,27 @@ class TourStepCapabilityTests(unittest.TestCase):
             self.assertNotIn("Winsock", text)
         self.assertIn("Winsock", TEXTS["onboarding.step.quick_actions.body"]["ru"])
 
+    def test_the_dns_steps_have_a_text_for_a_system_without_the_built_in_encrypted_dns(self) -> None:
+        from app.ui_texts import TEXTS
+        from platforms import Cap
+        from ui.onboarding.steps import ALL_TOUR_STEPS, tour_steps_for
+
+        with_proxy = [step.key for step in tour_steps_for(self._system(Cap.LOCAL_DNS_PROXY))]
+        without = [step.key for step in tour_steps_for(self._system())]
+        self.assertIn("dns_providers", with_proxy)
+        self.assertNotIn("dns_providers_basic", with_proxy)
+        self.assertIn("dns_providers_basic", without)
+        self.assertNotIn("dns_providers", without)
+        self.assertNotIn("dns_now", without)
+        keys = [step.key for step in ALL_TOUR_STEPS]
+        self.assertEqual(keys.index("dns_providers_basic"), keys.index("dns_providers") + 1)
+        for key in ("dns_now_basic", "dns_providers_basic"):
+            for language in ("ru", "en"):
+                text = TEXTS[f"onboarding.step.{key}.body"][language]
+                self.assertNotIn("Windows", text)
+                self.assertNotIn("dnscrypt", text)
+        self.assertNotIn("(DoH)», серверы", TEXTS["onboarding.step.dns_providers_basic.body"]["ru"])
+
     def test_the_running_tour_is_the_one_of_this_system(self) -> None:
         from platforms import current
         from ui.onboarding.steps import TOUR_STEPS, tour_steps_for

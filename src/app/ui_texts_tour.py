@@ -270,6 +270,50 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "plain addresses, so your provider sees the queries. The server set now is re-applied at once."
         ),
     },
+    "onboarding.step.dns_now_basic.title": {"ru": "Какой DNS сейчас", "en": "Current DNS"},
+    "onboarding.step.dns_now_basic.body": {
+        "ru": (
+            "DNS — служба, которая по имени сайта находит его адрес. Провайдер может подменять её ответы, "
+            "и тогда сайт не открывается, даже если обход работает.\n\n"
+            "Карточка показывает, какой DNS стоит сейчас, а под адресами — кто отвечает на самом деле: "
+            "программа проверяет это сама и предупредит, если вместо выбранного сервера отвечает сеть "
+            "провайдера. В строке «Применять к» отмечаются сетевые адаптеры — обычно это ваш Wi‑Fi или кабель. "
+            "«Замерить скорость» сравнит серверы по времени ответа, «Сбросить кэш DNS» заставит систему забыть "
+            "старые адреса. Адреса ставятся через системную службу имён (NetworkManager или systemd-resolved), "
+            "программа просит у системы пароль только для этого."
+        ),
+        "en": (
+            "DNS is the service that finds a site's address by its name. Your provider may spoof its "
+            "answers, and then a site does not open even when the bypass works.\n\n"
+            "The card shows which DNS is set now and, under the addresses, who really answers: the app "
+            "checks it by itself and warns you if your provider's network answers instead of the chosen "
+            "server. The Apply to row marks the network adapters — usually your Wi‑Fi or cable. Measure "
+            "speed compares servers by response time, Flush DNS cache makes the system forget old addresses. "
+            "The addresses are set through the system name service (NetworkManager or systemd-resolved)."
+        ),
+    },
+    "onboarding.step.dns_providers_basic.title": {"ru": "Выбор сервера", "en": "Choosing a server"},
+    "onboarding.step.dns_providers_basic.body": {
+        "ru": (
+            "Нажмите на плитку — этот DNS сразу встанет на отмеченные адаптеры. «Автоматически» возвращает "
+            "тот, что выдаёт роутер или провайдер. Широкая плитка рядом — «Zapret DNS», свой сервер "
+            "проекта: она ничего не меняет, а открывает сайт сервера.\n\n"
+            "Вкладки над плитками делят серверы на группы. «Популярные» и «Безопасные» — известные публичные "
+            "серверы. «Малоизвестные» реже попадают под блокировки. Не знаете, что выбрать, — возьмите Quad9 "
+            "из группы «Безопасные».\n\n"
+            "Встроенного шифрованного DNS (DoH) в Linux-версии нет: серверы ставятся обычными адресами, и "
+            "провайдер видит запросы. Шифрованные серверы, которые принимают только DoH, здесь не показываются."
+        ),
+        "en": (
+            "Click a tile and that DNS is set on the marked adapters right away. Automatic brings back "
+            "the one your router or provider gives. The wide tile next to it is Zapret DNS, the project's "
+            "own server: it changes nothing and opens the server's site.\n\n"
+            "The tabs above the tiles split servers into groups. Popular and Secure are well-known public "
+            "servers. Lesser-known ones are blocked less often. If unsure, take Quad9 from Secure.\n\n"
+            "The Linux version has no built-in encrypted DNS (DoH): servers are set by plain addresses, so "
+            "your provider sees the queries. Encrypted servers that accept only DoH are not shown here."
+        ),
+    },
     "onboarding.step.dns_ai.title": {"ru": "DNS для ИИ-сервисов", "en": "DNS for AI services"},
     "onboarding.step.dns_ai.body": {
         "ru": (

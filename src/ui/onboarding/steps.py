@@ -369,8 +369,11 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
     *_chapter(
         "tools",
         TourStep("tools", _nav_group("system")),
-        TourStep("dns_now", _page_target("now"), page="dns"),
-        TourStep("dns_providers", _page_target("providers"), page="dns"),
+        # Two versions of these steps: the full ones talk about the built-in encrypted DNS and about Windows.
+        TourStep("dns_now", _page_target("now"), page="dns", requires=Cap.LOCAL_DNS_PROXY),
+        TourStep("dns_now_basic", _page_target("now"), page="dns", excludes=Cap.LOCAL_DNS_PROXY),
+        TourStep("dns_providers", _page_target("providers"), page="dns", requires=Cap.LOCAL_DNS_PROXY),
+        TourStep("dns_providers_basic", _page_target("providers"), page="dns", excludes=Cap.LOCAL_DNS_PROXY),
         TourStep("dns_ai", _page_target("ai"), page="dns", page_state="ai"),
         TourStep("dns_custom", _page_target("form"), page="custom_dns"),
         TourStep("geo_blocks", _nav_items(PageName.NETWORK, PageName.HOSTS)),
