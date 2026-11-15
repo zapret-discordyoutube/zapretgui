@@ -11,6 +11,8 @@ from collections.abc import Callable
 
 from PyQt6.QtCore import QObject, Qt, QTimer
 
+from utils.qt_signal_links import SignalLinks
+
 try:
     from log.log import log
 except Exception:  # pragma: no cover
@@ -37,7 +39,7 @@ class LinuxSystemThemeWatcher(QObject):
         self._app = app
         self._window = window
         self._apply_theme = apply_theme
-        self._connected = False
+        self._links = SignalLinks()
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(max(0, int(debounce_ms)))
@@ -45,11 +47,10 @@ class LinuxSystemThemeWatcher(QObject):
 
     def install(self) -> bool:
         try:
-            self._app.styleHints().colorSchemeChanged.connect(self._on_scheme_changed)
+            self._links.connect(self._app.styleHints().colorSchemeChanged, self._on_scheme_changed)
         except Exception as exc:  # Qt older than 6.5: no signal, the theme is read once at start
             log(f"Слежение за темой рабочего стола недоступно: {exc}", "DEBUG")
             return False
-        self._connected = True
         return True
 
     def _on_scheme_changed(self, *_args) -> None:
@@ -65,12 +66,7 @@ class LinuxSystemThemeWatcher(QObject):
 
     def cleanup(self) -> None:
         self._timer.stop()
-        if self._connected:
-            try:
-                self._app.styleHints().colorSchemeChanged.disconnect(self._on_scheme_changed)
-            except Exception:
-                pass
-            self._connected = False
+        self._links.disconnect_all()
 
 
 def install_system_theme_watcher(app, window) -> LinuxSystemThemeWatcher | None:
