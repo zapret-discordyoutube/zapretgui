@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from platforms import current as current_platform
+from platforms import Cap, current as current_platform
 
 from settings.mode import (
     ALL_WINWS_EXE_NAMES,
@@ -51,9 +51,26 @@ def query_process_start_time(pid: int) -> float:
     return current_platform().processes.start_time(int(pid))
 
 
+def _engine_owned_pids() -> list[int]:
+    """Where the engine is not a program the process list names (Linux: nfqws2 behind the root helper) the engine
+    interface tells which process is ours. Windows keeps the scan by name and path."""
+    platform = current_platform()
+    if platform.has(Cap.DIRECT_ENGINE_PROCESS):
+        return []
+    try:
+        return [int(pid) for pid in platform.engine.running_pids()]
+    except Exception:
+        return []
+
+
 def find_expected_winws_processes(expected_exe_path: str) -> list[WinwsProcessRecord]:
     normalized_expected_path = _normalize_path(expected_exe_path)
     expected_name = os.path.basename(normalized_expected_path).strip().lower()
+
+    if not current_platform().has(Cap.DIRECT_ENGINE_PROCESS):
+        if expected_name != EXE_NAME_WINWS2:
+            return []
+        return [WinwsProcessRecord(pid=pid, name=EXE_NAME_WINWS2, exe_path=normalized_expected_path) for pid in sorted(_engine_owned_pids())]
 
     if expected_name not in _WINWS_NAME_SET or not normalized_expected_path:
         return []
@@ -130,6 +147,9 @@ def scan_winws_processes() -> WinwsProcessScan:
     find_foreign_winws_processes(), но без трёх полных снимков подряд:
     монитор процессов зовёт это каждые 2 секунды всё время работы программы.
     """
+    if not current_platform().has(Cap.DIRECT_ENGINE_PROCESS):
+        owned = sorted(_engine_owned_pids())
+        return WinwsProcessScan(canonical_pids={EXE_NAME_WINWS2: owned} if owned else {}, foreign_paths={})
     expected_paths = get_expected_winws_paths()
     existing_expected = {
         name: path for name, path in expected_paths.items() if os.path.exists(path)

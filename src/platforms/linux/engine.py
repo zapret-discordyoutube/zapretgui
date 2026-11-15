@@ -33,3 +33,14 @@ class LinuxEngine:
             runner, self._runner = self._runner, None
         if runner is not None:
             runner.stop_background_watchers()
+
+    def running_pids(self) -> list[int]:
+        """The helper runs one engine; the process scan by name does not know its program (nfqws2 is not winws2)."""
+        from platforms.linux.helper.client import HelperClient, HelperUnavailable
+
+        try:
+            status = HelperClient().status()
+        except (HelperUnavailable, OSError):
+            return []
+        pid = status.get("pid")
+        return [int(pid)] if status.get("running") and isinstance(pid, int) else []

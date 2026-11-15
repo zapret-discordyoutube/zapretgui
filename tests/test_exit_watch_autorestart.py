@@ -29,6 +29,13 @@ if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
 
+def _windows_like_platform():
+    from platforms import Cap
+    from platforms.stub import make_platform
+
+    return make_platform(capabilities=frozenset({Cap.DIRECT_ENGINE_PROCESS}))
+
+
 class _LogRecorder:
     def __init__(self) -> None:
         self.records: list[tuple[str, str]] = []
@@ -283,6 +290,8 @@ class ForeignWinwsDetectionTests(unittest.TestCase):
             # Пути в тесте Windows-овские: на Linux basename их бы не разобрал.
             patch.object(process_probe, "_normalize_path", side_effect=lambda path: path),
             patch.object(process_probe.os.path, "basename", ntpath.basename),
+            # The test describes the Windows scan by name and path.
+            patch.object(process_probe, "current_platform", return_value=_windows_like_platform()),
         ):
             scan = process_probe.scan_winws_processes()
             self.assertEqual(len(snapshots), 1)

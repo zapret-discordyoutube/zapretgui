@@ -430,6 +430,10 @@ class Engine(Protocol):
     def invalidate_runner(self) -> None:
         """Forgets the runner without waiting (its background watchers are stopped)."""
 
+    def running_pids(self) -> list[int]:
+        """Process ids of the engine that the scan of the process list by program name cannot find. Windows: none
+        (its engine is found by name and path). Linux: the engine the root helper runs for this person."""
+
 
 class Cap:
     """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.

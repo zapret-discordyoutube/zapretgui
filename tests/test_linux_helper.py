@@ -443,3 +443,48 @@ def test_the_engine_of_a_root_caller_runs_as_nobody(world) -> None:
     root = Caller(uid=0, home="/root", gid=0)
     assert world.service.start(GOOD_ARGS, root)["ok"]
     assert "--uid=65534:65534" in world.recorder.spawned[0]
+
+
+# -- the engine the helper runs is found through the engine interface, not by a program name -------------------
+
+
+def test_the_linux_engine_reports_the_helpers_engine_pid(monkeypatch) -> None:
+    from platforms.linux.engine import LinuxEngine
+
+    class Client:
+        def __init__(self, answer):
+            self.answer = answer
+
+        def status(self):
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+    for answer, expected in (
+        ({"ok": True, "running": True, "pid": 4321}, [4321]),
+        ({"ok": True, "running": False}, []),
+        (helper_client.HelperUnavailable("not running"), []),
+    ):
+        monkeypatch.setattr(helper_client, "HelperClient", lambda answer=answer: Client(answer))
+        assert LinuxEngine().running_pids() == expected
+
+
+def test_the_process_scan_asks_the_engine_where_the_engine_is_not_found_by_name(monkeypatch) -> None:
+    """Found on a real Linux desktop: the tray said "stopped" while nfqws2 ran, because the scan looked for winws2.exe."""
+    from platforms import Cap
+    from platforms.stub import make_platform
+    from winws_runtime.runtime import process_probe
+
+    class Engine:
+        def running_pids(self):
+            return [4321]
+
+    monkeypatch.setattr(process_probe, "current_platform", lambda: make_platform(engine=Engine(), capabilities=frozenset()))
+    assert process_probe.scan_winws_processes().canonical_pids == {"winws2.exe": [4321]}
+    assert [r.pid for r in process_probe.find_expected_winws_processes("/opt/zapretgui/exe/winws2.exe")] == [4321]
+    assert process_probe.find_expected_winws_processes("/opt/zapretgui/exe/winws.exe") == []
+    assert process_probe.get_canonical_winws_process_pids() == {"winws2.exe": [4321]}
+    # Windows keeps the scan by name: the engine interface is not asked
+    monkeypatch.setattr(process_probe, "current_platform", lambda: make_platform(engine=Engine(), capabilities=frozenset({Cap.DIRECT_ENGINE_PROCESS})))
+    monkeypatch.setattr(process_probe, "_iter_winws_process_entries", lambda: [])
+    assert process_probe.scan_winws_processes().canonical_pids == {}

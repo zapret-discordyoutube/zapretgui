@@ -28,3 +28,6 @@ class FactoryEngine:
         from winws_runtime.runners import runner_factory
 
         runner_factory.invalidate_strategy_runner()
+
+    def running_pids(self) -> list[int]:
+        return []  # the engine is found by its program name and path (winws_runtime.runtime.process_probe)
