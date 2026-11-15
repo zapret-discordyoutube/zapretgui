@@ -10,6 +10,7 @@ import time
 from config.build_info import APP_VERSION
 
 from log.log import log
+from platforms import MessageKind, current as current_platform
 
 from startup.admin_check import is_admin
 from utils.exit_steps import register_exit_step
@@ -70,7 +71,7 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
     args = list(argv or sys.argv)
 
     if "--version" in args:
-        ctypes.windll.user32.MessageBoxW(None, APP_VERSION, "Zapret – версия", 0x40)
+        current_platform().messages.show("Zapret – версия", APP_VERSION, MessageKind.INFO)
         sys.exit(0)
 
     if "--update" in args and len(args) > 3:
@@ -104,11 +105,10 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
             1,
         )
         if int(shell_exec_result) <= 32:
-            ctypes.windll.user32.MessageBoxW(
-                None,
-                "Не удалось запросить права администратора.",
+            current_platform().messages.show(
                 "Zapret",
-                0x10,
+                "Не удалось запросить права администратора.",
+                MessageKind.ERROR,
             )
         sys.exit(0)
 
@@ -126,11 +126,10 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
         elif start_in_tray:
             log("Второй экземпляр из автозапуска — выходим молча", "INFO")
         else:
-            ctypes.windll.user32.MessageBoxW(
-                None,
-                "Экземпляр Zapret уже запущен, но не удалось показать окно!",
+            current_platform().messages.show(
                 "Zapret",
-                0x40,
+                "Экземпляр Zapret уже запущен, но не удалось показать окно!",
+                MessageKind.INFO,
             )
         sys.exit(0)
 

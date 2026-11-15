@@ -29,6 +29,7 @@ from config.runtime_layout import (
     require_packaged_application,
     require_valid_install_layout,
 )
+from platforms import MessageKind, current as current_platform
 from startup.windows_version_guard import WINDOWS_VERSION_ERROR_TITLE, current_windows_support
 
 
@@ -49,12 +50,7 @@ class LaunchBlocked(Exception):
 
 
 def show_launch_error(title: str, message: str) -> None:
-    try:
-        import ctypes
-
-        ctypes.windll.user32.MessageBoxW(0, message, title, 0x10)
-    except Exception:
-        print(f"{title}\n\n{message}", file=sys.stderr)
+    current_platform().messages.show(title, message, MessageKind.ERROR)
 
 
 def _check_launch() -> None:

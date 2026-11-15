@@ -322,8 +322,6 @@ def _install_non_transient_scrollbars_style(app: QApplication) -> bool:
 
 
 def application_bootstrap() -> QApplication:
-    import ctypes
-
     t_runtime = _time.perf_counter()
     app = ensure_qt_runtime()
     emit_startup_metric(
@@ -349,7 +347,9 @@ def application_bootstrap() -> QApplication:
             f"{(_time.perf_counter() - t_crash) * 1000:.0f}ms",
         )
     except Exception as exc:
-        ctypes.windll.user32.MessageBoxW(None, f"Ошибка инициализации Qt: {exc}", "Zapret", 0x10)
+        from platforms import MessageKind, current as current_platform
+
+        current_platform().messages.show("Zapret", f"Ошибка инициализации Qt: {exc}", MessageKind.ERROR)
 
     t_theme = _time.perf_counter()
     from qfluentwidgets import Theme, setTheme

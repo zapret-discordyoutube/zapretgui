@@ -6,7 +6,7 @@ Numbers are lines that use Windows-only calls (`windll`, `winreg`, `powershell`,
 
 | Interface | Files | Lines |
 |---|---:|---:|
-| launch | 5 | 17 |
+| launch | 3 | 12 |
 | privileges | 7 | 34 |
 | single_instance | 1 | 1 |
 | process | 7 | 129 |
@@ -18,16 +18,14 @@ Numbers are lines that use Windows-only calls (`windll`, `winreg`, `powershell`,
 | updater_install | 10 | 64 |
 | engine | 5 | 24 |
 | integrations | 4 | 66 |
-| **total** | **74** | **685** |
+| **total** | **72** | **680** |
 
 ## launch (first start of the program)
 
 The launch gate, message boxes before Qt exists, UAC relaunch, process start time.
 
 - `src/main/process_start_time.py` — 10
-- `src/main/shell.py` — 4
-- `src/main/launch_gate.py` — 1
-- `src/main/qt_runtime.py` — 1
+- `src/main/shell.py` — 1
 - `src/zapret_update/apply.py` — 1
 
 ## privileges (admin / root, elevation)
@@ -154,11 +152,16 @@ Defender, MAX blocker, BFE firewall service, antivirus start checks. Hidden on L
 - `src/startup/bfe_util.py` — 10
 - `src/windows_features/defender_manager.py` — 4
 
+## Progress (hand-maintained)
+
+- 2026-11-15 `launch`, part 1: message boxes (`MessageBoxW`) moved behind `platforms.current().messages` (backends: `platforms/windows`, `platforms/linux` with zenity/kdialog, `platforms/stub`). Done in `main/launch_gate.py`, `main/shell.py`, `main/qt_runtime.py`. Left in the launch group: `process_start_time` (process start time), `shell.py` (admin relaunch, goes with `privileges`), `zapret_update/apply.py` (standalone updater part, goes with `updater_install`).
+
+
 ## Found while probing the first start on Linux (2026-11-15)
 
 Run: the app past its launch gate, under Xvfb (a virtual screen) on CT 201, with `ctypes.windll` replaced by a fake.
 
-1. The program refuses to start from source. Two separate checks do it: `main/launch_gate.py` (`require_packaged_application`, install layout `_internal\Zapret.exe`, Windows version, install folder) and a second `require_packaged_application()` in `main/entry.py`. A platform layer needs one launch description, not two copies.
+1. The program refuses to start from source, on purpose, in two places: the outer gate `main/launch_gate.py` (`require_packaged_application`, install layout `_internal\Zapret.exe`, Windows version, install folder) and an inner guard `require_packaged_application()` in `main/entry.py` that stops a direct call of `main.entry.main()` (pinned by `tests/test_runtime_layout.py`). They are not duplicates. A Linux development run still needs a clear, explicit way past both, to be decided together with the Linux launch description.
 2. Next wall: `main/shell.py` `shell_bootstrap` calls `ctypes.windll.shell32.ShellExecuteW` (relaunch as administrator).
 3. With those skipped and `windll` faked, the main window is built and shown (`first showEvent`, about 290 ms) under Xvfb. The qfluentwidgets window does not need Windows to appear. The process then crashed with a segmentation fault; the cause is not analysed yet and may come from the fake, not from the app.
 4. The source tree has no `presets/` folder (they live in the private repository / build), so the log warns "Пресеты не найдены". A Linux dev run needs them copied in or pointed to.
