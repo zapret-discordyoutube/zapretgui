@@ -147,9 +147,9 @@ def _safe(read: Callable[[], object]):
 
 
 def _read_is_admin() -> bool:
-    import ctypes
+    from platforms import current as current_platform
 
-    return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    return current_platform().privileges.is_elevated()
 
 
 def _read_windows_build() -> int:

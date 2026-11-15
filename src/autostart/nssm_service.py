@@ -245,7 +245,9 @@ def create_service_with_nssm(
                     from ctypes import wintypes
                     
                     # Проверяем, что мы администратор
-                    is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+                    from platforms import current as current_platform
+
+                    is_admin = current_platform().privileges.is_elevated()
                     log(f"  📋 IsUserAnAdmin: {is_admin}", "WARNING")
                     
                     advapi32 = ctypes.windll.advapi32

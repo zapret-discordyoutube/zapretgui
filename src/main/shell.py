@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import ctypes
 import os
 import shutil
-import subprocess
 import sys
 import time
 
@@ -12,7 +10,6 @@ from config.build_info import APP_VERSION
 from log.log import log
 from platforms import MessageKind, current as current_platform
 
-from startup.admin_check import is_admin
 from utils.exit_steps import register_exit_step
 from utils.subproc import run_hidden
 
@@ -94,17 +91,9 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
     if _update_is_being_installed():
         sys.exit(0)
 
-    if not is_admin():
-        params = subprocess.list2cmdline(list(args[1:]))
-        shell_exec_result = ctypes.windll.shell32.ShellExecuteW(
-            None,
-            "runas",
-            sys.executable,
-            params,
-            None,
-            1,
-        )
-        if int(shell_exec_result) <= 32:
+    privileges = current_platform().privileges
+    if privileges.gui_needs_elevation and not privileges.is_elevated():
+        if not privileges.relaunch_elevated(sys.executable, args[1:]):
             current_platform().messages.show(
                 "Zapret",
                 "Не удалось запросить права администратора.",
@@ -112,16 +101,10 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
             )
         sys.exit(0)
 
-    from startup.single_instance import (
-        create_mutex,
-        create_show_event,
-        release_mutex,
-        signal_show_event,
-    )
-
-    mutex_handle, already_running = create_mutex("ZapretSingleInstance")
-    if already_running:
-        if signal_show_event():
+    single_instance = current_platform().single_instance
+    instance_lock = single_instance.acquire("ZapretSingleInstance")
+    if instance_lock.already_running:
+        if single_instance.signal_running_instance():
             log("Существующему экземпляру послан сигнал показать окно", "INFO")
         elif start_in_tray:
             log("Второй экземпляр из автозапуска — выходим молча", "INFO")
@@ -135,9 +118,9 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
 
     register_exit_step(
         "освобождение мьютекса единственного экземпляра",
-        lambda: release_mutex(mutex_handle),
+        instance_lock.release,
     )
     # Событие создаётся до инициализации Qt: второй экземпляр, запущенный
     # во время загрузки первого, доставит сигнал без потерь.
-    create_show_event()
+    single_instance.create_show_signal()
     return bool(start_in_tray)

@@ -21,12 +21,9 @@ class ProgramSettingActionResult:
 
 
 def is_user_admin() -> bool:
-    try:
-        import ctypes
+    from platforms import current as current_platform
 
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
-        return False
+    return current_platform().privileges.is_elevated()
 
 
 def is_auto_dpi_enabled() -> bool:

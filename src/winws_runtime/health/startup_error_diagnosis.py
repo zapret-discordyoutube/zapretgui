@@ -41,7 +41,6 @@ def diagnose_startup_error(error: Exception, exe_path: str = None) -> str:
     Returns:
         str: Понятное сообщение об ошибке с рекомендациями
     """
-    import ctypes
 
     error_str = str(error)
     error_code = getattr(error, 'winerror', None) or getattr(error, 'errno', None)
@@ -56,7 +55,9 @@ def diagnose_startup_error(error: Exception, exe_path: str = None) -> str:
 
         # Проверка 1: Права администратора
         try:
-            is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+            from platforms import current as current_platform
+
+            is_admin = current_platform().privileges.is_elevated()
             if not is_admin:
                 diagnostics.append("❌ Причина: Программа запущена БЕЗ прав администратора")
                 diagnostics.append("   Решение: Закройте программу и запустите от имени администратора")

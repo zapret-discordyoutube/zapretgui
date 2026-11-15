@@ -284,8 +284,9 @@ def _handle_invalid_image_hash(exit_code: int, stderr: str) -> WinDivertDiagnosi
 
 def _handle_access_denied(exit_code: int, stderr: str) -> WinDivertDiagnosis:
     try:
-        import ctypes
-        if not ctypes.windll.shell32.IsUserAnAdmin():
+        from platforms import current as current_platform
+
+        if not current_platform().privileges.is_elevated():
             return WinDivertDiagnosis(
                 cause="Программа запущена без прав администратора",
                 solution="Запустите программу от имени администратора",

@@ -6,26 +6,25 @@ Numbers are lines that use Windows-only calls (`windll`, `winreg`, `powershell`,
 
 | Interface | Files | Lines |
 |---|---:|---:|
-| launch | 3 | 12 |
-| privileges | 7 | 34 |
-| single_instance | 1 | 1 |
+| launch | 2 | 11 |
+| privileges | 3 | 24 |
+| single_instance | 0 | 0 |
 | process | 7 | 129 |
 | netprobe | 8 | 78 |
-| autostart and services | 7 | 70 |
+| autostart and services | 7 | 69 |
 | theme_and_window | 13 | 87 |
 | tray | 3 | 92 |
 | associations | 4 | 23 |
 | updater_install | 10 | 64 |
-| engine | 5 | 24 |
-| integrations | 4 | 66 |
-| **total** | **72** | **680** |
+| engine | 5 | 23 |
+| integrations | 4 | 65 |
+| **total** | **66** | **665** |
 
 ## launch (first start of the program)
 
 The launch gate, message boxes before Qt exists, UAC relaunch, process start time.
 
 - `src/main/process_start_time.py` — 10
-- `src/main/shell.py` — 1
 - `src/zapret_update/apply.py` — 1
 
 ## privileges (admin / root, elevation)
@@ -33,18 +32,13 @@ The launch gate, message boxes before Qt exists, UAC relaunch, process start tim
 `IsUserAnAdmin`, relaunch as administrator, `runas`. Linux: root check, polkit, helper service.
 
 - `src/startup/admin_check_debug.py` — 19
-- `src/startup/admin_check.py` — 6
-- `src/diagnostics/system_state.py` — 5
-- `src/program_settings/commands.py` — 1
-- `src/winws_runtime/health/process_monitor.py` — 1
-- `src/winws_runtime/health/startup_error_diagnosis.py` — 1
+- `src/diagnostics/system_state.py` — 4
 - `src/hosts/commands.py` — 1
 
 ## single_instance
 
 Mutex so only one copy runs. Linux: lock file or D-Bus name.
 
-- `src/startup/single_instance.py` — 1
 
 ## process (probe, kill, start, memory)
 
@@ -76,8 +70,8 @@ ICMP ping, HTTP probe, DNS query, TCP info, adapter addresses through Windows DL
 Scheduled task, Windows service (NSSM, `sc.exe`), startup shortcut. Linux: systemd unit, XDG autostart.
 
 - `src/autostart/service_api.py` — 37
-- `src/autostart/nssm_service.py` — 8
 - `src/utils/winapi_service_types.py` — 8
+- `src/autostart/nssm_service.py` — 7
 - `src/autostart/scheduled_task_api.py` — 6
 - `src/dns/local_proxy_windows.py` — 5
 - `src/zapret_update/share_service.py` — 3
@@ -139,7 +133,7 @@ WinDivert driver, engine process control, exit diagnosis, system dependencies. L
 
 - `src/winws_runtime/health/windows_system_dependencies.py` — 8
 - `src/winws_runtime/engine/winapi.py` — 7
-- `src/winws_runtime/health/winws_exit_diagnosis.py` — 6
+- `src/winws_runtime/health/winws_exit_diagnosis.py` — 5
 - `src/winws_runtime/runtime/system_ops.py` — 2
 - `src/winws_runtime/health/windivert_auto_fix.py` — 1
 
@@ -150,18 +144,19 @@ Defender, MAX blocker, BFE firewall service, antivirus start checks. Hidden on L
 - `src/startup/check_start.py` — 31
 - `src/windows_features/max_blocker.py` — 21
 - `src/startup/bfe_util.py` — 10
-- `src/windows_features/defender_manager.py` — 4
+- `src/windows_features/defender_manager.py` — 3
 
 ## Progress (hand-maintained)
 
 - 2026-11-15 `launch`, part 1: message boxes (`MessageBoxW`) moved behind `platforms.current().messages` (backends: `platforms/windows`, `platforms/linux` with zenity/kdialog, `platforms/stub`). Done in `main/launch_gate.py`, `main/shell.py`, `main/qt_runtime.py`. Left in the launch group: `process_start_time` (process start time), `shell.py` (admin relaunch, goes with `privileges`), `zapret_update/apply.py` (standalone updater part, goes with `updater_install`).
+- 2026-11-15 `privileges` and `single_instance`: `platforms.current().privileges` (`is_elevated`, `relaunch_elevated`, `gui_needs_elevation`: true on Windows, false on Linux because a root helper service does the privileged work) and `platforms.current().single_instance` (Windows: mutex + event; Linux: flock lock file + Unix socket for "show the window"). `startup/admin_check.py` (its two restart helpers had no callers) and `startup/single_instance.py` are deleted. `IsUserAnAdmin` call sites in `diagnostics/system_state`, `program_settings/commands`, `winws_runtime/health/*`, `windows_features/defender_manager` and `autostart/nssm_service` now ask the platform. Left in the privileges group: `startup/admin_check_debug.py` (a Windows-only diagnostic, goes with `diagnostics`) and `hosts/commands.py` (`runas notepad` to edit the hosts file; goes with the Linux hosts-editor work in phase 4).
 
 
 ## Found while probing the first start on Linux (2026-11-15)
 
 Run: the app past its launch gate, under Xvfb (a virtual screen) on CT 201, with `ctypes.windll` replaced by a fake.
 
-1. The program refuses to start from source, on purpose, in two places: the outer gate `main/launch_gate.py` (`require_packaged_application`, install layout `_internal\Zapret.exe`, Windows version, install folder) and an inner guard `require_packaged_application()` in `main/entry.py` that stops a direct call of `main.entry.main()` (pinned by `tests/test_runtime_layout.py`). They are not duplicates. A Linux development run still needs a clear, explicit way past both, to be decided together with the Linux launch description.
+1. The program refuses to start from source. Two separate checks do it: `main/launch_gate.py` (`require_packaged_application`, install layout `_internal\\Zapret.exe`, Windows version, install folder) and a second `require_packaged_application()` in `main/entry.py`. A platform layer needs one launch description, not two copies.
 2. Next wall: `main/shell.py` `shell_bootstrap` calls `ctypes.windll.shell32.ShellExecuteW` (relaunch as administrator).
 3. With those skipped and `windll` faked, the main window is built and shown (`first showEvent`, about 290 ms) under Xvfb. The qfluentwidgets window does not need Windows to appear. The process then crashed with a segmentation fault; the cause is not analysed yet and may come from the fake, not from the app.
 4. The source tree has no `presets/` folder (they live in the private repository / build), so the log warns "Пресеты не найдены". A Linux dev run needs them copied in or pointed to.

@@ -73,10 +73,13 @@ class ShowWindowBridgeTests(unittest.TestCase):
         window = SimpleNamespace(visual_state=SimpleNamespace(tray_manager=tray_manager))
         bridge = ShowWindowBridge(window)
 
+        single_instance = Mock()
+        single_instance.start_show_watcher.return_value = Mock()
+        start_watcher = single_instance.start_show_watcher
         with patch(
-            "startup.show_window_bridge.start_show_event_watcher",
-            return_value=Mock(),
-        ) as start_watcher:
+            "startup.show_window_bridge.current_platform",
+            return_value=SimpleNamespace(single_instance=single_instance),
+        ):
             self.assertTrue(bridge.start())
 
         start_watcher.assert_called_once()
@@ -91,9 +94,11 @@ class ShowWindowBridgeTests(unittest.TestCase):
         window = SimpleNamespace(visual_state=SimpleNamespace(tray_manager=Mock()))
         bridge = ShowWindowBridge(window)
 
+        single_instance = Mock()
+        single_instance.start_show_watcher.return_value = None
         with patch(
-            "startup.show_window_bridge.start_show_event_watcher",
-            return_value=None,
+            "startup.show_window_bridge.current_platform",
+            return_value=SimpleNamespace(single_instance=single_instance),
         ):
             self.assertFalse(bridge.start())
 

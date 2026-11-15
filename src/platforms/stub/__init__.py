@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from platforms.base import MessageKind, Platform, print_to_stderr
+import threading
+from typing import Callable, Sequence
+
+from platforms.base import InstanceLock, MessageKind, Platform, print_to_stderr
 
 
 class _StderrMessageBox:
@@ -10,4 +13,35 @@ class _StderrMessageBox:
         print_to_stderr(title, message)
 
 
-PLATFORM = Platform(name="stub", messages=_StderrMessageBox())
+class _NoPrivileges:
+    gui_needs_elevation = False
+
+    def is_elevated(self) -> bool:
+        return False
+
+    def relaunch_elevated(self, executable: str, args: Sequence[str]) -> bool:
+        return False
+
+
+class _NoSingleInstance:
+    def acquire(self, name: str) -> InstanceLock:
+        return InstanceLock(already_running=False)
+
+    def create_show_signal(self) -> bool:
+        return False
+
+    def signal_running_instance(self) -> bool:
+        return False
+
+    def start_show_watcher(
+        self, callback: Callable[[], None], *, wait_fn: Callable[[], int] | None = None
+    ) -> threading.Thread | None:
+        return None
+
+
+PLATFORM = Platform(
+    name="stub",
+    messages=_StderrMessageBox(),
+    privileges=_NoPrivileges(),
+    single_instance=_NoSingleInstance(),
+)

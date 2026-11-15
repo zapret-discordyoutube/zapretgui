@@ -13,8 +13,9 @@ before Qt, the logger or any other part of the program exists.
 from __future__ import annotations
 
 import enum
+import threading
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol, Sequence
 
 
 class MessageKind(enum.Enum):
@@ -30,10 +31,90 @@ class MessageBox(Protocol):
         """Shows the message and returns after it is closed. Never raises."""
 
 
+class Privileges(Protocol):
+    """Administrator / root rights of the running program."""
+
+    @property
+    def gui_needs_elevation(self) -> bool:
+        """True when the window itself must run elevated (Windows: the engine needs it).
+
+        On Linux the window runs as a normal user; a root helper service does the
+        privileged work, so the program never asks to restart itself as root.
+        """
+
+    def is_elevated(self) -> bool:
+        """True when the process runs as administrator / root. Never raises."""
+
+    def relaunch_elevated(self, executable: str, args: Sequence[str]) -> bool:
+        """Asks the system to start ``executable args`` with higher rights.
+
+        True when the request was accepted (the caller then exits); False when it
+        was refused or is not possible on this system.
+        """
+
+
+WAIT_SIGNALLED = 0
+"""What a ``wait_fn`` returns when the "show window" signal arrived. Any other value ends the watcher."""
+
+
+@dataclass(slots=True)
+class InstanceLock:
+    """Result of ``SingleInstance.acquire``. Keep it until the program exits."""
+
+    already_running: bool
+    _release: Callable[[], None] = lambda: None
+
+    def release(self) -> None:
+        self._release()
+
+
+class SingleInstance(Protocol):
+    """Only one copy of the program runs; a second copy asks the first to show its window.
+
+    Order at start: ``acquire`` -> (second copy: ``signal_running_instance`` and exit) ->
+    first copy: ``create_show_signal`` before Qt starts, so a signal sent while the
+    first copy is still loading is not lost -> later ``start_show_watcher``.
+    """
+
+    def acquire(self, name: str) -> InstanceLock:
+        """Takes the single-instance lock. If the system refuses, returns a lock that is not "already running"."""
+
+    def create_show_signal(self) -> bool:
+        """First copy: makes the "show window" signal receivable. False if impossible."""
+
+    def signal_running_instance(self) -> bool:
+        """Second copy: asks the running copy to show its window. False when nobody received it."""
+
+    def start_show_watcher(
+        self,
+        callback: Callable[[], None],
+        *,
+        wait_fn: Callable[[], int] | None = None,
+    ) -> threading.Thread | None:
+        """Starts a daemon thread calling ``callback()`` for every signal; None if the signal was never created.
+
+        ``wait_fn`` is a test seam replacing the real wait.
+        """
+
+
+def run_show_watcher(callback: Callable[[], None], wait_fn: Callable[[], int]) -> threading.Thread:
+    """The loop every backend shares: wait, call back, repeat until the wait fails."""
+
+    def _watch() -> None:
+        while wait_fn() == WAIT_SIGNALLED:
+            callback()
+
+    thread = threading.Thread(target=_watch, daemon=True, name="show-event-watcher")
+    thread.start()
+    return thread
+
+
 @dataclass(frozen=True, slots=True)
 class Platform:
     name: str
     messages: MessageBox
+    privileges: Privileges
+    single_instance: SingleInstance
 
 
 def print_to_stderr(title: str, message: str) -> None:

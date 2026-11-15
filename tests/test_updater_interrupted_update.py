@@ -316,21 +316,30 @@ class InstallationInProgressTests(unittest.TestCase):
 
 class StartupDuringInstallationTests(unittest.TestCase):
     def _bootstrap(self, record):
+        from unittest.mock import MagicMock
+
         from main import shell
+        from platforms.base import InstanceLock, Platform
+
+        privileges = MagicMock(gui_needs_elevation=True)
+        privileges.is_elevated.return_value = True
+        single_instance = MagicMock()
+        single_instance.acquire.return_value = InstanceLock(already_running=False)
+        fake_platform = Platform(
+            name="fake", messages=MagicMock(), privileges=privileges, single_instance=single_instance
+        )
 
         with (
             patch.object(interrupted, "installation_in_progress", return_value=record),
-            patch.object(shell, "is_admin", return_value=True) as is_admin,
+            patch.object(shell, "current_platform", return_value=fake_platform),
             patch.object(shell, "log"),
-            patch("startup.single_instance.create_mutex", return_value=(1, False)) as create_mutex,
-            patch("startup.single_instance.create_show_event"),
             patch.object(shell, "register_exit_step"),
         ):
             try:
                 result = shell.shell_bootstrap(["zapret.exe"])
             except SystemExit as exc:
                 result = exc
-        return result, is_admin, create_mutex
+        return result, privileges.is_elevated, single_instance.acquire
 
     def test_launch_during_installation_steps_aside_before_anything_else(self) -> None:
         result, is_admin, create_mutex = self._bootstrap(_record(state=HandoffState.LAUNCHED))

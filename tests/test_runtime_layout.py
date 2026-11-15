@@ -225,7 +225,7 @@ class RuntimeLayoutTests(unittest.TestCase):
         )
 
     def test_runtime_helpers_do_not_fall_back_to_source_launch(self) -> None:
-        admin_source = (SRC_ROOT / "startup" / "admin_check.py").read_text(encoding="utf-8")
+        admin_source = (SRC_ROOT / "platforms" / "windows" / "privileges.py").read_text(encoding="utf-8")
         kaspersky_source = (SRC_ROOT / "startup" / "kaspersky.py").read_text(encoding="utf-8")
 
         self.assertNotIn("sys.argv[0]", admin_source)

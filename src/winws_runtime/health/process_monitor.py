@@ -198,8 +198,9 @@ def check_common_crash_causes(process_name: str = EXE_NAME_WINWS1) -> Optional[s
 
     # ✅ ПРОВЕРКА 1: Права администратора
     try:
-        import ctypes
-        if not ctypes.windll.shell32.IsUserAnAdmin():
+        from platforms import current as current_platform
+
+        if not current_platform().privileges.is_elevated():
             suggestions.append("  ⚠ Программа запущена БЕЗ прав администратора")
             suggestions.append("     Запустите программу от имени администратора")
     except:

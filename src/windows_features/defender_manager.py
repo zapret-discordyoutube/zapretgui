@@ -44,8 +44,9 @@ class WindowsDefenderManager:
         """Выполняет команду реестра с правами администратора"""
         try:
             # Проверяем, запущена ли программа с правами администратора
-            import ctypes
-            if not ctypes.windll.shell32.IsUserAnAdmin():
+            from platforms import current as current_platform
+
+            if not current_platform().privileges.is_elevated():
                 log("Требуются права администратора для изменения Windows Defender", "⚠️ WARNING")
                 return False
                 

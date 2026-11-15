@@ -318,7 +318,7 @@ class ExitOrderContractTests(unittest.TestCase):
             "log/run_log_sessions.py": 'register_exit_step("закрытие журналов запусков winws", run_log_sessions.close_all)',
             "log/crash_handler.py": 'register_exit_step("отметка конца сеанса в журнале падений", _mark_session_ended)',
             "settings/store.py": 'register_exit_step("закрытие базы настроек", close_settings_database)',
-            "main/shell.py": "lambda: release_mutex(mutex_handle),",
+            "main/shell.py": "instance_lock.release,",
         }
         for relative, registration in expected.items():
             with self.subTest(relative):

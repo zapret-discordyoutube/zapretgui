@@ -24,10 +24,8 @@ class LaunchConflictingProcessesTests(unittest.TestCase):
         self.assertTrue(callable(launch_conflicts.build_launch_conflict_advice))
         self.assertNotIn("CONFLICTING_PROCESSES", inspect.getsource(process_health_check))
 
-    @unittest.skipUnless(sys.platform == "win32", "проверка прав администратора использует WinAPI")
     def test_process_hacker_advice_is_added_after_windivert_launch_failure(self) -> None:
-        import ctypes
-
+        import platforms
         from winws_runtime.health import launch_conflicts
         from winws_runtime.health.process_health_check import diagnose_winws_exit
 
@@ -43,7 +41,7 @@ class LaunchConflictingProcessesTests(unittest.TestCase):
             # The access-denied handler first probes real admin rights and
             # short-circuits with generic advice when not elevated, so the
             # probe must be pinned for the conflict branch to be reachable.
-            patch.object(ctypes.windll.shell32, "IsUserAnAdmin", return_value=1),
+            patch.object(platforms.current().privileges, "is_elevated", return_value=True),
             patch.object(launch_conflicts, "check_conflicting_processes", return_value=[conflict]),
         ):
             diagnosis = diagnose_winws_exit(5, "Error opening filter: Access is denied")

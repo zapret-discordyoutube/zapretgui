@@ -1,30 +1,26 @@
 # Files that still use Windows-only calls, with the number of such lines.
 # Only shrinks. New code goes to src/platforms/windows/ behind an interface.
 # Regenerate: python -m app.architecture_checks --refresh-windows-api-list
-src/autostart/nssm_service.py 8
+src/autostart/nssm_service.py 7
 src/autostart/scheduled_task_api.py 6
 src/autostart/service_api.py 37
 src/blockcheck/browser_switch.py 16
 src/blockcheck/default_browser.py 3
 src/config/telegram_links.py 2
 src/config/window_metrics.py 4
-src/diagnostics/system_state.py 5
+src/diagnostics/system_state.py 4
 src/diagnostics/tcp_stats.py 3
 src/dns/local_proxy_windows.py 5
 src/dns/winapi.py 2
 src/hosts/commands.py 1
 src/hosts/ipv6_detection.py 1
 src/main/process_start_time.py 10
-src/main/shell.py 1
 src/main/window_native_commands.py 2
 src/presets/native_dir_watcher.py 1
-src/program_settings/commands.py 1
 src/settings/store.py 5
-src/startup/admin_check.py 6
 src/startup/admin_check_debug.py 19
 src/startup/bfe_util.py 10
 src/startup/check_start.py 31
-src/startup/single_instance.py 1
 src/support_request_bundle.py 2
 src/telegram_proxy/config/settings.py 2
 src/tray.py 90
@@ -56,16 +52,14 @@ src/utils/windows_http.py 38
 src/utils/windows_icmp.py 28
 src/utils/windows_process_probe.py 48
 src/utils/windows_working_set.py 9
-src/windows_features/defender_manager.py 4
+src/windows_features/defender_manager.py 3
 src/windows_features/internet_cleanup_winapi.py 4
 src/windows_features/max_blocker.py 21
 src/winws_runtime/engine/winapi.py 7
 src/winws_runtime/health/launch_conflicts.py 3
-src/winws_runtime/health/process_monitor.py 1
-src/winws_runtime/health/startup_error_diagnosis.py 1
 src/winws_runtime/health/windivert_auto_fix.py 1
 src/winws_runtime/health/windows_system_dependencies.py 8
-src/winws_runtime/health/winws_exit_diagnosis.py 6
+src/winws_runtime/health/winws_exit_diagnosis.py 5
 src/winws_runtime/runtime/process_probe.py 18
 src/winws_runtime/runtime/system_ops.py 2
 src/zapret_update/apply.py 1
