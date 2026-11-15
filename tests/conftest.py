@@ -85,6 +85,18 @@ def _tests_use_the_shared_runner_factory_outside_windows(monkeypatch, request):
     yield
 
 
+@pytest.fixture()
+def short_dir():
+    """A short temporary folder for Unix sockets: their path may not exceed about 108 characters, and the folders
+    pytest-xdist makes for long test names do."""
+    import shutil
+    import tempfile
+
+    folder = Path(tempfile.mkdtemp(prefix="zg-"))
+    yield folder
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 _SESSION_EXIT_STATUS = {"status": 0}
 
 

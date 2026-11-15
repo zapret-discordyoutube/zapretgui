@@ -324,8 +324,8 @@ def test_cleanup_without_a_state_file_still_removes_the_table(world) -> None:
 
 
 @pytest.fixture()
-def running_server(world):
-    path = str(world.tmp_path / "helper.sock")
+def running_server(world, short_dir):
+    path = str(short_dir / "helper.sock")
     stop = threading.Event()
     allowed = {"yes": True}
 
@@ -361,14 +361,14 @@ def test_somebody_outside_the_group_is_turned_away(running_server) -> None:
     assert "usermod -aG zapretgui" in str(raised.value)
 
 
-def test_without_the_helper_the_client_says_how_to_start_it(tmp_path) -> None:
+def test_without_the_helper_the_client_says_how_to_start_it(short_dir) -> None:
     with pytest.raises(helper_client.HelperUnavailable) as raised:
-        helper_client.HelperClient(str(tmp_path / "none.sock"), timeout=1).status()
+        helper_client.HelperClient(str(short_dir / "none.sock"), timeout=1).status()
     assert "systemctl start zapretgui-helper" in str(raised.value)
 
 
-def test_a_socket_nobody_listens_on_is_unavailable_not_a_crash(tmp_path) -> None:
-    path = str(tmp_path / "dead.sock")
+def test_a_socket_nobody_listens_on_is_unavailable_not_a_crash(short_dir) -> None:
+    path = str(short_dir / "dead.sock")
     leftover = socket.socket(socket.AF_UNIX)
     leftover.bind(path)
     leftover.close()
@@ -376,8 +376,8 @@ def test_a_socket_nobody_listens_on_is_unavailable_not_a_crash(tmp_path) -> None
         helper_client.HelperClient(path, timeout=1).status()
 
 
-def test_stopping_the_server_removes_the_firewall_rules_and_the_socket(world) -> None:
-    path = str(world.tmp_path / "h.sock")
+def test_stopping_the_server_removes_the_firewall_rules_and_the_socket(world, short_dir) -> None:
+    path = str(short_dir / "h.sock")
     stop = threading.Event()
     listener = server.open_socket(path, group_name=None, mode=0o600)
     thread = threading.Thread(
@@ -394,9 +394,9 @@ def test_stopping_the_server_removes_the_firewall_rules_and_the_socket(world) ->
     assert not os.path.exists(path)
 
 
-def test_the_server_starts_by_removing_leftovers_of_a_crashed_predecessor(world) -> None:
+def test_the_server_starts_by_removing_leftovers_of_a_crashed_predecessor(world, short_dir) -> None:
     (world.tmp_path / "state.json").write_text(json.dumps({"pid": 5, "sysctls": {}}))
-    path = str(world.tmp_path / "h2.sock")
+    path = str(short_dir / "h2.sock")
     stop = threading.Event()
     stop.set()  # serve() cleans up, then leaves immediately
     server.serve(world.service, path=path, authorize=lambda _c: world.user, stop_event=stop, server=server.open_socket(path, group_name=None))

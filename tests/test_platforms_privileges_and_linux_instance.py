@@ -114,9 +114,17 @@ from platforms.linux.single_instance import SHOW_SOCKET_NAME, LinuxSingleInstanc
 
 
 @pytest.fixture()
-def runtime(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    return tmp_path
+def runtime(monkeypatch):
+    """A SHORT folder: a Unix socket path may not exceed about 108 characters, and the temporary folders pytest-xdist
+    makes for a long test name do (the signal socket then cannot be created and the test fails now and then)."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    folder = Path(tempfile.mkdtemp(prefix="zg-"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(folder))
+    yield folder
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 def test_second_copy_is_seen_while_the_first_holds_the_lock(runtime):
