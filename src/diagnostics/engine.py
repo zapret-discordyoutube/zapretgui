@@ -480,6 +480,7 @@ def _run_probes(
             done_probes.append((key, target, None, str(exc)))
     if full:
         done_probes = _recheck_failed(run, services, done_probes)
+        sections.recheck_quic(run, [probe for _key, _target, probe, _error in done_probes if probe is not None])
         if ask_outside:
             sections.ask_outside(run, services, done_probes)
         # До печати: строка «Профиль пресета» должна попасть и в текст, и на карточку.

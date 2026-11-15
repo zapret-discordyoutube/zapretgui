@@ -69,6 +69,28 @@ class JudgeTests(unittest.TestCase):
 
         self.assertEqual(verdict.code, vp.VOLUME_UNKNOWN)
         self.assertIn("не проверить", verdict.text)
+        # Сервер просто отдаёт крошечные ответы: строка на экране ничего не скажет — она помечена «мало».
+        self.assertTrue(verdict.small)
+
+    def test_only_a_server_that_closes_after_tiny_answers_is_small(self) -> None:
+        for kind in (vp.RUN_STALLED, vp.RUN_RESET, vp.RUN_FAILED, vp.RUN_CANCELLED, vp.RUN_PASSED):
+            with self.subTest(kind=kind):
+                self.assertFalse(vp.judge(vp.VolumeFacts(_run(kind, 2_000))).small)
+
+    def test_small_volume_reaches_the_report_and_hides_the_row(self) -> None:
+        from diagnostics import engine, report_text, service_view
+
+        probe = engine._Probe(target=engine.Target("i.ytimg.com", "превью"), service="youtube", host="i.ytimg.com")
+        probe.volume = vp.judge(vp.VolumeFacts(_run(vp.RUN_CLOSED, 300, 6)))
+        item = report_text.target_report(probe)
+
+        self.assertTrue(item["volume_small"])
+        self.assertNotIn("Объём загрузки", [row.title for row in service_view.target_rows(item)])
+
+        probe.volume = vp.judge(vp.VolumeFacts(_run(vp.RUN_STALLED, 2_000)))
+        item = report_text.target_report(probe)
+        self.assertFalse(item["volume_small"])
+        self.assertIn("Объём загрузки", [row.title for row in service_view.target_rows(item)])
 
     def test_interrupted_probe_gives_no_verdict(self) -> None:
         cancelled = _run(vp.RUN_CANCELLED)

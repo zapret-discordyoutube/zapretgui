@@ -28,12 +28,14 @@ from utils.socket_cancel import SocketCancel, close_quietly
 __all__ = [
     "NEUTRAL_NAME",
     "QUIC_BLOCKED_BY_NAME",
+    "QUIC_FLAKY",
     "QUIC_OK",
     "QUIC_SILENT",
     "QuicFacts",
     "QuicVerdict",
     "collect",
     "judge",
+    "judge_again",
     "quic_hello",
 ]
 
@@ -46,6 +48,9 @@ ATTEMPT_TIMEOUT_S = 1.5
 QUIC_OK = "ok"
 QUIC_BLOCKED_BY_NAME = "blocked_by_name"
 QUIC_SILENT = "silent"
+# Пакет с именем сайта пропал и на повторе, а позже, когда остальные проверки закончились, прошёл:
+# фильтр (или линия) теряет его через раз — назвать это блокировкой по имени нельзя.
+QUIC_FLAKY = "flaky"
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +140,20 @@ def collect(host: str, ip: str, *, submit: Callable, cancel: SocketCancel) -> Qu
         nameless_ms=nameless_ms,
         real_again_ms=real_again_ms,
         cancelled=cancel.cancelled,
+    )
+
+
+def judge_again(verdict: QuicVerdict | None, host: str, again_ms: float | None) -> QuicVerdict | None:
+    """Итог повторного пакета с именем сайта, отправленного, когда остальные проверки закончились.
+
+    Меняется только «по имени»: если на этот раз сервер ответил, пакет теряется через раз.
+    """
+    if verdict is None or verdict.code != QUIC_BLOCKED_BY_NAME or again_ms is None:
+        return verdict
+    return QuicVerdict(
+        QUIC_FLAKY,
+        f"то теряется, то проходит: пакет с именем {host} пропал и на повторе, а позже, когда остальные проверки "
+        f"закончились, сервер ответил за {max(1, round(again_ms))} мс",
     )
 
 

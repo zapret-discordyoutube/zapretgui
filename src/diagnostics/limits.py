@@ -29,6 +29,7 @@ __all__ = [
     "REFERENCE_AT_ONCE",
     "REFERENCE_GRACE_S",
     "RECHECK_NEEDS_S",
+    "QUIC_RECHECK_NEEDS_S",
     "RECHECK_SITES",
     "RETRY_PAUSE_S",
     "RUN_DEADLINE",
@@ -123,6 +124,8 @@ NET_AT_ONCE_WEAK = 24
 NET_AT_ONCE = 40
 # Запас небольшой: повтор, который не успел, просто оставляет первый результат.
 RECHECK_NEEDS_S = 12.0
+# Повтор QUIC «по имени», когда остальное закончилось: два пакета по 1,5 с и запас.
+QUIC_RECHECK_NEEDS_S = 4.0
 # Сколько должно оставаться до общего срока, чтобы спросить сервер за рубежом («жив ли сайт снаружи»).
 OUTSIDE_NEEDS_S = 20.0
 FREEZE_READ_TIMEOUT = 4.0

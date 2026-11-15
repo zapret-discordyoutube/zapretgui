@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from diagnostics import service_view
 from diagnostics.path_trace import FILTER_FOUND, judge_filter
-from diagnostics.quic_probe import QUIC_BLOCKED_BY_NAME, QUIC_OK, QUIC_SILENT
+from diagnostics.quic_probe import QUIC_BLOCKED_BY_NAME, QUIC_FLAKY, QUIC_OK, QUIC_SILENT
 from dns.domain_lookup import (
     KIND_DOMAIN,
     KIND_INVALID,
@@ -377,7 +377,7 @@ def _ping_line(ping: PingReport, title: str) -> InfoLine:
 
 FILTER_MARK = "── здесь стоит фильтр ──"
 
-_QUIC_TONES = {QUIC_OK: TONE_SUCCESS, QUIC_BLOCKED_BY_NAME: TONE_ERROR, QUIC_SILENT: TONE_MUTED}
+_QUIC_TONES = {QUIC_OK: TONE_SUCCESS, QUIC_BLOCKED_BY_NAME: TONE_ERROR, QUIC_FLAKY: TONE_WARNING, QUIC_SILENT: TONE_MUTED}
 
 
 def _hops_word(count: int) -> str:

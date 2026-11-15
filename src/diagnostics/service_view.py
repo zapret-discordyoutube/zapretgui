@@ -68,7 +68,7 @@ _PROTOCOL_STATES = {"ok": OK, "fail": FAIL, "info": INFO, "unknown": UNKNOWN}
 # Ответ DNS: подмена — предупреждение, совпадение с эталоном — норма, свой адрес — справка.
 _DNS_LEVELS = {"ok": OK, "spoofed": WARN, "local": INFO, "unknown": UNKNOWN}
 # QUIC: блокировка по имени — предупреждение, ответ — норма, молчание — справка (сервер мог не поддерживать QUIC).
-_QUIC_LEVELS = {"ok": OK, "blocked_by_name": WARN, "silent": INFO}
+_QUIC_LEVELS = {"ok": OK, "blocked_by_name": WARN, "flaky": INFO, "silent": INFO}
 _OUTSIDE_WORDS = {
     "up": (INFO, "открывается — значит, закрыт он именно на вашей линии"),
     "down": (INFO, "тоже не открывается — сайт не работает сам"),
@@ -94,12 +94,12 @@ _BLOCK_LAYERS = {
         "TLS поверх TCP 443 (имя сайта в начале соединения)",
         "сервер жив, но соединение рвётся, как только в его начале открытым текстом названо имя сайта (поле SNI). "
         "Так работает фильтр на пути: оборудование оператора связи читает имя и обрывает соединение; сам сайт его не рвёт, "
-        "потому что на посторонние имена тот же адрес отвечает. Блокировку по имени стратегия Zapret обходит.",
+        "потому что на посторонние имена тот же адрес отвечает.",
     ),
     "cut16": (
         "TCP 443, передача данных после рукопожатия",
         "соединение устанавливается и начало страницы приходит, а затем поток замирает или обрывается около 16 КБ. "
-        "Так ведёт себя фильтр на пути, который пропускает рукопожатие и режет передачу. Обрыв стратегия Zapret обходит.",
+        "Так ведёт себя фильтр на пути, который пропускает рукопожатие и режет передачу.",
     ),
     "stub": (
         "HTTP или TLS (вместо сайта отдана подмена)",
@@ -113,6 +113,11 @@ _BLOCK_LAYERS = {
         "TLS (отпечаток приветствия клиента)",
         "обычная программа соединяется, а приветствие, составленное как у браузера, — нет: фильтр на пути сравнивает состав приветствия.",
     ),
+}
+# Чем лечится уровень, если Zapret к этому имени ещё не применяли, — и что сказать, если применяли, а не помогло.
+_LAYER_CURES = {
+    "sni": ("Блокировку по имени стратегия Zapret обходит.", "Блокировку по имени стратегия Zapret обходит, но"),
+    "cut16": ("Обрыв стратегия Zapret обходит.", "Обрыв стратегия Zapret обходит, но"),
 }
 _QUIC_LAYER = (
     "QUIC поверх UDP 443 (имя сайта в первом пакете)",
@@ -349,7 +354,8 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
         rows.append(ViewRow(INFO, "Проверка заняла", f"{float(item['seconds']):.0f} с" + (f" ({parts})" if parts else "")))
     if item.get("quic_text"):
         rows.append(ViewRow(_QUIC_LEVELS.get(str(item.get("quic")), INFO), "QUIC (UDP 443)", str(item["quic_text"])))
-    if item.get("volume_text"):
+    # Сервер отдал пару крошечных ответов и закрыл соединение: «набрать только 1 КБ» ничего не говорит о блокировке.
+    if item.get("volume_text") and not item.get("volume_small"):
         rows.append(ViewRow(WARN if item.get("volume") == "cut" else INFO, "Объём загрузки", str(item["volume_text"])))
     transfer = item.get("transfer") or {}
     if transfer.get("text") and transfer.get("code") != "unknown":
@@ -554,12 +560,37 @@ def _distance_rows(nodes: list[dict], coverage: object) -> list[ViewRow]:
     return rows
 
 
+def _applied_strategy(coverage: object) -> str:
+    """Стратегия, которую запущенный Zapret уже применяет к этому имени: её название или «стратегия профиля».
+
+    Пусто — имя Zapret не трогает (нет профиля, профиль без стратегии, оркестратор ещё перебирает).
+    """
+    if not isinstance(coverage, dict) or not coverage.get("profile") or not coverage.get("strategy", True):
+        return ""
+    if coverage.get("orchestra"):
+        number = int(coverage.get("locked_strategy") or 0)
+        return f"стратегия №{number} оркестратора" if number else ""
+    name = str(coverage.get("strategy_name") or "")
+    return f"«{name}»" if name else "стратегия профиля"
+
+
 def blocker_rows(item: dict) -> tuple[ViewRow, ...]:
     """Кто мешает и на каком уровне сети: по строке на каждый найденный уровень, с доказательством и следствием."""
     found: list[tuple[str, tuple[str, str], str]] = []
     kind = str(item.get("kind") or "")
     if kind in _BLOCK_LAYERS and not item.get("ok"):
-        found.append((FAIL, _BLOCK_LAYERS[kind], str(item.get("cause_text") or "")))
+        layer, meaning = _BLOCK_LAYERS[kind]
+        if kind in _LAYER_CURES:
+            cure, cure_failed = _LAYER_CURES[kind]
+            applied = _applied_strategy(item.get("coverage"))
+            # Zapret уже запущен и применяет к имени стратегию, а сайт всё равно закрыт: «обходит» было бы неправдой.
+            meaning += " " + (
+                f"{cure_failed} та, что сейчас применяется к этому имени ({applied}), не справилась — "
+                "подберите другую во вкладке «Подбор стратегии»."
+                if applied
+                else cure
+            )
+        found.append((FAIL, (layer, meaning), str(item.get("cause_text") or "")))
     if item.get("quic") == "blocked_by_name":
         found.append((WARN, _QUIC_LAYER, str(item.get("quic_text") or "")))
     if item.get("dns_state") == "spoofed":
@@ -933,6 +964,14 @@ def service_roads(probes, dns_note: str = "") -> list[dict]:
     quic = {probe.quic.code for probe in probes if probe.quic is not None}
     if quic_probe.QUIC_BLOCKED_BY_NAME in quic:
         roads.append(_road("quic", "QUIC", "warn", "закрыт", "QUIC к этому сайту режут: сайт откроется обычным способом, чуть медленнее", HINT_QUIC))
+    elif quic_probe.QUIC_FLAKY in quic:
+        roads.append(
+            _road(
+                "quic", "QUIC", "warn", "через раз",
+                "QUIC к этому сайту то теряется, то проходит: браузер иногда откатывается на обычное соединение",
+                HINT_QUIC,
+            )
+        )
     elif quic_probe.QUIC_OK in quic:
         roads.append(_road("quic", "QUIC", "ok", "работает", "QUIC к этому сайту проходит", HINT_QUIC))
     else:

@@ -72,6 +72,7 @@ def target_report(probe: Probe) -> dict:
         "kind_title": block_kind.kind_info(probe.kind).title if probe.kind else "",
         "volume": probe.volume.code if probe.volume else "",
         "volume_text": probe.volume.text if probe.volume else "",
+        "volume_small": bool(probe.volume and probe.volume.small),
         # Скорость ответов по замерам пробы объёма: пауза, медленный ответ, число замеров и уверенность.
         "transfer": probe.transfer.as_dict() if probe.transfer else None,
         # Путь запроса по шагам (DNS → TCP → TLS → QUIC → передача): уровень, слова и уверенность каждого.

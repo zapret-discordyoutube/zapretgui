@@ -269,6 +269,121 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(qp.judge(qp.QuicFacts("youtube.com", real_ms=5.0, cancelled=True)).code, qp.QUIC_OK)
 
 
+class LateRecheckTests(unittest.TestCase):
+    """QUIC «по имени» спрашивается ещё раз, когда остальные проверки закончились (отчёт с МТС, 15.11.2026)."""
+
+    BLOCKED = qp.QuicVerdict(qp.QUIC_BLOCKED_BY_NAME, "блокируется по имени сайта")
+
+    def test_answer_later_turns_by_name_into_flaky(self) -> None:
+        verdict = qp.judge_again(self.BLOCKED, "i.ytimg.com", 41.6)
+
+        self.assertEqual(verdict.code, qp.QUIC_FLAKY)
+        self.assertIn("то теряется, то проходит", verdict.text)
+        self.assertIn("i.ytimg.com", verdict.text)
+        self.assertIn("42 мс", verdict.text)
+
+    def test_silence_later_keeps_the_verdict_and_other_verdicts_never_change(self) -> None:
+        self.assertIs(qp.judge_again(self.BLOCKED, "i.ytimg.com", None), self.BLOCKED)
+        ok = qp.QuicVerdict(qp.QUIC_OK, "отвечает за 5 мс")
+        self.assertIs(qp.judge_again(ok, "i.ytimg.com", 7.0), ok)
+        self.assertIsNone(qp.judge_again(None, "i.ytimg.com", 7.0))
+
+    def _engine_run(self, answer, *, left: float = 60.0, cancelled: bool = False):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from diagnostics import sections
+
+        cancel = SocketCancel()
+        if cancelled:
+            cancel.cancel()
+        asked = []
+
+        def hello(ip, name, **_kw):
+            asked.append((ip, name))
+            return answer
+
+        def submit(fn, *args, **kwargs):
+            from concurrent.futures import Future
+
+            future = Future()
+            future.set_result(fn(*args, **kwargs))
+            return future
+
+        run = SimpleNamespace(
+            submit=submit,
+            wait=lambda future: future.result(),
+            dns_cancelled=lambda: False,
+            deadline=__import__("time").monotonic() + left,
+            probe_cancel=cancel,
+        )
+        blocked = SimpleNamespace(host="i.ytimg.com", reach=SimpleNamespace(ip="142.251.144.6"), quic=self.BLOCKED)
+        fine = SimpleNamespace(host="www.youtube.com", reach=SimpleNamespace(ip="142.251.157.4"), quic=qp.QuicVerdict(qp.QUIC_OK, "ok"))
+        with patch.object(qp, "quic_hello", hello):
+            sections.recheck_quic(run, [blocked, fine])
+        return blocked, fine, asked
+
+    def test_engine_asks_only_by_name_verdicts_and_applies_the_answer(self) -> None:
+        blocked, fine, asked = self._engine_run(30.0)
+
+        self.assertEqual(asked, [("142.251.144.6", "i.ytimg.com")])
+        self.assertEqual(blocked.quic.code, qp.QUIC_FLAKY)
+        self.assertEqual(fine.quic.code, qp.QUIC_OK)
+
+    def test_engine_keeps_by_name_when_silent_cancelled_or_out_of_time(self) -> None:
+        self.assertEqual(self._engine_run(None)[0].quic.code, qp.QUIC_BLOCKED_BY_NAME)
+        self.assertEqual(self._engine_run(30.0, cancelled=True)[0].quic.code, qp.QUIC_BLOCKED_BY_NAME)
+        blocked, _fine, asked = self._engine_run(30.0, left=1.0)
+        self.assertEqual((blocked.quic.code, asked), (qp.QUIC_BLOCKED_BY_NAME, []))
+
+    def test_full_check_rechecks_quic_before_the_probes_go_to_the_verdicts(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from diagnostics import engine, preset_coverage, report_text, sections
+        from diagnostics.services import Service
+
+        target = engine.Target("i.ytimg.com", "превью", main=True)
+        services = {"youtube": Service("youtube", "YouTube", (target,))}
+        probe = SimpleNamespace(host="i.ytimg.com", reach=SimpleNamespace(ip="142.251.144.6"), quic=self.BLOCKED)
+        order: list[str] = []
+
+        def recheck(_run, probes):
+            order.append("quic")
+            self.assertEqual(probes, [probe])
+
+        run = engine._Run(None, workers=4, deadline=60)
+        self.addCleanup(run.close)
+        with (
+            patch.object(engine, "_probe_target", return_value=probe),
+            patch.object(engine, "_recheck_failed", side_effect=lambda _run, _services, done: done),
+            patch.object(sections, "recheck_quic", side_effect=recheck),
+            patch.object(preset_coverage, "annotate", side_effect=lambda *_a: order.append("coverage")),
+            patch.object(report_text, "probe_lines", return_value=[]),
+        ):
+            collected = engine._run_probes(run, services, full=True, emit=lambda _line: None)
+            engine._run_probes(run, services, full=False, emit=lambda _line: None)
+
+        self.assertEqual(collected["youtube"], [probe])
+        # Только полная проверка, один раз и до строки «Профиль пресета».
+        self.assertEqual(order, ["quic", "coverage"])
+
+    def test_flaky_quic_road_says_through_once(self) -> None:
+        from types import SimpleNamespace
+
+        from diagnostics import service_view
+
+        line = SimpleNamespace(key="tls13", title="TLS 1.3", state="ok", word="открывается", text="открывается")
+        probe = SimpleNamespace(
+            target=SimpleNamespace(main=True), protocols=(line,), transfer=None, judgement=None,
+            quic=qp.QuicVerdict(qp.QUIC_FLAKY, "то теряется, то проходит"),
+        )
+
+        road = next(item for item in service_view.service_roads([probe]) if item["key"] == "quic")
+
+        self.assertEqual((road["state"], road["word"]), ("warn", "через раз"))
+
+
 class CollectTests(unittest.TestCase):
     def test_answering_site_gets_one_packet_like_a_browser(self) -> None:
         asked: list = []

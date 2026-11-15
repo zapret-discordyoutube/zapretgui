@@ -108,6 +108,47 @@ class BlockerRowsTests(unittest.TestCase):
         self.assertTrue(titles[0].startswith("Кто мешает: TLS"))
         self.assertTrue(titles[2].startswith("Кто мешает: DNS"))
 
+    def test_name_block_while_zapret_applies_a_strategy_says_it_did_not_get_through(self) -> None:
+        # Отчёт с МТС: Zapret запущен, youtubei в профиле «YouTube · сайт и приложение», а имя всё равно режут.
+        coverage = {
+            "profile": "YouTube · сайт и приложение",
+            "preset": "Default v1 (game filter)",
+            "strategy_name": "Protocol Mask STUN (fake_stun_as_tls) · из «Default v1»",
+        }
+        item = _target(ok=False, kind="sni", cause_text="режут имя", coverage=coverage)
+
+        text = view.blocker_rows(item)[0].text
+
+        self.assertIn("не справилась", text)
+        self.assertIn("«Protocol Mask STUN (fake_stun_as_tls) · из «Default v1»»", text)
+        self.assertIn("«Подбор стратегии»", text)
+        self.assertNotIn("Блокировку по имени стратегия Zapret обходит.", text)
+
+    def test_name_block_without_an_applied_strategy_keeps_the_plain_cure(self) -> None:
+        for coverage in (
+            None,
+            {"profile": ""},
+            {"profile": "YouTube", "strategy": False},
+            {"profile": "YouTube", "orchestra": True, "locked_strategy": 0},
+        ):
+            with self.subTest(coverage=coverage):
+                text = view.blocker_rows(_target(ok=False, kind="sni", coverage=coverage))[0].text
+                self.assertIn("Блокировку по имени стратегия Zapret обходит.", text)
+                self.assertNotIn("не справилась", text)
+
+    def test_cut16_and_orchestra_strategy_get_the_same_honest_cure(self) -> None:
+        coverage = {"profile": "Profile 1 TLS", "orchestra": True, "locked_strategy": 267}
+
+        text = view.blocker_rows(_target(ok=False, kind="cut16", coverage=coverage))[0].text
+
+        self.assertIn("Обрыв стратегия Zapret обходит, но та, что сейчас применяется к этому имени (стратегия №267 оркестратора)", text)
+
+    def test_flaky_quic_is_information_and_not_a_blocker(self) -> None:
+        item = _target(quic="flaky", quic_text="то теряется, то проходит")
+
+        self.assertEqual(_rows(item)["QUIC (UDP 443)"].level, "info")
+        self.assertEqual(view.blocker_rows(item), ())
+
     def test_nothing_found_adds_nothing_and_an_open_site_is_not_named_blocked(self) -> None:
         self.assertEqual(view.blocker_rows(_target()), ())
         self.assertEqual(view.blocker_rows(_target(ok=True, kind="sni")), ())

@@ -42,7 +42,7 @@ from diagnostics import (
 )
 from diagnostics import problems as problem_rules
 from diagnostics.privacy import mask_ip, mask_prefix, mask_public_ip
-from diagnostics.limits import FILTER_MAX_TTL, FREEZE_READ_TIMEOUT, OUTSIDE_NEEDS_S
+from diagnostics.limits import FILTER_MAX_TTL, FREEZE_READ_TIMEOUT, OUTSIDE_NEEDS_S, QUIC_RECHECK_NEEDS_S, RECHECK_SITES
 from diagnostics.run_context import Probe, Run, Stopped
 from diagnostics.services import Service
 from diagnostics.tls_probe import KIND_RESET, ProbeResult
@@ -637,6 +637,38 @@ def _matrix_cell(run: Run) -> Callable[[str, str], selectivity.Cell]:
         return selectivity.Cell(tls, quic, hello.ms, quic_ms)
 
     return cell
+
+
+def recheck_quic(run: Run, probes: list[Probe]) -> None:
+    """QUIC «по имени» спрашивается ещё раз — когда остальные проверки закончились, до выводов.
+
+    В залпе пакет с именем сайта мог пропасть и на повторе, а позже пройти: так было в отчёте с МТС
+    (15.11.2026), где строка сайта говорила «блокируется по имени», а таблица имён и адресов на том же
+    адресе получила ответ. Ответил сейчас — пакет теряется через раз (``QUIC_FLAKY``), и это видят все
+    выводы сразу: проблемы, путь запроса, строки карточки.
+    """
+    picked = [
+        probe
+        for probe in probes
+        if probe.quic is not None
+        and probe.quic.code == quic_probe.QUIC_BLOCKED_BY_NAME
+        and probe.reach is not None
+        and probe.reach.ip
+    ][:RECHECK_SITES]
+    if not picked or run.dns_cancelled() or run.deadline - time.monotonic() < QUIC_RECHECK_NEEDS_S:
+        return
+    futures = [(probe, run.submit(quic_probe.quic_hello, probe.reach.ip, probe.host, cancel=run.probe_cancel)) for probe in picked]
+    for probe, future in futures:
+        try:
+            again_ms = run.wait(future)
+        except Stopped:
+            raise
+        except Exception:
+            continue
+        if run.probe_cancel.cancelled:
+            # Снятый пакет ничего не говорит: остаётся первый вывод.
+            return
+        probe.quic = quic_probe.judge_again(probe.quic, probe.host, again_ms)
 
 
 def annotate_selectivity(run: Run, report: list[dict], collected: dict[str, list[Probe]], services) -> None:
