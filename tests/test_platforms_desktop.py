@@ -25,7 +25,10 @@ def test_linux_and_stub_have_nothing_to_hook_into_yet() -> None:
         assert desktop.create_drag_hover_detector(window, on_hover_start=print, on_hover_end=print) is None
         assert desktop.handle_native_event(window, 0) is False
         assert desktop.cloak_until_painted(window) is None
-        assert desktop.install_theme_watcher(MagicMock(), window) is None
+        if backend is LINUX:
+            assert desktop.install_theme_watcher(None, window) is None  # no application object: nothing to watch
+        else:
+            assert desktop.install_theme_watcher(MagicMock(), window) is None
 
 
 def test_windows_does_not_use_qt_file_drop() -> None:

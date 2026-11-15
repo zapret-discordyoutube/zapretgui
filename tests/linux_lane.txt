@@ -28,3 +28,4 @@ tests/test_onboarding_tour.py
 tests/test_onboarding_tour_drift.py
 tests/test_onboarding_tour_targets.py
 tests/test_onboarding_tour_pages.py
+tests/test_linux_system_theme.py

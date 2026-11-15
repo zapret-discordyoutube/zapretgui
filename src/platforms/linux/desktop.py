@@ -27,4 +27,6 @@ class LinuxDesktop:
         return None
 
     def install_theme_watcher(self, app, window):
-        return None
+        from platforms.linux.system_theme import install_system_theme_watcher
+
+        return install_system_theme_watcher(app, window)
