@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import configparser
+import re
+import subprocess
+
+import pytest
 from pathlib import Path
 
 from platforms.linux import capture_rules
@@ -190,3 +194,27 @@ def test_the_unit_lets_the_helper_write_exactly_the_hosts_file_and_its_backup() 
 
     assert system_ops.HOSTS_PATH == "/etc/hosts"
     assert system_ops.HOSTS_BACKUP.startswith("/var/lib/zapretgui/")
+
+
+def _hosts_backup_block(script: Path, tmp_path: Path) -> str:
+    text = script.read_text(encoding="utf-8")
+    start = text.index("if [ -f /var/lib/zapretgui/hosts.original ]")
+    end = re.compile(r"^\s*fi$", re.MULTILINE).search(text, start).end()  # the first "fi" after the start closes our if
+    block = text[start:end]
+    return block.replace("/var/lib/zapretgui", str(tmp_path / "var")).replace("/etc/hosts", str(tmp_path / "hosts"))
+
+
+@pytest.mark.parametrize("script", [PACKAGING / "deb" / "postrm", PACKAGING / "uninstall.sh"], ids=["postrm", "uninstall"])
+def test_the_hosts_backup_goes_with_the_program_unless_hosts_still_differs_from_it(script, tmp_path) -> None:
+    block = _hosts_backup_block(script, tmp_path)
+    (tmp_path / "var").mkdir()
+    (tmp_path / "var" / "hosts.original").write_text("127.0.0.1 localhost\n")
+    (tmp_path / "hosts").write_text("127.0.0.1 localhost\n")
+    assert subprocess.run(["sh", "-c", block]).returncode == 0
+    assert not (tmp_path / "var").exists()
+    # an edited /etc/hosts: the backup is the only way back, so it stays
+    (tmp_path / "var").mkdir()
+    (tmp_path / "var" / "hosts.original").write_text("127.0.0.1 localhost\n")
+    (tmp_path / "hosts").write_text("127.0.0.1 localhost\n1.2.3.4 x.example\n")
+    assert subprocess.run(["sh", "-c", block]).returncode == 0
+    assert (tmp_path / "var" / "hosts.original").exists()

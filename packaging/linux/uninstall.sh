@@ -17,6 +17,11 @@ systemctl daemon-reload
 command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
 
 getent group zapretgui >/dev/null && groupdel zapretgui 2>/dev/null || true
+# the copy of /etc/hosts from before the first change made by the program: removed with the program, unless /etc/hosts
+# still differs from it (then it is the only way back, and it stays)
+if [ -f /var/lib/zapretgui/hosts.original ] && cmp -s /var/lib/zapretgui/hosts.original /etc/hosts; then
+  rm -rf /var/lib/zapretgui
+fi
 
 if [ "${1:-}" = "--purge-user-data" ]; then
   home="$(getent passwd "${2:?user name}" | cut -d: -f6)"
