@@ -91,6 +91,13 @@ _ONBOARDING_TILE_CATEGORIES = {"direct_tile": CATEGORY_DIRECT, "ai_tile": CATEGO
 
 
 
+def _subtitle_key() -> str:
+    """The wording that says "Windows" is for Windows; other systems get the neutral one."""
+    from platforms import current as current_platform
+
+    return "page.hosts.subtitle" if current_platform().name == "windows" else "page.hosts.subtitle.basic"
+
+
 class _StatusPill(QWidget):
     """Статус записи в сводке: значок и текст в одну строку на мягкой заливке.
 
@@ -170,7 +177,7 @@ class HostsPage(BasePage):
             "программа сразу запишет в него адреса сервиса.",
             parent,
             title_key="page.hosts.title",
-            subtitle_key="page.hosts.subtitle",
+            subtitle_key=_subtitle_key(),
         )
         self._hosts = deps.hosts_feature
         self._open_file_page = deps.open_file_page

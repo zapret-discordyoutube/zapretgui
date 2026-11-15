@@ -64,6 +64,7 @@ ONBOARDING_WIKI_URLS = {
     "fakes": "https://wiki.zapret.moe/Zapret2/blob",
     "fakes_blob": "https://wiki.zapret.moe/Zapret2/blob",
     "hosts_summary": HOSTS_INFO_URL,
+    "hosts_summary_basic": HOSTS_INFO_URL,
     "blockcheck_start": f"{BLOCKCHECK_INFO_URL}#шаг-1-запустите-проверку",
     "blockcheck_domains": f"{BLOCKCHECK_INFO_URL}#шаг-1-запустите-проверку",
     "blockcheck_summary": f"{BLOCKCHECK_INFO_URL}#шаг-3-прочитайте-итог",

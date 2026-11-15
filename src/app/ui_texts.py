@@ -1646,6 +1646,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Файл hosts — список Windows «имя сайта → адрес», он главнее ответа DNS. Щёлкните по плитке — программа сразу запишет в него адреса сервиса.",
         "en": "The hosts file is the Windows list “site name → address”; it wins over the DNS answer. Click a tile and the app writes the service addresses into it right away.",
     },
+    "page.hosts.subtitle.basic": {
+        "ru": "Файл hosts — системный список «имя сайта → адрес», он главнее ответа DNS. Щёлкните по плитке — программа сразу запишет в него адреса сервиса.",
+        "en": "The hosts file is the system list “site name → address”; it wins over the DNS answer. Click a tile and the app writes the service addresses into it at once.",
+    },
     "page.hosts.summary.writing": {
         "ru": "Записываю…",
         "en": "Writing…",

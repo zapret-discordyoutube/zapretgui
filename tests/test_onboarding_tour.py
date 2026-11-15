@@ -616,7 +616,10 @@ class TourStepCapabilityTests(unittest.TestCase):
         self.assertNotIn("dns_now", without)
         keys = [step.key for step in ALL_TOUR_STEPS]
         self.assertEqual(keys.index("dns_providers_basic"), keys.index("dns_providers") + 1)
-        for key in ("dns_now_basic", "dns_providers_basic"):
+        self.assertIn("hosts_summary_basic", without)
+        self.assertNotIn("hosts_summary", without)
+        self.assertIn("hosts_summary", with_proxy)
+        for key in ("dns_now_basic", "dns_providers_basic", "hosts_summary_basic"):
             for language in ("ru", "en"):
                 text = TEXTS[f"onboarding.step.{key}.body"][language]
                 self.assertNotIn("Windows", text)

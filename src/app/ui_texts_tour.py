@@ -365,6 +365,25 @@ TEXTS_TOUR: dict[str, dict[str, str]] = {
             "for all services at once, Turn all off removes the app's lines."
         ),
     },
+    "onboarding.step.hosts_summary_basic.title": {"ru": "Редактор hosts", "en": "Hosts editor"},
+    "onboarding.step.hosts_summary_basic.body": {
+        "ru": (
+            "Файл hosts — системный список «имя сайта → адрес». То, что в нём записано, важнее ответа DNS. "
+            "Программа вписывает туда адреса, через которые открываются нужные сервисы. Файл лежит в /etc/hosts, "
+            "правит его системная служба Zapret, поэтому пароль не нужен.\n\n"
+            "Сводка показывает, сколько сервисов включено и сколько строк программа держит в файле. Кнопки "
+            "сверху: «Файл hosts» открывает файл целиком, «DNS для всех» ставит один DNS-профиль сразу "
+            "всем сервисам, «Выключить все» убирает строки программы."
+        ),
+        "en": (
+            "The hosts file is the system list of \"site name → address\". What is written there beats "
+            "the DNS answer. The app writes addresses there through which the services you need open. The file "
+            "is /etc/hosts and the Zapret system service edits it, so no password is asked.\n\n"
+            "The summary shows how many services are on and how many lines the app keeps in the file. "
+            "The buttons at the top: Hosts file opens the whole file, DNS for all sets one DNS profile "
+            "for all services at once, Turn all off removes the app's lines."
+        ),
+    },
     "onboarding.step.hosts_direct.title": {"ru": "Сервисы «напрямую»", "en": "Direct services"},
     "onboarding.step.hosts_direct.body": {
         "ru": (
