@@ -199,3 +199,41 @@ def test_startup_checks_run_bfe_when_the_platform_has_it():
             pass
     preload.assert_called_once_with("BFE")
     ensure.assert_called_once_with()
+
+
+# --- self-update gate ---------------------------------------------------------
+
+def test_only_windows_has_self_update():
+    from platforms.linux import PLATFORM as LINUX
+    from platforms.windows import PLATFORM as WINDOWS
+
+    assert WINDOWS.has(Cap.SELF_UPDATE) is True
+    assert LINUX.has(Cap.SELF_UPDATE) is False
+    assert STUB.has(Cap.SELF_UPDATE) is False
+
+
+def _platform(*caps):
+    return Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
+                    services=MagicMock(), capabilities=frozenset(caps))
+
+
+def test_update_check_is_not_installed_without_self_update():
+    from main import post_startup
+
+    with (
+        patch("platforms.current", return_value=_platform()),
+        patch("main.post_startup_update.install_update_check") as real_install,
+    ):
+        assert post_startup.install_update_check(MagicMock(), updater_feature=MagicMock()) is None
+    real_install.assert_not_called()
+
+
+def test_update_check_is_installed_when_the_platform_can_update():
+    from main import post_startup
+
+    with (
+        patch("platforms.current", return_value=_platform(Cap.SELF_UPDATE)),
+        patch("main.post_startup_update.install_update_check", return_value="installed") as real_install,
+    ):
+        assert post_startup.install_update_check("host", updater_feature="u") == "installed"
+    real_install.assert_called_once_with("host", updater_feature="u")

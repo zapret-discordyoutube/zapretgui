@@ -71,6 +71,7 @@ class Cap:
     """
 
     BFE = "windows_bfe"  # Base Filtering Engine: the Windows service WinDivert depends on
+    SELF_UPDATE = "self_update"  # the program replaces itself from a downloaded installer
 
 
 WAIT_SIGNALLED = 0

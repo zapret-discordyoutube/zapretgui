@@ -14,5 +14,5 @@ PLATFORM = Platform(
     privileges=WindowsPrivileges(),
     single_instance=WindowsSingleInstance(),
     services=WindowsServices(),
-    capabilities=frozenset({Cap.BFE}),
+    capabilities=frozenset({Cap.BFE, Cap.SELF_UPDATE}),
 )
