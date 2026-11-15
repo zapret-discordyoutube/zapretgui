@@ -165,6 +165,15 @@ Probe script (not in the repository): `/tmp/zg-baseline/tools/probe_launch.py`.
 
 - 2026-11-15 `services` and capabilities: `platforms.current().services` (`is_running`, `start`; Windows: pywin32 loaded lazily; Linux: systemd) and `Platform.has(Cap.X)`. Capabilities so far: `BFE`, `SELF_UPDATE`, `WINDOWS_STARTUP_CHECKS` (all Windows only). `startup/bfe_util.py` has no Windows calls left. The startup update check and the Windows startup advisories are not installed on systems without the capability.
 
+- 2026-11-15 `ZAPRET_DEV_ROOT` (the "paths" step, part 1): outside Windows, and only when the variable names an existing folder, the program may start from source and treats that folder as its install root (`config/runtime_layout.py`: `resolve_dev_root`, `is_dev_root_run`). Without the variable the source start is refused exactly as before. `scripts/prepare_dev_root.py` builds such a folder from the repositories (strategy catalogs, built-in presets, icons, managed lists, and from `private_zapretgui`: Lua, engine blobs, templates, catalog databases). The real install layout for Linux (`/opt/zapretgui` + XDG folders) is still to do.
+
+  Run from source on Linux:
+  ```
+  python3 scripts/prepare_dev_root.py /tmp/zapret-dev-root
+  ZAPRET_DEV_ROOT=/tmp/zapret-dev-root PYTHONPATH=src python3 src/main.py
+  ```
+  (`QT_QPA_PLATFORM=offscreen` for no screen; the virtual X screen `xvfb-run` still ends in a Qt segfault, see below.)
+
 ## Second probe, after `launch` / `privileges` / `single_instance` (2026-11-15)
 
 Run: skip the two source-start checks, start with Qt `offscreen`, grab the main window after 9 s, no fake `windll`. Probe script (not in the repository): `/tmp/zg-baseline/tools/probe_shot.py`. Screenshot of the result: `/root/.agent-todo/zapretgui/2026-11-15-linux-gui-first-screenshot.png`.
@@ -181,3 +190,7 @@ Run: skip the two source-start checks, start with Qt `offscreen`, grab the main 
 ## Third probe, after `services` and the capability gates (2026-11-15)
 
 Only the four "Пресеты не найдены" toasts are left (same cause: the dev tree has no `presets/winws2*` folders; they come from the build layout). The main page also still offers Windows-only things on Linux, for example the quick action "Сбросить сеть Windows"; hiding them is capability work for Phase 2. Diagnostics still shows a BFE row ("не удалось определить") on Linux; it should be hidden, not unknown.
+
+## Fourth probe, with `ZAPRET_DEV_ROOT` and the real launch gate (2026-11-15)
+
+The program starts through the real gate (no patches) and shows the first-run welcome tour. The four "Пресеты не найдены" toasts are gone. Two toasts remain: "ФАЙЛ ИЛИ ПАПКА НЕ НАЙДЕНЫ" ("Ошибка запуска Zapret"), expected because there is no `winws2` engine binary on Linux yet (phase 3). Screenshot: `/root/.agent-todo/zapretgui/2026-11-15-linux-gui-with-dev-root.png`.

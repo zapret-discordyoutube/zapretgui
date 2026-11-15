@@ -13,7 +13,7 @@ def collect_startup_checks_payload(*, verbose_logging_enabled: bool) -> dict:
     from platforms import Cap, current as current_platform
 
     if not current_platform().has(Cap.WINDOWS_STARTUP_CHECKS):
-        # Every check below is about Windows (services through sc.exe, the registry, netsh,
+        # Every check below is about Windows (its services and settings database,
         # GoodbyeDPI, Kaspersky). Linux gets its own startup checks later.
         return {"notifications": [], "duration_ms": 0}
     from startup.check_start import collect_startup_notifications, check_goodbyedpi, check_mitmproxy

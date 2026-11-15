@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import sys
 
+
+# Running from source is allowed only outside Windows and only on purpose: the variable
+# points at a folder prepared by scripts/prepare_dev_root.py (the same layout an install has).
+DEV_ROOT_ENV = "ZAPRET_DEV_ROOT"
 
 RUNTIME_DIR_NAME = "_internal"
 RUNTIME_EXE_NAME = "Zapret.exe"
@@ -218,10 +223,36 @@ def is_packaged_runtime() -> bool:
     return bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
 
 
+def resolve_dev_root(*, environ: dict | None = None, platform: str | None = None) -> tuple[Path | None, str]:
+    """Папка для запуска из исходников вне Windows: (путь, текст ошибки).
+
+    Переменная ``ZAPRET_DEV_ROOT`` действует только вне Windows и не у собранной
+    программы. Без неё запуск из исходников по-прежнему запрещён. Если переменная
+    задана, но папки нет, возвращается понятная ошибка, а не молчаливый отказ.
+    """
+    env = os.environ if environ is None else environ
+    if (sys.platform if platform is None else platform) == "win32":
+        return None, ""
+    value = str(env.get(DEV_ROOT_ENV) or "").strip()
+    if not value:
+        return None, ""
+    path = Path(value).expanduser()
+    if not path.is_dir():
+        return None, f"{DEV_ROOT_ENV} указывает на несуществующую папку: {path}"
+    return path.resolve(), ""
+
+
+def is_dev_root_run() -> bool:
+    """True, если приложение запущено из исходников через ZAPRET_DEV_ROOT."""
+    return DEV_ROOT is not None
+
+
 def require_packaged_application() -> None:
     """Запрещает вход в приложение из обычного Python-сценария."""
-    if is_packaged_runtime():
+    if is_packaged_runtime() or DEV_ROOT is not None:
         return
+    if DEV_ROOT_ERROR:
+        raise SourceApplicationLaunchForbidden(DEV_ROOT_ERROR)
     raise SourceApplicationLaunchForbidden(
         "Запуск приложения из исходников запрещён. "
         f"Используйте установленный {RUNTIME_DIR_NAME}\\{RUNTIME_EXE_NAME}."
@@ -276,6 +307,7 @@ def require_valid_install_layout() -> None:
 
 
 PACKAGED_RUNTIME = is_packaged_runtime()
+DEV_ROOT, DEV_ROOT_ERROR = (None, "") if PACKAGED_RUNTIME else resolve_dev_root()
 INSTALL_LAYOUT_ERROR: InvalidInstallLayout | None = None
 try:
     APPLICATION_ROOT = resolve_application_root(
@@ -287,6 +319,8 @@ try:
         executable=sys.executable,
         packaged=PACKAGED_RUNTIME,
     )
+    if DEV_ROOT is not None:
+        APPLICATION_ROOT = DEV_ROOT
 except InvalidInstallLayout as exc:
     # Импорт этого модуля не должен падать: иначе main.launch_gate не успеет
     # показать пользователю окно. Эти пути в работе не используются —
@@ -299,7 +333,7 @@ APPLICATION_PATHS = ApplicationPaths.from_root(APPLICATION_ROOT)
 # из исходников всё равно останавливается require_packaged_application().
 APPLICATION_RESOURCE_PATHS = (
     APPLICATION_PATHS
-    if PACKAGED_RUNTIME
+    if PACKAGED_RUNTIME or DEV_ROOT is not None
     else ApplicationPaths.from_root(APPLICATION_ROOT / "src")
 )
 
@@ -309,6 +343,9 @@ __all__ = [
     "APPLICATION_PATHS",
     "APPLICATION_RESOURCE_PATHS",
     "ApplicationPaths",
+    "DEV_ROOT",
+    "DEV_ROOT_ENV",
+    "DEV_ROOT_ERROR",
     "INSTALL_LAYOUT_ERROR",
     "InvalidInstallLayout",
     "PACKAGED_RUNTIME",
@@ -316,7 +353,9 @@ __all__ = [
     "RUNTIME_EXE_NAME",
     "RUNTIME_ROOT",
     "SourceApplicationLaunchForbidden",
+    "is_dev_root_run",
     "is_packaged_runtime",
+    "resolve_dev_root",
     "require_packaged_application",
     "require_valid_install_layout",
     "resolve_application_root",
