@@ -65,6 +65,8 @@ def make_net(tmp_path):
     card("enp3s0", 2, 1, device=True)
     card("wlp2s0", 3, 1, state="down", device=True, wireless=True)
     card("docker0", 4, 1, virtual=True)
+    card("eth0", 5, 1, virtual=True)  # the only card of a container: virtual, but it is the network
+    card("veth1a2b", 6, 1, virtual=True)
     return str(tmp_path / "net")
 
 
@@ -75,12 +77,13 @@ def test_interfaces_get_kinds_flags_and_the_dns_they_use(tmp_path):
     ])
     dns = LinuxDns(system, net_class=make_net(tmp_path))
     by_name = {item.name: item for item in dns.list_interfaces()}
-    assert set(by_name) == {"enp3s0", "wlp2s0", "docker0"}  # lo is never offered
+    assert set(by_name) == {"enp3s0", "wlp2s0", "docker0", "eth0", "veth1a2b"}  # lo is never offered
     wired, wifi, bridge = by_name["enp3s0"], by_name["wlp2s0"], by_name["docker0"]
     assert (wired.if_type, wifi.if_type, bridge.if_type) == (6, 71, 6)
     assert wired.hardware and wired.connector and wired.connected and not wired.filter
     assert not wifi.connected and wifi.hardware
-    assert bridge.filter and not bridge.hardware  # virtual: the page hides it unless the internet goes through it
+    assert bridge.filter and not bridge.hardware and by_name["veth1a2b"].filter  # bridges and container ends are never offered
+    assert not by_name["eth0"].filter  # a virtual card that is the machine's network stays
     assert wired.dns_ipv4 == ("192.168.1.1",) and wired.dns_ipv6 == ("fe80::1",)
 
 

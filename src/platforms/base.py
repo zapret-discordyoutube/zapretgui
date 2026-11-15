@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import enum
 import threading
+from pathlib import Path
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Protocol, Sequence
 
@@ -357,6 +358,34 @@ class DnsAdapters(Protocol):
         """Whether the system can encrypt DNS itself (DNS over HTTPS) for the servers written."""
 
 
+class HostsFile(Protocol):
+    """The system's hosts file (names written by hand, the program's managed block inside it).
+
+    Every method takes the ``path`` the program works with (``default_path()`` unless a test says otherwise).
+    ``write`` and ``can_write`` raise ``PermissionError`` with a readable text when the system refuses.
+    """
+
+    encoding: str
+
+    def default_path(self) -> Path:
+        """Where the hosts file is."""
+
+    def is_read_only(self, path: Path) -> bool:
+        """Whether the file carries a write ban of its own (the read-only attribute on Windows)."""
+
+    def write(self, path: Path, data: bytes) -> None:
+        """Replace the content of the file with ``data`` (already encoded as ``encoding``)."""
+
+    def check_name(self, path: Path) -> tuple[bool, str | None]:
+        """``(True, None)``, or ``(False, text)`` when a wrongly named copy (``HOSTS``) is in the way."""
+
+    def can_write(self, path: Path) -> None:
+        """Return when a write would be allowed; raise ``PermissionError`` (or ``FileNotFoundError``) otherwise."""
+
+    def restore_access(self, path: Path) -> tuple[bool, str]:
+        """Give the file its standard access rights back (a button on the hosts page): ``(success, text)``."""
+
+
 class Engine(Protocol):
     """The DPI engine: the object that starts, switches and stops the bypass process for a preset.
 
@@ -466,6 +495,7 @@ class Platform:
     tray: Tray
     system_settings: SystemSettings
     dns: DnsAdapters
+    hosts: HostsFile
     engine: Engine
     working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()

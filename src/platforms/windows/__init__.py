@@ -7,6 +7,7 @@ from platforms.windows.autostart import WindowsGuiAutostart
 from platforms.windows.desktop import WindowsDesktop
 from platforms.windows.dns_adapters import WindowsDns
 from platforms.windows.engine import WindowsEngine
+from platforms.windows.hosts_file import WindowsHostsFile
 from platforms.windows.launch import WindowsLaunch
 from platforms.windows.messages import WindowsMessageBox
 from platforms.windows.netprobe import WindowsNetProbe
@@ -31,6 +32,7 @@ PLATFORM = Platform(
     tray=WindowsTray(),
     system_settings=WindowsSystemSettings(),
     dns=WindowsDns(),
+    hosts=WindowsHostsFile(),
     engine=WindowsEngine(),
     working_set=WindowsWorkingSet(),
     capabilities=frozenset(

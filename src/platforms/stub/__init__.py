@@ -189,6 +189,30 @@ class _NoDns:
         return False
 
 
+class _NoHostsFile:
+    encoding = "utf-8"
+
+    def default_path(self):
+        from pathlib import Path
+
+        return Path("hosts")
+
+    def is_read_only(self, path) -> bool:
+        return False
+
+    def write(self, path, data: bytes) -> None:
+        raise PermissionError("the hosts file cannot be changed on this system")
+
+    def check_name(self, path):
+        return True, None
+
+    def can_write(self, path) -> None:
+        raise PermissionError("the hosts file cannot be changed on this system")
+
+    def restore_access(self, path):
+        return False, "Nothing to restore on this system."
+
+
 class _NoLaunch:
     def process_creation_unix_seconds(self) -> float | None:
         return None
@@ -217,6 +241,7 @@ PLATFORM = Platform(
     tray=_NoTray(),
     system_settings=_NoSystemSettings(),
     dns=_NoDns(),
+    hosts=_NoHostsFile(),
     engine=FactoryEngine(),
     working_set=NoWorkingSet(),
 )

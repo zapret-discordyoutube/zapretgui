@@ -35,6 +35,9 @@ PROBE_V4 = "1.1.1.1"
 PROBE_V6 = "2606:4700:4700::1111"
 ARPHRD_ETHER = 1
 ARPHRD_LOOPBACK = 772
+# Interfaces of containers, virtual machines and bridges: never offered as "the network of this computer".
+# (A virtual card that is simply the machine's only network, as in a container, is offered.)
+SERVICE_INTERFACE_PREFIXES = ("docker", "br-", "veth", "virbr", "vnet", "cni", "flannel", "cali", "lxcbr", "lxdbr", "podman", "tailscale")
 OTHER_TYPE = 0  # not Ethernet, Wi-Fi or loopback: the page ignores it
 
 
@@ -157,7 +160,7 @@ class LinuxDns:
             if not index:
                 continue
             hardware = os.path.exists(os.path.join(base, "device"))
-            virtual = "/devices/virtual/" in os.path.realpath(base)
+            service_interface = name.startswith(SERVICE_INTERFACE_PREFIXES)
             v4, v6 = self._live_dns(name)
             result.append(
                 RawInterface(
@@ -169,7 +172,7 @@ class LinuxDns:
                     if_type=self._interface_type(name),
                     connected=_read(os.path.join(base, "operstate")) in ("up", "unknown") and _read(os.path.join(base, "carrier")) != "0",
                     hardware=hardware,
-                    filter=virtual,
+                    filter=service_interface,
                     connector=hardware,
                     dns_ipv4=v4,
                     dns_ipv6=v6,

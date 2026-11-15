@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import os
 import unittest
 from types import SimpleNamespace
@@ -33,6 +34,16 @@ from hosts.page_snapshot import (
 
 BEGIN = "# >>> zapretgui:hosts managed begin >>>"
 END = "# <<< zapretgui:hosts managed end <<<"
+
+
+@pytest.fixture(autouse=True)
+def _hosts_file_behaves_like_windows_here(monkeypatch):
+    """These tests are about the file logic of hosts.py on a temporary file (BOM, write in place, read-only attribute):
+    that is the Windows backend; the Linux one hands the text to the helper (tests/test_platforms_hosts_file.py)."""
+    from hosts import hosts as hosts_module
+    from platforms.windows.hosts_file import WindowsHostsFile
+
+    monkeypatch.setattr(hosts_module, "_platform_hosts", lambda: WindowsHostsFile())
 
 
 def _managed(*lines: str) -> str:

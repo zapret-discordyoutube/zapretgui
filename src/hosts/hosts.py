@@ -1,7 +1,4 @@
-import ctypes
-import stat
 import os
-import subprocess
 from pathlib import Path
 from .proxy_domains import (
     get_dns_profiles,
@@ -15,18 +12,13 @@ from .relay_check import internet_reachable, unreachable_relays
 from log.log import log
 
 
-def _get_hosts_path_from_env() -> Path:
-    """
-    Возвращает путь к hosts через переменные окружения, чтобы корректно работать
-    когда Windows установлена не на C:.
-    """
-    sys_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
-    if sys_root:
-        return Path(sys_root, "System32", "drivers", "etc", "hosts")
-    return Path(r"C:\Windows\System32\drivers\etc\hosts")
+def _platform_hosts():
+    from platforms import current
+
+    return current().hosts
 
 
-HOSTS_PATH = _get_hosts_path_from_env() if os.name == "nt" else Path(r"C:\Windows\System32\drivers\etc\hosts")
+HOSTS_PATH = _platform_hosts().default_path()
 
 _MANAGED_HOSTS_BEGIN = "# >>> zapretgui:hosts managed begin >>>"
 _MANAGED_HOSTS_END = "# <<< zapretgui:hosts managed end <<<"
@@ -263,142 +255,23 @@ def invalidate_hosts_file_cache() -> None:
     _set_hosts_cache(None, None)
 
 
-def _run_cmd(args, description):
-    """Выполняет команду и логирует результат"""
-    try:
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        if result.returncode == 0:
-            log(f"✅ {description}: успешно")
-            return True
-        else:
-            # Проверяем stderr или stdout на наличие ошибки
-            error = result.stderr.strip() or result.stdout.strip()
-            log(f"⚠ {description}: {error}", "⚠ WARNING")
-            return False
-    except Exception as e:
-        log(f"❌ {description}: {e}", "❌ ERROR")
-        return False
 
-
-def _get_current_username():
-    """Получает имя текущего пользователя"""
-    try:
-        import getpass
-        return getpass.getuser()
-    except:
-        return None
 
 
 def restore_hosts_permissions():
+    """Возвращает стандартные права на файл hosts. Вызывается только по кнопке пользователя, не автоматически.
+
+    Returns: (success: bool, message: str)
     """
-    Восстанавливает стандартные права доступа к файлу hosts.
-    Устанавливает: Administrators:F, SYSTEM:F, Users:R (через SID для любой локализации).
-
-    Вызывается ТОЛЬКО явно по кнопке пользователя в UI — не автоматически.
-    Это НЕ вредоносная активность: пользователь сам нажал «Восстановить права доступа»,
-    чтобы вернуть стандартные ACL на файл hosts после блокировки антивирусом.
-
-    Returns:
-        tuple: (success: bool, message: str)
-    """
-    hosts_path = str(HOSTS_PATH)
-
-    # Действие инициировано пользователем через кнопку в интерфейсе приложения.
-    # Восстанавливаем стандартные Windows ACL: Administrators:F, SYSTEM:F, Users:R.
-    log("Пользователь запросил восстановление стандартных прав доступа к файлу hosts")
-
-    # Well-known SIDs (работают на любой локализации Windows)
-    SID_ADMINISTRATORS = "*S-1-5-32-544"  # Administrators
-    SID_USERS = "*S-1-5-32-545"           # Users
-    SID_SYSTEM = "*S-1-5-18"              # SYSTEM
-
-    try:
-        # Снимаем атрибут "только для чтения"
-        _run_cmd(['attrib', '-R', hosts_path], "attrib -R")
-
-        # Забираем владение для группы администраторов
-        _run_cmd(['takeown', '/F', hosts_path, '/A'], "takeown /A")
-
-        # Сбрасываем ACL и выставляем стандартные права через SID
-        _run_cmd(['icacls', hosts_path, '/reset'], "icacls /reset")
-        _run_cmd(['icacls', hosts_path, '/grant', f'{SID_ADMINISTRATORS}:F'],
-                 "icacls /grant Administrators")
-        _run_cmd(['icacls', hosts_path, '/grant', f'{SID_SYSTEM}:F'],
-                 "icacls /grant SYSTEM")
-        _run_cmd(['icacls', hosts_path, '/grant', f'{SID_USERS}:R'],
-                 "icacls /grant Users (read)")
-
-        # Проверяем результат
-        try:
-            HOSTS_PATH.read_text(encoding='utf-8')
-            log("Права восстановлены, файл hosts доступен для чтения")
-
-            try:
-                with HOSTS_PATH.open('a', encoding='utf-8-sig'):
-                    pass
-                log("Файл hosts доступен для записи")
-                return True, "Права доступа к файлу hosts восстановлены"
-            except PermissionError:
-                return False, (
-                    "Файл hosts доступен для чтения, но запись запрещена.\n"
-                    "Возможные причины: защита антивируса/Defender.\n"
-                    "Добавьте исключение для hosts или временно отключите защиту."
-                )
-
-        except PermissionError:
-            return False, (
-                "Не удалось восстановить права доступа.\n"
-                "Попробуйте:\n"
-                "1. Запустить программу от имени администратора\n"
-                "2. Временно отключить антивирус\n"
-                "3. Добавить исключение для файла hosts"
-            )
-
-        except Exception as e:
-            return False, f"Ошибка при проверке прав: {e}"
-
-    except FileNotFoundError as e:
-        return False, f"Системная команда не найдена: {e}"
-    except Exception as e:
-        return False, f"Ошибка: {e}"
+    return _platform_hosts().restore_access(HOSTS_PATH)
 
 def check_hosts_file_name():
-    """Проверяет правильность написания имени файла hosts"""
-    hosts_dir = HOSTS_PATH.parent
-
-    # Проверка только читает: каталог etc не создаём.
-    if not hosts_dir.exists():
-        return True, None
-
-    # Сначала проверяем правильный файл hosts
-    hosts_lower = hosts_dir / "hosts"
-    if hosts_lower.exists():
-        # Кодировку здесь не проверяем: safe_read_hosts_file читает и UTF-8, и
-        # cp1251/cp866 (комментарий по-русски в «ANSI»), а запись идёт в UTF-8.
-        return True, None
-    
-    # Если правильного файла нет, проверяем есть ли неправильный HOSTS
-    hosts_upper = hosts_dir / "HOSTS"
-    if hosts_upper.exists():
-        log("Обнаружен файл HOSTS (с большими буквами) - это неправильно!", level="⚠ WARNING")
-        return False, "Файл должен называться 'hosts' (с маленькими буквами), а не 'HOSTS'"
-    
-    # Файла нет вообще — это нормально, его создаст явная запись.
-    return True, None
+    """Проверяет правильность написания имени файла hosts."""
+    return _platform_hosts().check_name(HOSTS_PATH)
 
 def is_file_readonly(filepath):
-    """Проверяет, установлен ли атрибут 'только для чтения' у файла"""
-    try:
-        file_stat = os.stat(filepath)
-        return not (file_stat.st_mode & stat.S_IWRITE)
-    except Exception as e:
-        log(f"Ошибка при проверке атрибутов файла: {e}")
-        return False
+    """Установлен ли у файла запрет записи (атрибут «только для чтения» в Windows)."""
+    return _platform_hosts().is_read_only(Path(filepath))
 
 def safe_read_hosts_file():
     """Безопасно читает файл hosts с обработкой различных кодировок.
@@ -467,30 +340,11 @@ def safe_write_hosts_file(content):
             log("Файл hosts защищён от записи (только чтение). Используйте кнопку «Восстановить права доступа».", "WARNING")
             return False
 
-        # Текст кодируется целиком ДО открытия файла: ошибка кодировки не должна
-        # оставить hosts обрезанным. Сам файл пишется на месте, а не подменой:
-        # у системного hosts свои права доступа, подмена их бы потеряла.
-        data = str(content or "").replace("\r\n", "\n").encode("utf-8-sig")
-        previous: bytes | None = None
-        if HOSTS_PATH.exists():
-            previous = HOSTS_PATH.read_bytes()
-        try:
-            with open(HOSTS_PATH, "wb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except PermissionError:
-            raise
-        except Exception:
-            # Запись оборвалась после обрезки файла (например, нет места):
-            # возвращаем прежнее содержимое, чтобы не оставить hosts пустым.
-            if previous is not None:
-                try:
-                    with open(HOSTS_PATH, "wb") as handle:
-                        handle.write(previous)
-                except Exception as restore_error:
-                    log(f"Не удалось вернуть прежний hosts: {restore_error}", "❌ ERROR")
-            raise
+        # Текст кодируется целиком ДО записи: ошибка кодировки не должна оставить hosts обрезанным.
+        # Как именно пишется файл (на месте, через службу-помощник), решает система.
+        platform_hosts = _platform_hosts()
+        data = str(content or "").replace("\r\n", "\n").encode(platform_hosts.encoding)
+        platform_hosts.write(HOSTS_PATH, data)
         _set_hosts_cache(content, _get_hosts_sig(HOSTS_PATH))
         return True
     except PermissionError:
@@ -710,8 +564,7 @@ class HostsManager:
                 return False
 
             # Проверяем право записи, не меняя содержимое.
-            with HOSTS_PATH.open("a", encoding="utf-8-sig"):
-                pass
+            _platform_hosts().can_write(HOSTS_PATH)
             return True
             
         except PermissionError:
