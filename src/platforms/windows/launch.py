@@ -66,3 +66,6 @@ class WindowsLaunch:
 
     def source_launch_message(self) -> str:
         return "Запуск приложения из исходников запрещён. Используйте установленный _internal\\Zapret.exe."
+
+    def prepare_process(self) -> None:
+        return None

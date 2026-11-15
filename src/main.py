@@ -5,6 +5,14 @@
 ещё до своего окна, пользователь увидит понятное окно, а не тишину.
 """
 
+import sys
+
+if sys.argv[1:2] == ["--zapret-helper"]:
+    # Тот же собранный файл в роли службы (zapretgui-helper.service): права root, правила nftables и движок.
+    from platforms.linux.helper.server import main as _run_helper
+
+    raise SystemExit(_run_helper())
+
 from main.launch_gate import pass_launch_gate, run_guarded
 
 pass_launch_gate()

@@ -1,0 +1,14 @@
+Package: zapretgui
+Version: @VERSION@
+Section: net
+Priority: optional
+Architecture: amd64
+Maintainer: Zapret <noreply@zapret.moe>
+Depends: nftables, systemd, libluajit-5.1-2, zlib1g, libnetfilter-queue1, libnfnetlink0, libmnl0, libcap2, libxcb-cursor0, libxkbcommon-x11-0, libegl1, libgl1, libfontconfig1, libdbus-1-3
+Recommends: policykit-1 | polkitd, libnotify-bin, xdg-utils
+Installed-Size: @SIZE@
+Homepage: https://wiki.zapret.moe/
+Description: Zapret: bypass of network blocks with a window
+ Presets, tray icon, DNS settings and checks on top of zapret2 (nfqws2).
+ The window runs as the normal user; a small root service (zapretgui-helper)
+ owns the firewall table "inet zapretgui" and the engine.

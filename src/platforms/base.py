@@ -88,6 +88,10 @@ class Launch(Protocol):
     def source_launch_message(self) -> str:
         """Why starting from source is refused and what to do instead, for the person who tried."""
 
+    def prepare_process(self) -> None:
+        """Set the process up before the program imports anything of its own. May replace the process
+        (Linux restarts it once in UTF-8 mode when the locale is not UTF-8). Does nothing when nothing is needed."""
+
 
 class ProcessSnapshotError(OSError):
     """The system refused to list the processes. A refusal, not "there are no processes"."""

@@ -91,6 +91,7 @@ def _check_launch() -> None:
 
 def pass_launch_gate() -> None:
     """Пропускает запуск дальше или показывает окно и закрывает программу."""
+    current_platform().launch.prepare_process()
     try:
         _check_launch()
     except LaunchBlocked as blocked:

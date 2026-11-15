@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+if [ "$1" = remove ] || [ "$1" = upgrade ] || [ "$1" = deconfigure ]; then
+  if [ -d /run/systemd/system ]; then
+    systemctl stop zapretgui-helper.service || true
+    [ "$1" = remove ] && systemctl disable zapretgui-helper.service || true
+  fi
+  # the helper removes its table when it stops; this is the second net, so no rule outlives the program
+  command -v nft >/dev/null && nft delete table inet zapretgui 2>/dev/null || true
+fi
+exit 0

@@ -6,6 +6,24 @@ import sys
 from platforms.base import SystemSupport
 
 DEV_ROOT_ENV = "ZAPRET_DEV_ROOT"
+UTF8_RESTART_ENV = "ZAPRET_UTF8_RESTARTED"
+
+
+def utf8_mode_needed(environ=None) -> bool:
+    """True when file names are not UTF-8 and the program has not already restarted itself for that."""
+    environ = os.environ if environ is None else environ
+    if sys.flags.utf8_mode or environ.get(UTF8_RESTART_ENV):
+        return False
+    return (sys.getfilesystemencoding() or "").lower().replace("-", "") != "utf8"
+
+
+def restart_in_utf8_mode() -> None:
+    """Replace this process with itself in UTF-8 mode. Returns only when the restart is impossible."""
+    environment = dict(os.environ, PYTHONUTF8="1", **{UTF8_RESTART_ENV: "1"})
+    try:
+        os.execve("/proc/self/exe", [sys.argv[0], *sys.argv[1:]], environment)
+    except OSError:
+        return
 
 
 class LinuxLaunch:
@@ -30,6 +48,16 @@ class LinuxLaunch:
             return boot_unix + start_ticks / os.sysconf("SC_CLK_TCK")
         except (OSError, ValueError, IndexError):
             return None
+
+    def prepare_process(self) -> None:
+        """Make Python read and write file names and files as UTF-8, whatever the locale says.
+
+        Started from a menu entry, a service or ``env -i`` the locale is often "C", and Python then decodes
+        Russian file names (the presets have them) into lone surrogates that cannot be written back. The
+        interpreter cannot switch to UTF-8 mode after it started, so the program restarts itself once.
+        """
+        if utf8_mode_needed():
+            restart_in_utf8_mode()
 
     def system_support(self) -> SystemSupport:
         return SystemSupport(supported=True)

@@ -109,3 +109,60 @@ def test_uninstall_keeps_the_users_data_unless_asked() -> None:
     before_the_switch = uninstall.split('if [ "${1:-}" = "--purge-user-data" ]')[0]
     before_the_switch = "\n".join(line for line in before_the_switch.splitlines() if not line.lstrip().startswith("#"))
     assert "$home" not in before_the_switch and ".config" not in before_the_switch and ".local" not in before_the_switch
+
+
+def test_the_start_wrappers_run_the_bundled_program_in_utf8_mode() -> None:
+    import os
+    import subprocess
+
+    window = PACKAGING / "bin" / "zapretgui"
+    helper = PACKAGING / "bin" / "zapretgui-helper"
+    desktop = (PACKAGING / "zapretgui.desktop").read_text(encoding="utf-8")
+    assert f"Exec={'/opt/zapretgui/bin/' + window.name} " in desktop
+    for path in (window, helper):
+        assert os.access(path, os.X_OK), path.name
+        text = path.read_text(encoding="utf-8")
+        assert "PYTHONUTF8=1" in text and "exec /opt/zapretgui/_internal/zapretgui" in text
+        assert subprocess.run(["sh", "-n", str(path)], capture_output=True, text=True).returncode == 0
+    assert "--zapret-helper" in helper.read_text(encoding="utf-8")
+    assert "--zapret-helper" not in window.read_text(encoding="utf-8")
+
+
+def test_main_switches_into_the_helper_role_before_any_window_code(monkeypatch) -> None:
+    import runpy
+    import sys
+
+    import pytest
+
+    from platforms.linux.helper import server
+
+    monkeypatch.setattr(server, "main", lambda: 7)
+    monkeypatch.setattr(sys, "argv", ["zapretgui", "--zapret-helper"])
+    main_py = Path(__file__).resolve().parents[1] / "src" / "main.py"
+    with pytest.raises(SystemExit) as stopped:
+        runpy.run_path(str(main_py), run_name="__main__")
+    assert stopped.value.code == 7
+
+
+def test_the_deb_files_are_valid_and_match_the_installer() -> None:
+    import os
+    import subprocess
+
+    deb = PACKAGING / "deb"
+    control = (deb / "control.in").read_text(encoding="utf-8")
+    assert "Package: zapretgui" in control and "@VERSION@" in control and "@SIZE@" in control
+    # the engine is linked against these libraries: build_nfqws2.sh prints the same list
+    for library in ("nftables", "libluajit-5.1-2", "libnetfilter-queue1", "libnfnetlink0", "libmnl0", "zlib1g"):
+        assert library in control
+    for name in ("postinst", "prerm", "postrm"):
+        assert os.access(deb / name, os.X_OK), name
+        assert subprocess.run(["sh", "-n", str(deb / name)], capture_output=True, text=True).returncode == 0
+    postinst = (deb / "postinst").read_text(encoding="utf-8")
+    prerm = (deb / "prerm").read_text(encoding="utf-8")
+    postrm = (deb / "postrm").read_text(encoding="utf-8")
+    assert "groupadd --system zapretgui" in postinst and "enable zapretgui-helper.service" in postinst
+    assert f"nft delete table inet {capture_rules.TABLE_NAME}" in prerm
+    assert "groupdel zapretgui" in postrm and "purge" in postrm
+    # the people's own data is never deleted by a package script
+    code = "\n".join(line for line in postrm.splitlines() if not line.lstrip().startswith("#"))
+    assert ".local/share" not in code and ".config" not in code

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Starts the Zapret window. UTF-8 is set here so file names with Russian letters work even under the "C" locale
+# (menu entries and autostart often start programs with no locale at all).
+export PYTHONUTF8=1
+exec /opt/zapretgui/_internal/zapretgui "$@"

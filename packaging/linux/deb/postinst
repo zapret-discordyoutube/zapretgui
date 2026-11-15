@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+# The person who installed (sudo or pkexec) is added to the group that may talk to the helper; others add themselves:
+#   sudo usermod -aG zapretgui NAME
+if [ "$1" = configure ]; then
+  getent group zapretgui >/dev/null || groupadd --system zapretgui
+  WHO="${SUDO_USER:-}"
+  [ -z "$WHO" ] && [ -n "${PKEXEC_UID:-}" ] && WHO="$(getent passwd "$PKEXEC_UID" | cut -d: -f1)"
+  if [ -n "$WHO" ] && [ "$WHO" != root ] && id "$WHO" >/dev/null 2>&1; then
+    usermod -aG zapretgui "$WHO" && echo "zapretgui: $WHO was added to the group zapretgui (log in again for it to apply)"
+  else
+    echo "zapretgui: add each person who uses it to the group:  sudo usermod -aG zapretgui NAME"
+  fi
+  command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
+  command -v update-mime-database >/dev/null && update-mime-database /usr/share/mime || true
+  command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl enable zapretgui-helper.service || true
+    systemctl restart zapretgui-helper.service || true
+  fi
+fi
+exit 0

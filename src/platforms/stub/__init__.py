@@ -173,6 +173,9 @@ class _NoLaunch:
     def source_launch_message(self) -> str:
         return "Запуск приложения из исходников запрещён."
 
+    def prepare_process(self) -> None:
+        return None
+
 
 PLATFORM = Platform(
     name="stub",
