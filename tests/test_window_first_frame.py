@@ -14,8 +14,8 @@ from PyQt6.QtCore import QEvent  # noqa: E402
 from PyQt6.QtGui import QPaintEvent  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from ui import window_first_frame  # noqa: E402
-from ui.window_first_frame import FrameReveal, cloak_until_painted, set_window_cloaked  # noqa: E402
+from platforms.windows import first_frame as window_first_frame  # noqa: E402
+from platforms.windows.first_frame import FrameReveal, cloak_until_painted, set_window_cloaked  # noqa: E402
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -159,7 +159,7 @@ class FrameRevealWiringTests(unittest.TestCase):
         with (
             patch("main.window_lifecycle.QTimer.singleShot"),
             patch("main.window_lifecycle.emit_startup_metric"),
-            patch("main.window_lifecycle.cloak_until_painted") as cloak,
+            patch.object(__import__("platforms").current().desktop, "cloak_until_painted") as cloak,
         ):
             for event in events:
                 window.showEvent(event)

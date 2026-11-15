@@ -21,6 +21,16 @@ if str(PROJECT_SRC) not in sys.path:
 _IDLE_TASKS = object()
 
 
+
+def _windows_desktop_platform():
+    """``WindowLifecycleMixin.nativeEvent`` asks ``current_platform().desktop``; these scenarios are Windows messages."""
+    from types import SimpleNamespace as _NS
+
+    from platforms.windows.desktop import WindowsDesktop
+
+    return _NS(desktop=WindowsDesktop(), has=lambda _capability: False)
+
+
 class StartupRuntimeSetupTests(unittest.TestCase):
     def test_post_interactive_startup_steps_have_no_fixed_gap(self) -> None:
         from main import startup_coordinator
@@ -3116,7 +3126,7 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
     def setUp(self) -> None:
         # Окна в этих тестах — заготовки без настоящего HWND; скрытие окна до
         # первого кадра проверяет tests/test_window_first_frame.py.
-        patcher = patch("main.window_lifecycle.cloak_until_painted")
+        patcher = patch.object(__import__("platforms").current().desktop, "cloak_until_painted")
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -3312,7 +3322,7 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
         effects.set_animation_active.assert_called_with(True)
 
     def test_native_minimize_command_hides_to_tray_when_mode_includes_minimize(self) -> None:
-        from main.window_native_commands import SC_MINIMIZE, WM_SYSCOMMAND
+        from platforms.windows.native_commands import SC_MINIMIZE, WM_SYSCOMMAND
         from main.window_lifecycle import WindowLifecycleMixin
 
         class Window(WindowLifecycleMixin, _BaseWindowEvents):
@@ -3339,7 +3349,8 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
                 side_effect=AssertionError("settings read must not happen in minimize path"),
                 create=True,
             ),
-            patch("main.window_native_commands.sys.platform", "win32"),
+            patch("platforms.windows.native_commands.sys.platform", "win32"),
+            patch("main.window_lifecycle.current_platform", _windows_desktop_platform),
         ):
             result = window.nativeEvent(b"windows_generic_MSG", int(addressof(msg)))
 
@@ -3354,7 +3365,7 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.calls: list[str] = []
 
-        from ui.windows_file_drop import WM_DROPFILES
+        from platforms.windows.file_drop import WM_DROPFILES
 
         window = Window()
         msg = wintypes.MSG()
@@ -3363,10 +3374,11 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
 
         with (
             patch(
-                "main.window_lifecycle.handle_native_preset_file_drop",
+                "ui.window_preset_file_drop.handle_native_preset_file_drop",
                 return_value=True,
             ) as handle_drop,
-            patch("main.window_native_commands.sys.platform", "win32"),
+            patch("platforms.windows.native_commands.sys.platform", "win32"),
+            patch("main.window_lifecycle.current_platform", _windows_desktop_platform),
         ):
             result = window.nativeEvent(b"windows_generic_MSG", message)
 
@@ -3390,9 +3402,10 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
         msg.message = WM_MOUSEMOVE
 
         with (
-            patch("main.window_lifecycle.handle_native_preset_file_drop") as handle_drop,
-            patch("main.window_lifecycle.handle_native_minimize_command") as handle_minimize,
-            patch("main.window_native_commands.sys.platform", "win32"),
+            patch("ui.window_preset_file_drop.handle_native_preset_file_drop") as handle_drop,
+            patch("platforms.windows.native_commands.handle_native_minimize_command") as handle_minimize,
+            patch("platforms.windows.native_commands.sys.platform", "win32"),
+            patch("main.window_lifecycle.current_platform", _windows_desktop_platform),
         ):
             result = window.nativeEvent(b"windows_generic_MSG", int(addressof(msg)))
 
@@ -3402,7 +3415,7 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
         self.assertEqual(result, (False, 123))
 
     def test_native_minimize_command_uses_normal_window_flow_when_mode_is_normal(self) -> None:
-        from main.window_native_commands import SC_MINIMIZE, WM_SYSCOMMAND
+        from platforms.windows.native_commands import SC_MINIMIZE, WM_SYSCOMMAND
         from main.window_lifecycle import WindowLifecycleMixin
 
         class Window(WindowLifecycleMixin, _BaseWindowEvents):
@@ -3425,7 +3438,8 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
                 side_effect=AssertionError("settings read must not happen in minimize path"),
                 create=True,
             ),
-            patch("main.window_native_commands.sys.platform", "win32"),
+            patch("platforms.windows.native_commands.sys.platform", "win32"),
+            patch("main.window_lifecycle.current_platform", _windows_desktop_platform),
         ):
             result = window.nativeEvent(b"windows_generic_MSG", int(addressof(msg)))
 

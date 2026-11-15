@@ -114,6 +114,32 @@ class _NoAutostart:
         return False
 
 
+class _NoDesktop:
+    def user_idle_ms(self) -> int | None:
+        return None
+
+    def uses_qt_file_drop(self) -> bool:
+        return True
+
+    def bind_window(self, window) -> bool:
+        return False
+
+    def dropped_file_paths(self, message):
+        return None
+
+    def create_drag_hover_detector(self, window, *, on_hover_start, on_hover_end):
+        return None
+
+    def handle_native_event(self, window, message) -> bool:
+        return False
+
+    def cloak_until_painted(self, window):
+        return None
+
+    def install_theme_watcher(self, app, window):
+        return None
+
+
 class _NoLaunch:
     def process_creation_unix_seconds(self) -> float | None:
         return None
@@ -135,5 +161,6 @@ PLATFORM = Platform(
     processes=_NoProcesses(),
     netprobe=_NoNetProbe(),
     autostart=_NoAutostart(),
+    desktop=_NoDesktop(),
     working_set=NoWorkingSet(),
 )

@@ -17,7 +17,7 @@ class WindowsSystemThemeTests(unittest.TestCase):
         cls._app = QApplication.instance() or QApplication([])
 
     def test_reads_windows_apps_theme_from_personalize_registry_value(self) -> None:
-        import ui.windows_system_theme as system_theme
+        import platforms.windows.system_theme as system_theme
 
         fake_winreg = SimpleNamespace(HKEY_CURRENT_USER=object())
         with (
@@ -34,20 +34,20 @@ class WindowsSystemThemeTests(unittest.TestCase):
             )
 
     def test_ignores_non_windows_apps_theme(self) -> None:
-        import ui.windows_system_theme as system_theme
+        import platforms.windows.system_theme as system_theme
 
         with patch.object(system_theme.sys, "platform", "linux"):
             self.assertIsNone(system_theme.read_windows_apps_theme(read_dword=lambda *_args: 1))
 
     def test_detects_native_windows_theme_messages(self) -> None:
-        import ui.windows_system_theme as system_theme
+        import platforms.windows.system_theme as system_theme
 
         self.assertTrue(system_theme.is_windows_theme_change_message(system_theme.WM_SETTINGCHANGE))
         self.assertTrue(system_theme.is_windows_theme_change_message(system_theme.WM_DWMCOLORIZATIONCOLORCHANGED))
         self.assertFalse(system_theme.is_windows_theme_change_message(0x0200))
 
     def test_apply_theme_skips_when_display_mode_is_not_auto(self) -> None:
-        import ui.windows_system_theme as system_theme
+        import platforms.windows.system_theme as system_theme
 
         set_theme = Mock()
 
@@ -66,7 +66,7 @@ class WindowsSystemThemeTests(unittest.TestCase):
         set_theme.assert_not_called()
 
     def test_apply_theme_uses_system_value_when_display_mode_is_auto(self) -> None:
-        import ui.windows_system_theme as system_theme
+        import platforms.windows.system_theme as system_theme
 
         window = SimpleNamespace(update=Mock())
         set_theme = Mock()
@@ -91,7 +91,7 @@ class WindowsSystemThemeTests(unittest.TestCase):
         window.update.assert_called_once()
 
     def test_apply_theme_skips_repaint_when_qfluent_theme_already_matches(self) -> None:
-        import ui.windows_system_theme as system_theme
+        import platforms.windows.system_theme as system_theme
 
         set_theme = Mock()
         background_applier = Mock()
@@ -114,7 +114,7 @@ class WindowsSystemThemeTests(unittest.TestCase):
         refresh_flusher.assert_not_called()
 
     def test_native_event_filter_returns_pyqt6_result_pair(self) -> None:
-        import ui.windows_system_theme as system_theme
+        import platforms.windows.system_theme as system_theme
 
         watcher = system_theme.WindowsSystemThemeWatcher(window=object())
 

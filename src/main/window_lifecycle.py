@@ -4,26 +4,13 @@ from PyQt6.QtCore import QEvent, QObject, QTimer
 
 from log.log import log
 
-from main.window_native_commands import (
-    WM_SYSCOMMAND,
-    handle_minimize_request,
-    handle_native_minimize_command,
-    is_native_minimize_command,
-    is_native_restore_command,
-)
+from main.window_native_commands import handle_minimize_request
+from platforms import current as current_platform
 from main.runtime_state import (
     log_startup_metric as emit_startup_metric,
     startup_elapsed_ms,
 )
 from ui.frame_clock import frame_clock
-from ui.window_first_frame import cloak_until_painted
-from ui.window_preset_file_drop import handle_native_preset_file_drop
-from ui.windows_file_drop import WM_DROPFILES
-from ui.windows_screen_presence import (
-    SCREEN_PRESENCE_MESSAGES,
-    handle_native_screen_presence,
-    native_message_id,
-)
 
 
 def _is_system_show_event(event) -> bool:
@@ -153,25 +140,10 @@ class WindowLifecycleMixin:
         return bool(provider())
 
     def nativeEvent(self, event_type, message):  # noqa: N802 (Qt override)
-        # Сюда приходит каждое сообщение Windows для окна, поэтому структуру
-        # сообщения разбираем один раз и дальше идём только по своим номерам.
-        message_id = native_message_id(message)
-        if message_id == WM_DROPFILES:
-            if handle_native_preset_file_drop(self, message):
-                return (True, 0)
-        elif message_id == WM_SYSCOMMAND:
-            if is_native_restore_command(message):
-                self._note_return_intent()
-            elif is_native_minimize_command(message):
-                self._note_away_intent()
-            if handle_native_minimize_command(
-                self,
-                message,
-                minimize_to_tray_enabled=self._minimize_to_tray_enabled,
-            ):
-                return (True, 0)
-        elif message_id in SCREEN_PRESENCE_MESSAGES:
-            handle_native_screen_presence(message)
+        # Системные сообщения окна разбирает платформа (Windows: перенос файлов, «свернуть», экран);
+        # True — сообщение обработано полностью и Qt его не трогает.
+        if current_platform().desktop.handle_native_event(self, message):
+            return (True, 0)
         return super().nativeEvent(event_type, message)
 
     def _note_away_intent(self) -> None:
@@ -300,7 +272,7 @@ class WindowLifecycleMixin:
             # Наш show() (запуск, значок в трее): событие приходит до вывода
             # окна на экран. Прячем окно от экрана до отрисовки, иначе Windows
             # покажет его пустым и белым — скрытое окно Qt рисует заново целиком.
-            cloak_until_painted(self)
+            current_platform().desktop.cloak_until_painted(self)
 
         geometry_runtime = self._get_window_geometry_runtime()
         if geometry_runtime is not None:

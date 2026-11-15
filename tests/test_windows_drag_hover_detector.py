@@ -62,7 +62,7 @@ class _FakeUser32:
 
 
 def _signals(user32, *, window=None, platform="win32"):
-    from ui.windows_drag_hover_detector import read_shell_drag_signals
+    from platforms.windows.drag_hover_detector import read_shell_drag_signals
 
     return read_shell_drag_signals(
         window if window is not None else _window(),
@@ -73,7 +73,7 @@ def _signals(user32, *, window=None, platform="win32"):
 
 class ReadShellDragSignalsTests(unittest.TestCase):
     def test_reads_full_drag_over_own_window(self) -> None:
-        from ui.windows_drag_hover_detector import SHELL_DRAG_IMAGE_CLASS
+        from platforms.windows.drag_hover_detector import SHELL_DRAG_IMAGE_CLASS
 
         user32 = _FakeUser32()
         signals = _signals(user32)
@@ -132,7 +132,7 @@ class WindowsDragHoverDetectorTests(unittest.TestCase):
         cls._app = QApplication.instance() or QApplication([])
 
     def _detector(self, user32):
-        from ui.windows_drag_hover_detector import WindowsDragHoverDetector
+        from platforms.windows.drag_hover_detector import WindowsDragHoverDetector
 
         started = Mock()
         ended = Mock()
@@ -206,7 +206,7 @@ class WindowsDragHoverDetectorTests(unittest.TestCase):
         ended.assert_called_once_with()
 
     def test_start_runs_polling_only_on_windows(self) -> None:
-        from ui.windows_drag_hover_detector import WindowsDragHoverDetector
+        from platforms.windows.drag_hover_detector import WindowsDragHoverDetector
 
         detector = WindowsDragHoverDetector(
             _window(),
@@ -249,7 +249,7 @@ class HoverPollingFollowsTheWindowTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication, QWidget
 
-        from ui.windows_drag_hover_detector import WindowsDragHoverDetector
+        from platforms.windows.drag_hover_detector import WindowsDragHoverDetector
 
         app = QApplication.instance() or QApplication([])
         window = QWidget()

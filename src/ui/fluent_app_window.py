@@ -19,9 +19,7 @@ from log.log import log
 from main.runtime_state import log_startup_metric as emit_startup_metric
 from ui.widgets.spinning_logo import SpinningLogo
 from ui.window_preset_file_drop import WindowPresetFileDropFilter
-from ui.windows_drag_hover_detector import WindowsDragHoverDetector
-from ui.windows_file_drop import enable_windows_file_drop, use_qt_file_drop
-from ui.windows_screen_presence import register_screen_presence_notifications
+from platforms import current as current_platform
 
 
 # Логотип рисуется на 18 px, как стандартный значок qfluentwidgets; коробка
@@ -114,32 +112,32 @@ class ZapretFluentWindow(FluentWindow):
         # выбирает её вместо WM_DROPFILES, но Windows блокирует OLE при переносе
         # в повышенное окно. Оставляем Qt-путь другим ОС, а Windows — только
         # системный WM_DROPFILES, разрешённый ниже через message filter.
-        self.setAcceptDrops(use_qt_file_drop())
+        self.setAcceptDrops(current_platform().desktop.uses_qt_file_drop())
         self._preset_file_drop_filter = WindowPresetFileDropFilter(
             self,
             target_resolver=self._current_preset_file_drop_target,
             language_resolver=self._current_ui_language,
         )
-        if use_qt_file_drop():
+        if current_platform().desktop.uses_qt_file_drop():
             # На Windows drag-событий Qt нет (см. выше), а фильтр на всё
             # приложение иначе проверял бы каждое событие каждого объекта.
             app.installEventFilter(self._preset_file_drop_filter)
         self._register_windows_file_drop()
         # Событий наведения при переносе Windows повышенному окну не даёт,
         # поэтому подсказку включает опрос косвенных признаков переноса.
-        self._drag_hover_detector = WindowsDragHoverDetector(
+        self._drag_hover_detector = current_platform().desktop.create_drag_hover_detector(
             self,
             on_hover_start=self._preset_file_drop_filter.show_hover_hint,
             on_hover_end=self._preset_file_drop_filter.hide_hover_hint,
         )
-        self._drag_hover_detector.start()
+        if self._drag_hover_detector is not None:
+            self._drag_hover_detector.start()
 
     def _register_windows_file_drop(self) -> None:
         """Привязывает WM_DROPFILES к текущему системному HWND окна."""
-        self._windows_file_drop_enabled = enable_windows_file_drop(self)
         # К тому же HWND привязаны уведомления «сеанс заблокирован» и «дисплей
         # выключен»: по ним анимации перестают рисовать кадры в пустоту.
-        register_screen_presence_notifications(self)
+        self._windows_file_drop_enabled = current_platform().desktop.bind_window(self)
 
     def event(self, event):
         result = super().event(event)

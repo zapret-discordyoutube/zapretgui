@@ -14,6 +14,16 @@ from PyQt6.QtCore import QEvent, QUrl
 from PyQt6.QtWidgets import QApplication
 
 
+
+def _windows_desktop_platform():
+    """The window module asks ``current_platform().desktop``; these scenarios are about the Windows backend."""
+    from types import SimpleNamespace as _NS
+
+    from platforms.windows.desktop import WindowsDesktop
+
+    return _NS(desktop=WindowsDesktop(), has=lambda _capability: False)
+
+
 class _DropEvent:
     def __init__(self, event_type, urls) -> None:
         self._event_type = event_type
@@ -53,8 +63,9 @@ class WindowPresetFileDropTests(unittest.TestCase):
             WindowPresetFileDropFilter,
         )
 
-        with patch(
-            "ui.fluent_app_window.enable_windows_file_drop",
+        with patch.object(
+            __import__("platforms").current().desktop,
+            "bind_window",
             return_value=True,
         ) as enable_native_drop:
             window = ZapretFluentWindow()
@@ -85,8 +96,8 @@ class WindowPresetFileDropTests(unittest.TestCase):
             return real_install(app, event_filter)
 
         with (
-            patch("ui.fluent_app_window.use_qt_file_drop", return_value=False),
-            patch("ui.fluent_app_window.enable_windows_file_drop", return_value=True),
+            patch.object(__import__("platforms").current().desktop, "uses_qt_file_drop", return_value=False),
+            patch.object(__import__("platforms").current().desktop, "bind_window", return_value=True),
             patch.object(QApplication, "installEventFilter", _record_install),
         ):
             window = ZapretFluentWindow()
@@ -104,8 +115,9 @@ class WindowPresetFileDropTests(unittest.TestCase):
     def test_rebinds_native_drop_after_qt_recreates_window_handle(self) -> None:
         from ui.fluent_app_window import ZapretFluentWindow
 
-        with patch(
-            "ui.fluent_app_window.enable_windows_file_drop",
+        with patch.object(
+            __import__("platforms").current().desktop,
+            "bind_window",
             return_value=True,
         ) as enable_native_drop:
             window = ZapretFluentWindow()
@@ -196,8 +208,9 @@ class WindowPresetFileDropTests(unittest.TestCase):
             )
             window = SimpleNamespace(_preset_file_drop_filter=event_filter)
 
-            with patch(
-                "ui.window_preset_file_drop.windows_dropped_file_paths",
+            with patch.object(
+                __import__("platforms").current().desktop,
+                "dropped_file_paths",
                 return_value=[str(preset_path)],
             ):
                 handled = handle_native_preset_file_drop(window, object())
@@ -212,8 +225,9 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
         event_filter = Mock()
         window = SimpleNamespace(_preset_file_drop_filter=event_filter)
-        with patch(
-            "ui.window_preset_file_drop.windows_dropped_file_paths",
+        with patch.object(
+            __import__("platforms").current().desktop,
+            "dropped_file_paths",
             return_value=["C:/Temp/ignored.log"],
         ):
             handled = handle_native_preset_file_drop(window, object())
@@ -225,8 +239,9 @@ class WindowPresetFileDropTests(unittest.TestCase):
         from ui.window_preset_file_drop import handle_native_preset_file_drop
 
         window = SimpleNamespace(_preset_file_drop_filter=Mock())
-        with patch(
-            "ui.window_preset_file_drop.windows_dropped_file_paths",
+        with patch.object(
+            __import__("platforms").current().desktop,
+            "dropped_file_paths",
             return_value=None,
         ):
             handled = handle_native_preset_file_drop(window, object())
@@ -349,10 +364,10 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
     def test_main_window_creates_drag_hover_detector(self) -> None:
         from ui.fluent_app_window import ZapretFluentWindow
-        from ui.windows_drag_hover_detector import WindowsDragHoverDetector
+        from platforms.windows.drag_hover_detector import WindowsDragHoverDetector
 
-        with patch(
-            "ui.fluent_app_window.enable_windows_file_drop",
+        with patch("ui.fluent_app_window.current_platform", _windows_desktop_platform), patch(
+            "platforms.windows.file_drop.enable_windows_file_drop",
             return_value=True,
         ):
             window = ZapretFluentWindow()
@@ -481,8 +496,9 @@ class WindowPresetFileDropTests(unittest.TestCase):
             event_filter.set_drop_delegate(delegate)
             window = SimpleNamespace(_preset_file_drop_filter=event_filter)
 
-            with patch(
-                "ui.window_preset_file_drop.windows_dropped_file_paths",
+            with patch.object(
+                __import__("platforms").current().desktop,
+                "dropped_file_paths",
                 return_value=[str(preset_path)],
             ):
                 handled = handle_native_preset_file_drop(window, object())

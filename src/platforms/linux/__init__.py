@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from platforms.base import NoWorkingSet, Platform
 from platforms.linux.autostart import LinuxGuiAutostart
+from platforms.linux.desktop import LinuxDesktop
 from platforms.linux.launch import LinuxLaunch
 from platforms.linux.messages import LinuxMessageBox
 from platforms.linux.netprobe import LinuxNetProbe
@@ -22,5 +23,6 @@ PLATFORM = Platform(
     processes=LinuxProcesses(),
     netprobe=LinuxNetProbe(),
     autostart=LinuxGuiAutostart(),
+    desktop=LinuxDesktop(),
     working_set=NoWorkingSet(),
 )

@@ -11,7 +11,6 @@ src/dns/local_proxy_windows.py 5
 src/dns/winapi.py 2
 src/hosts/commands.py 1
 src/hosts/ipv6_detection.py 1
-src/main/window_native_commands.py 2
 src/presets/native_dir_watcher.py 1
 src/settings/store.py 5
 src/startup/admin_check_debug.py 19
@@ -23,12 +22,6 @@ src/ui/popup_menu.py 1
 src/ui/popup_menu_style.py 1
 src/ui/runtime_ui_bridge.py 1
 src/ui/tray_menu/popup.py 1
-src/ui/user_idle.py 5
-src/ui/window_first_frame.py 4
-src/ui/windows_drag_hover_detector.py 5
-src/ui/windows_file_drop.py 20
-src/ui/windows_screen_presence.py 16
-src/ui/windows_system_theme.py 13
 src/updater/install/__init__.py 1
 src/updater/install/apply_mode.py 23
 src/updater/install/handoff.py 2

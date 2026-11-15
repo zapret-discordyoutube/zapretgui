@@ -11,14 +11,14 @@ def _value(value):
 
 class WindowsFileDropTests(unittest.TestCase):
     def test_uses_legacy_drop_on_windows_and_qt_drop_elsewhere(self) -> None:
-        from ui.windows_file_drop import use_qt_file_drop
+        from platforms.windows.file_drop import use_qt_file_drop
 
         self.assertFalse(use_qt_file_drop(platform="win32"))
         self.assertTrue(use_qt_file_drop(platform="linux"))
         self.assertTrue(use_qt_file_drop(platform="darwin"))
 
     def test_enables_drop_messages_for_the_native_window(self) -> None:
-        from ui.windows_file_drop import (
+        from platforms.windows.file_drop import (
             ALLOWED_DROP_MESSAGES,
             MSGFLT_ALLOW,
             enable_windows_file_drop,
@@ -66,7 +66,7 @@ class WindowsFileDropTests(unittest.TestCase):
         self.assertEqual(revoked, [0x123456789])
 
     def test_restores_saved_qt_drop_target_for_internal_preset_drag(self) -> None:
-        from ui.windows_file_drop import restore_windows_qt_file_drop
+        from platforms.windows.file_drop import restore_windows_qt_file_drop
 
         accepted: list[tuple[int, bool]] = []
         registered: list[tuple[int, int]] = []
@@ -101,7 +101,7 @@ class WindowsFileDropTests(unittest.TestCase):
         self.assertEqual(registered, [(0x123456789, 0xABCDEF)])
 
     def test_does_not_call_windows_api_on_other_platforms(self) -> None:
-        from ui.windows_file_drop import enable_windows_file_drop
+        from platforms.windows.file_drop import enable_windows_file_drop
 
         window = Mock()
         self.assertFalse(
@@ -115,7 +115,7 @@ class WindowsFileDropTests(unittest.TestCase):
         window.winId.assert_not_called()
 
     def test_reads_all_unicode_paths_and_always_releases_drop_handle(self) -> None:
-        from ui.windows_file_drop import WM_DROPFILES, windows_dropped_file_paths
+        from platforms.windows.file_drop import WM_DROPFILES, windows_dropped_file_paths
 
         paths = [r"C:\\Папка\\Первый.txt", r"D:\\SECOND.TXT"]
         released: list[int] = []
@@ -151,7 +151,7 @@ class WindowsFileDropTests(unittest.TestCase):
         self.assertEqual(released, [0xABCDEF])
 
     def test_ignores_other_native_messages_without_touching_shell(self) -> None:
-        from ui.windows_file_drop import windows_dropped_file_paths
+        from platforms.windows.file_drop import windows_dropped_file_paths
 
         shell32 = Mock()
         message = wintypes.MSG()
@@ -168,7 +168,7 @@ class WindowsFileDropTests(unittest.TestCase):
         shell32.DragFinish.assert_not_called()
 
     def test_releases_drop_handle_when_reading_fails(self) -> None:
-        from ui.windows_file_drop import WM_DROPFILES, windows_dropped_file_paths
+        from platforms.windows.file_drop import WM_DROPFILES, windows_dropped_file_paths
 
         released: list[int] = []
 

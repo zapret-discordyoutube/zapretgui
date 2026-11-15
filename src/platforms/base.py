@@ -259,6 +259,41 @@ class GuiAutostart(Protocol):
         """
 
 
+class Desktop(Protocol):
+    """How the program's window meets the desktop: native messages, file drops, the system theme, idle time.
+
+    Every method is safe to call on any system and answers "nothing to do" where the desktop has no such
+    mechanism (None / False). Windows-only message handling lives in ``platforms/windows``.
+    """
+
+    def user_idle_ms(self) -> int | None:
+        """Milliseconds since the last keyboard or mouse input; None when the system cannot say."""
+
+    def uses_qt_file_drop(self) -> bool:
+        """True when Qt's own drag-and-drop receives files (False: the system hands them over in a native message)."""
+
+    def bind_window(self, window) -> bool:
+        """Binds the window's native handle to system notifications (file drops, locked screen, display off).
+
+        Returns whether native file drop is on. Call again when Qt recreates the native window.
+        """
+
+    def dropped_file_paths(self, message) -> list[str] | None:
+        """Paths from a native file-drop message; None when the message is not a file drop."""
+
+    def create_drag_hover_detector(self, window, *, on_hover_start: Callable[[], None], on_hover_end: Callable[[], None]):
+        """An object with ``start()`` / ``stop()`` that reports files dragged over the window; None when not needed."""
+
+    def handle_native_event(self, window, message) -> bool:
+        """Looks at a native window message. True when it was fully handled and Qt must not process it."""
+
+    def cloak_until_painted(self, window):
+        """Hides a window that is being shown until its first frame is painted (no white flash); None when not needed."""
+
+    def install_theme_watcher(self, app, window):
+        """Follows the system light/dark setting; returns an object with ``cleanup()`` or None."""
+
+
 class Cap:
     """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.
 
@@ -339,6 +374,7 @@ class Platform:
     processes: Processes
     netprobe: NetProbe
     autostart: GuiAutostart
+    desktop: Desktop
     working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()
 

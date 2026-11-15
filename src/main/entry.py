@@ -189,9 +189,9 @@ def _configure_window_appearance(window, appearance_actions) -> None:
 
     try:
         from PyQt6.QtWidgets import QApplication
-        from ui.windows_system_theme import install_windows_system_theme_watcher
+        from platforms import current as current_platform
 
-        window.visual_state.windows_system_theme_watcher = install_windows_system_theme_watcher(
+        window.visual_state.windows_system_theme_watcher = current_platform().desktop.install_theme_watcher(
             QApplication.instance(),
             window,
         )

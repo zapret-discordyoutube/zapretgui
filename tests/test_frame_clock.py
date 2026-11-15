@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QObject
 from PyQt6.QtWidgets import QApplication, QWidget
 
-from ui import windows_screen_presence as presence
+from platforms.windows import screen_presence as presence
 from ui.frame_clock import BASE_FRAME_MS, FrameClock, frame_clock
 
 
@@ -251,12 +251,12 @@ class ScreenPresenceTests(unittest.TestCase):
         import inspect
 
         from main import window_lifecycle
+        from platforms.windows.desktop import WindowsDesktop
 
-        source = inspect.getsource(window_lifecycle)
-        native_event = source[source.index("def nativeEvent") : source.index("def showMinimized")]
+        native_event = inspect.getsource(WindowsDesktop.handle_native_event)
         self.assertEqual(native_event.count("native_message_id(message)"), 1)
         self.assertIn("handle_native_screen_presence(message)", native_event)
-        self.assertIn("frame_clock().resume_all()", source)
+        self.assertIn("frame_clock().resume_all()", inspect.getsource(window_lifecycle))
 
 
 if __name__ == "__main__":

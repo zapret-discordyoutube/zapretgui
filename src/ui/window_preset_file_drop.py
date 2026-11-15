@@ -19,7 +19,7 @@ from qfluentwidgets import FluentIcon, InfoBar, InfoBarPosition, isDarkTheme
 
 from app.ui_texts import tr as tr_catalog
 from log.log import log
-from ui.windows_file_drop import windows_dropped_file_paths
+from platforms import current as current_platform
 
 
 # Сколько держать плашку «файл принят» после броска, пока идёт импорт.
@@ -433,7 +433,7 @@ class WindowPresetFileDropFilter(QObject):
 
 def handle_native_preset_file_drop(window, message) -> bool:
     """Направляет WM_DROPFILES в тот же фильтр, что и обычный Qt Drop."""
-    file_paths = windows_dropped_file_paths(message)
+    file_paths = current_platform().desktop.dropped_file_paths(message)
     if file_paths is None:
         return False
     event_filter = getattr(window, "_preset_file_drop_filter", None)

@@ -513,7 +513,7 @@ class NoMemoryChurnTests(unittest.TestCase):
 
 class NativeRestoreCommandTests(unittest.TestCase):
     def test_restore_command_is_recognised_and_other_commands_are_not(self) -> None:
-        from main import window_native_commands as commands
+        from platforms.windows import native_commands as commands
 
         def message(command: int):
             fake = Mock()
@@ -530,17 +530,17 @@ class NativeRestoreCommandTests(unittest.TestCase):
     def test_lifecycle_tells_presence_before_qt_handles_the_command(self) -> None:
         import inspect
 
-        from main import window_lifecycle
+        from platforms.windows.desktop import WindowsDesktop
 
-        source = inspect.getsource(window_lifecycle.WindowLifecycleMixin.nativeEvent)
-        self.assertLess(source.index("is_native_restore_command"), source.index("handle_native_minimize_command"))
+        source = inspect.getsource(WindowsDesktop.handle_native_event)
+        self.assertLess(source.index("is_native_restore_command(message)"), source.index("handle_native_minimize_command(\n"))
         self.assertIn("_note_return_intent", source)
 
     def test_minimize_command_is_recognised_before_qt_handles_it(self) -> None:
         import inspect
 
-        from main import window_lifecycle
-        from main import window_native_commands as commands
+        from platforms.windows import native_commands as commands
+        from platforms.windows.desktop import WindowsDesktop
 
         def message(command: int):
             fake = Mock()
@@ -552,8 +552,8 @@ class NativeRestoreCommandTests(unittest.TestCase):
             self.assertTrue(commands.is_native_minimize_command(commands.SC_MINIMIZE))
             self.assertFalse(commands.is_native_minimize_command(commands.SC_RESTORE))
 
-        source = inspect.getsource(window_lifecycle.WindowLifecycleMixin.nativeEvent)
-        self.assertLess(source.index("is_native_minimize_command"), source.index("handle_native_minimize_command"))
+        source = inspect.getsource(WindowsDesktop.handle_native_event)
+        self.assertLess(source.index("is_native_minimize_command(message)"), source.index("handle_native_minimize_command(\n"))
         self.assertIn("_note_away_intent", source)
 
     def test_tray_and_minimize_calls_tell_presence_first(self) -> None:
