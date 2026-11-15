@@ -307,6 +307,25 @@ class Tray(Protocol):
         """Builds the tray manager for the main window."""
 
 
+class SystemSettings(Protocol):
+    """Read-only questions to the system's own settings (the registry on Windows, XDG tools on Linux).
+
+    The program's own settings are not here: they live in ``settings.sqlite3`` on every system.
+    """
+
+    def accent_color(self) -> str | None:
+        """The accent colour the person chose in the system as ``#rrggbb``; None when there is none."""
+
+    def url_scheme_handler_registered(self, scheme: str) -> bool:
+        """Whether some program is registered to open ``scheme://`` links (``tg`` for Telegram)."""
+
+    def default_browser_id(self) -> str:
+        """The system's name for the default browser (Windows: the ProgId; Linux: the .desktop file); empty when unknown."""
+
+    def proxy_settings(self) -> tuple[str, str]:
+        """``(proxy server, automatic-config URL)`` the system hands to programs; empty strings when none."""
+
+
 class Cap:
     """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.
 
@@ -389,6 +408,7 @@ class Platform:
     autostart: GuiAutostart
     desktop: Desktop
     tray: Tray
+    system_settings: SystemSettings
     working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()
 

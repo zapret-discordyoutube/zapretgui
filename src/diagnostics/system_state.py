@@ -223,19 +223,9 @@ def _read_antivirus() -> str:
 
 
 def _read_proxy() -> tuple[str, str]:
-    import winreg
+    from platforms import current as current_platform
 
-    with winreg.OpenKey(
-        winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-    ) as key:
-        def value(name: str):
-            try:
-                return winreg.QueryValueEx(key, name)[0]
-            except FileNotFoundError:
-                return ""
-
-        server = str(value("ProxyServer") or "") if value("ProxyEnable") else ""
-        return server, str(value("AutoConfigURL") or "")
+    return current_platform().system_settings.proxy_settings()
 
 
 def _read_tunnels() -> tuple[str, ...]:

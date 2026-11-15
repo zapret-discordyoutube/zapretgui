@@ -3,8 +3,8 @@
 
 import re
 import webbrowser
-import winreg
 from log.log import log
+from platforms import current as current_platform
 
 # Рекламные метки (параметр start) для ссылок на бота @zapretvpns_bot.
 # Формат метки общий для всех проектов Zapret: «<источник>_<место>», источник
@@ -13,13 +13,9 @@ _START_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def is_telegram_installed() -> bool:
-    """Проверяет наличие обработчика tg:// протокола в Windows"""
+    """Есть ли в системе программа для ссылок tg:// (обычно Telegram)"""
     try:
-        # Проверяем реестр на наличие обработчика tg://
-        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "tg") as key:
-            return True
-    except FileNotFoundError:
-        return False
+        return bool(current_platform().system_settings.url_scheme_handler_registered("tg"))
     except Exception as e:
         log(f"Ошибка проверки tg:// протокола: {e}", "DEBUG")
         return False

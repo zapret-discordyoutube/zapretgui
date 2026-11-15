@@ -9,11 +9,6 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-try:
-    import winreg
-except ImportError:  # pragma: no cover - WSL/static checks only
-    winreg = None
-
 from config.runtime_layout import APPLICATION_PATHS
 from settings import schema
 from utils.exit_steps import register_exit_step
@@ -1477,22 +1472,10 @@ def set_selected_theme(value: str) -> bool:
 
 
 def get_windows_system_accent() -> str | None:
-    if winreg is None:
-        return None
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Accent",
-            0,
-            winreg.KEY_READ,
-        ) as key:
-            value, _ = winreg.QueryValueEx(key, "AccentColorMenu")
-            r = value & 0xFF
-            g = (value >> 8) & 0xFF
-            b = (value >> 16) & 0xFF
-            return f"#{r:02x}{g:02x}{b:02x}"
-    except Exception:
-        return None
+    """Акцентный цвет системы как #rrggbb; как его узнать — решает платформа (None: цвета нет)."""
+    from platforms import current as current_platform
+
+    return current_platform().system_settings.accent_color()
 
 
 def get_tray_hint_shown() -> bool:

@@ -148,6 +148,20 @@ class _NoTray:
         )
 
 
+class _NoSystemSettings:
+    def accent_color(self) -> str | None:
+        return None
+
+    def url_scheme_handler_registered(self, scheme: str) -> bool:
+        return False
+
+    def default_browser_id(self) -> str:
+        return ""
+
+    def proxy_settings(self) -> tuple[str, str]:
+        return "", ""
+
+
 class _NoLaunch:
     def process_creation_unix_seconds(self) -> float | None:
         return None
@@ -171,5 +185,6 @@ PLATFORM = Platform(
     autostart=_NoAutostart(),
     desktop=_NoDesktop(),
     tray=_NoTray(),
+    system_settings=_NoSystemSettings(),
     working_set=NoWorkingSet(),
 )

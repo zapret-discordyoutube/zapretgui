@@ -707,15 +707,14 @@ def get_upstream_mtproxy_link(preset_id: str) -> str:
         return ""
 
 def is_telegram_link_handler_registered() -> bool:
-    """Есть ли в Windows программа для ссылок tg:// (обычно это Telegram).
+    """Есть ли в системе программа для ссылок tg:// (обычно это Telegram).
 
     Без неё открытие ссылки показало бы системное окно «выберите приложение».
     """
     try:
-        import winreg
+        from platforms import current as current_platform
 
-        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"tg\shell\open\command"):
-            return True
+        return bool(current_platform().system_settings.url_scheme_handler_registered("tg"))
     except Exception:
         return False
 

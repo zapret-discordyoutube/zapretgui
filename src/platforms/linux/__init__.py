@@ -8,6 +8,7 @@ from platforms.linux.desktop import LinuxDesktop
 from platforms.linux.launch import LinuxLaunch
 from platforms.linux.messages import LinuxMessageBox
 from platforms.linux.netprobe import LinuxNetProbe
+from platforms.linux.system_settings import LinuxSystemSettings
 from platforms.linux.tray_factory import LinuxTray
 from platforms.linux.privileges import LinuxPrivileges
 from platforms.linux.processes import LinuxProcesses
@@ -26,5 +27,6 @@ PLATFORM = Platform(
     autostart=LinuxGuiAutostart(),
     desktop=LinuxDesktop(),
     tray=LinuxTray(),
+    system_settings=LinuxSystemSettings(),
     working_set=NoWorkingSet(),
 )

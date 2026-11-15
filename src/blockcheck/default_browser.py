@@ -24,7 +24,6 @@ BROWSER_FIREFOX = "firefox"
 # Браузеры на движке Chromium, у которых правила (политики) лежат в своём разделе реестра.
 BROWSER_OTHER_CHROMIUM = "other_chromium"
 
-_USER_CHOICE = r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice"
 
 # Начало ProgId → (семейство, имя для человека).
 _PROG_IDS = (
@@ -63,11 +62,10 @@ def browser_from_prog_id(prog_id: str) -> DefaultBrowser:
 
 
 def _read_prog_id() -> str:
-    import winreg
+    """Системное имя браузера по умолчанию (Windows: ProgId, Linux: файл .desktop); как узнать — решает платформа."""
+    from platforms import current as current_platform
 
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _USER_CHOICE) as key:
-        value, _kind = winreg.QueryValueEx(key, "ProgId")
-    return str(value)
+    return str(current_platform().system_settings.default_browser_id() or "")
 
 
 def default_browser(read_prog_id: Callable[[], str] = _read_prog_id) -> DefaultBrowser:
