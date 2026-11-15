@@ -70,3 +70,22 @@ def test_the_tray_facade_takes_its_factory_from_the_platform() -> None:
     source = inspect.getsource(facade.TrayFeature._init_manager)
     assert "current_platform().tray.create_manager" in source
     assert "SystemTrayManager" not in source
+
+
+def test_the_stand_in_notifies_through_notify_send_where_it_exists() -> None:
+    import sys
+
+    from platforms.no_tray import NoTrayManager
+
+    if not sys.platform.startswith("linux"):
+        return
+    manager = NoTrayManager()
+    with patch("shutil.which", return_value="/usr/bin/notify-send"), patch("subprocess.Popen") as popen:
+        manager.show_notification("Заголовок", "Текст", 3000)
+    command = popen.call_args.args[0]
+    assert command[0] == "/usr/bin/notify-send" and "--expire-time=3000" in command and command[-2:] == ["Заголовок", "Текст"]
+    with patch("shutil.which", return_value=None), patch("subprocess.Popen") as popen:
+        manager.show_notification("a", "b")
+    popen.assert_not_called()
+    with patch("shutil.which", return_value="/usr/bin/notify-send"), patch("subprocess.Popen", side_effect=OSError("x")):
+        manager.show_notification("a", "b")  # a missing service never breaks the program

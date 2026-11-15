@@ -49,3 +49,62 @@ def test_the_polkit_rule_names_one_unit_and_the_helper_group() -> None:
 def test_the_engine_path_in_the_code_is_where_the_package_puts_the_binary() -> None:
     assert str(policy.ENGINE_PATH) == "/opt/zapretgui/bin/nfqws2"
     assert str(policy.PROGRAM_ROOT) == "/opt/zapretgui"
+
+
+def test_the_desktop_entry_is_valid_and_points_at_the_installed_program() -> None:
+    entry = configparser.ConfigParser(strict=False, interpolation=None)
+    entry.optionxform = str  # type: ignore[assignment]
+    entry.read_string((PACKAGING / "zapretgui.desktop").read_text(encoding="utf-8"))
+    main = entry["Desktop Entry"]
+    assert main["Type"] == "Application" and main["Terminal"] == "false"
+    assert main["Exec"].split()[0] == "/opt/zapretgui/bin/zapretgui"
+    assert main["Icon"] == "zapretgui" and "Network" in main["Categories"]
+    assert main["MimeType"].rstrip(";") == "application/x-zapret-preset"
+    assert "Name[ru]" not in main and "Comment[ru]" in main
+
+
+def test_the_mime_type_of_the_desktop_entry_is_defined_by_the_package() -> None:
+    import xml.etree.ElementTree as ET
+
+    root = ET.parse(PACKAGING / "zapretgui-preset.xml").getroot()
+    types = [element.get("type") for element in root]
+    assert types == ["application/x-zapret-preset"]
+
+
+def test_install_and_uninstall_put_and_remove_the_same_system_files() -> None:
+    install = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+    uninstall = (PACKAGING / "uninstall.sh").read_text(encoding="utf-8")
+    for path in (
+        "/usr/lib/systemd/system/zapretgui-helper.service",
+        "/usr/share/polkit-1/rules.d/50-zapretgui.rules",
+        "/usr/share/applications/zapretgui.desktop",
+        "/usr/share/mime/packages/zapretgui-preset.xml",
+        "/usr/share/icons/hicolor/256x256/apps/zapretgui.png",
+    ):
+        assert path in install, path
+        assert path in uninstall, path
+    assert "/opt/zapretgui" in install and "rm -rf /opt/zapretgui" in uninstall
+    assert "systemctl enable --now zapretgui-helper.service" in install
+    assert f"nft delete table inet {capture_rules.TABLE_NAME}" in uninstall
+    assert "groupadd --system zapretgui" in install and "groupdel zapretgui" in uninstall
+
+
+def test_the_scripts_are_executable_and_valid_shell() -> None:
+    import os
+    import subprocess
+
+    for name in ("install.sh", "uninstall.sh"):
+        path = PACKAGING / name
+        assert os.access(path, os.X_OK), name
+        done = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+
+
+def test_uninstall_keeps_the_users_data_unless_asked() -> None:
+    uninstall = (PACKAGING / "uninstall.sh").read_text(encoding="utf-8")
+    assert "--purge-user-data" in uninstall
+    purge = uninstall.split("--purge-user-data", 1)[1]
+    for folder in (".config/zapretgui", ".local/share/zapretgui", ".local/state/zapretgui", ".cache/zapretgui", ".config/autostart/zapretgui.desktop"):
+        assert folder in purge
+    before_the_switch = uninstall.split('if [ "${1:-}" = "--purge-user-data" ]')[0]
+    assert "$home" not in before_the_switch and ".config" not in before_the_switch and ".local" not in before_the_switch

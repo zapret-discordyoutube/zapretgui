@@ -17,7 +17,26 @@ class NoTrayManager:
         pass
 
     def show_notification(self, title, message, msec=5000) -> None:
-        pass
+        """Without a tray icon a notification can still reach the person through the desktop's notification service
+        (``notify-send``, present on every common Linux desktop); where that is missing too, nothing is shown."""
+        import shutil
+        import subprocess
+        import sys
+
+        if not sys.platform.startswith("linux"):
+            return
+        program = shutil.which("notify-send")
+        if not program:
+            return
+        try:
+            subprocess.Popen(
+                [program, "--app-name=Zapret", f"--expire-time={int(msec)}", str(title), str(message)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
 
     def show_window(self) -> None:
         port = self.window_port
