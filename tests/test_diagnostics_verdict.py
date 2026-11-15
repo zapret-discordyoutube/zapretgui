@@ -302,6 +302,12 @@ class _Net:
             return self.quic_facts(host, ip)
         return engine.quic_probe.QuicFacts(host=host, cancelled=True)
 
+    def _quic_hello(self, ip, name, **_kwargs):
+        # Поздний повтор QUIC «по имени» (sections.recheck_quic): тот же ответ, что дал сценарий, — без настоящей сети.
+        if self.quic_facts is None or not name:
+            return None
+        return self.quic_facts(name, ip).real_ms
+
     def _protocols(self, host, ip, **_kwargs):
         self.protocols_asked.append((host, ip))
         if self.protocol_facts is not None:
@@ -359,6 +365,7 @@ class _Net:
             # Уточнение причины ходит в сеть само: в сценариях движка оно подменено.
             patch.object(engine.block_cause, "collect", side_effect=self._collect),
             patch.object(engine.quic_probe, "collect", side_effect=self._quic),
+            patch.object(engine.quic_probe, "quic_hello", side_effect=self._quic_hello),
             patch.object(engine.volume_probe, "collect", side_effect=self._volume),
             patch.object(engine.protocol_probe, "collect", side_effect=self._protocols),
             patch.object(sections, "check_ipv6", side_effect=lambda _run: self.ipv6),
