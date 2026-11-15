@@ -130,6 +130,9 @@ def _settings_root() -> Path:
 
 
 def get_settings_database_path() -> Path:
+    if MAIN_DIRECTORY == str(APPLICATION_PATHS.root):
+        # Установленное приложение: путь решает раскладка (Windows: user/, Linux: ~/.config/zapretgui).
+        return APPLICATION_PATHS.settings_database
     return _settings_root() / _SETTINGS_DIR_NAME / _SETTINGS_DATABASE_FILE_NAME
 
 

@@ -117,7 +117,7 @@ class RealEnvironment:
             PROTOCOL_HTTP80: "http80",
             PROTOCOL_QUIC: "udp",
         }.get(scan_protocol, "tcp")
-        app_paths = AppPaths(user_root=APPLICATION_PATHS.root, local_root=APPLICATION_PATHS.root)
+        app_paths = AppPaths(user_root=APPLICATION_PATHS.user_data_root, local_root=APPLICATION_PATHS.root)
         signature, catalogs = load_strategy_catalogs_with_signature(app_paths, ENGINE_WINWS2)
         entries = catalogs.get(catalog_name, {})
         try:

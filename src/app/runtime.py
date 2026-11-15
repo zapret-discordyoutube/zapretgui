@@ -23,7 +23,7 @@ def build_app_runtime(*, initial_ui_state=None, feature_deps_factory: Callable[[
 
     t_paths = _time.perf_counter()
     paths = AppPaths(
-        user_root=APPLICATION_PATHS.root,
+        user_root=APPLICATION_PATHS.user_data_root,
         local_root=APPLICATION_PATHS.root,
     )
     emit_startup_metric(

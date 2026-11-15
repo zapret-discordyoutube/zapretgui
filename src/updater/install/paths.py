@@ -48,6 +48,7 @@ def preferred_update_state_dir() -> Path:
         application_root=APPLICATION_PATHS.root,
         program_data=os.environ.get("ProgramData"),
         local_app_data=os.environ.get("LOCALAPPDATA"),
+        fallback_dir=APPLICATION_PATHS.update_cache_dir,
     )
 
 

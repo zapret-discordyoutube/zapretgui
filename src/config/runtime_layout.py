@@ -46,6 +46,7 @@ def resolve_update_state_dir(
     application_root: str | Path,
     program_data: str | None,
     local_app_data: str | None,
+    fallback_dir: str | Path | None = None,
 ) -> Path:
     """Каталог состояния обновления за пределами каталога установки.
 
@@ -73,18 +74,64 @@ def resolve_update_state_dir(
             continue
         return candidate
 
-    return root / "user" / "update_cache"
+    # Обычно это ``APPLICATION_PATHS.update_cache_dir``: в Linux он в ~/.cache/zapretgui, а не в корне программы.
+    return Path(fallback_dir) if fallback_dir is not None else root / "user" / "update_cache"
+
+
+XDG_LAYOUT_ENV = "ZAPRET_XDG_LAYOUT"
+XDG_APP_DIR_NAME = "zapretgui"
 
 
 @dataclass(frozen=True, slots=True)
 class ApplicationPaths:
-    """Все пути установленного приложения, вычисленные из одного корня."""
+    """Все пути установленного приложения, вычисленные из одного корня.
+
+    Windows и запуск из подготовленной папки: всё под одним корнем (``root``), изменяемое состояние
+    в ``root/user``, ``root/lists/user`` и ``root/presets``.
+
+    Установка в Linux (``for_xdg_layout``): ``root`` (например ``/opt/zapretgui``) только для чтения,
+    а то, что программа пишет, лежит в папках пользователя по XDG:
+
+    * ``data_root``   (``~/.local/share/zapretgui``): пресеты (в том числе встроенные копии, которые программа
+      обновляет сама), свои списки, Lua и фейки пользователя, память движка, премиум-данные;
+    * ``config_root`` (``~/.config/zapretgui``): ``settings.sqlite3``;
+    * ``state_root``  (``~/.local/state/zapretgui``): журналы и отчёты о падениях;
+    * ``cache_root``  (``~/.cache/zapretgui``): временные файлы и скачанные обновления.
+    """
 
     root: Path
+    data_root: Path | None = None
+    config_root: Path | None = None
+    state_root: Path | None = None
+    cache_root: Path | None = None
 
     @classmethod
     def from_root(cls, root: str | Path) -> "ApplicationPaths":
         return cls(root=Path(root).resolve())
+
+    @classmethod
+    def for_xdg_layout(cls, root: str | Path, environ: dict | None = None) -> "ApplicationPaths":
+        """Корень только для чтения + папки пользователя по XDG Base Directory."""
+        env = os.environ if environ is None else environ
+        home = Path(str(env.get("HOME") or "").strip() or Path.home())
+
+        def _base(variable: str, fallback: str) -> Path:
+            value = str(env.get(variable) or "").strip()
+            # По спецификации относительный путь в XDG-переменной игнорируется.
+            return Path(value) if value and os.path.isabs(value) else home / fallback
+
+        return cls(
+            root=Path(root).resolve(),
+            data_root=_base("XDG_DATA_HOME", ".local/share") / XDG_APP_DIR_NAME,
+            config_root=_base("XDG_CONFIG_HOME", ".config") / XDG_APP_DIR_NAME,
+            state_root=_base("XDG_STATE_HOME", ".local/state") / XDG_APP_DIR_NAME,
+            cache_root=_base("XDG_CACHE_HOME", ".cache") / XDG_APP_DIR_NAME,
+        )
+
+    @property
+    def user_data_root(self) -> Path:
+        """Корень, под которым лежат ``presets/`` (программа пишет туда и свои, и встроенные пресеты)."""
+        return self.data_root if self.data_root is not None else self.root
 
     @property
     def runtime_dir(self) -> Path:
@@ -114,7 +161,7 @@ class ApplicationPaths:
     @property
     def user_dir(self) -> Path:
         """Каталог пользовательского состояния; установщик его не трогает."""
-        return self.root / "user"
+        return self.data_root if self.data_root is not None else self.root / "user"
 
     @property
     def user_lua_dir(self) -> Path:
@@ -163,6 +210,8 @@ class ApplicationPaths:
 
     @property
     def lists_user_dir(self) -> Path:
+        if self.data_root is not None:
+            return self.data_root / "lists"
         return self.lists_dir / "user"
 
     @property
@@ -171,19 +220,29 @@ class ApplicationPaths:
 
     @property
     def presets_dir(self) -> Path:
+        """Папка пресетов, которую программа читает и пишет (в Linux — в данных пользователя)."""
+        return self.user_data_root / "presets"
+
+    @property
+    def shipped_presets_dir(self) -> Path:
+        """Пресеты, которые положила поставка (только чтение). Из них при установке с XDG-папками
+        программа заполняет ``presets_dir`` (см. ``config.xdg_seed``)."""
         return self.root / "presets"
 
     @property
     def settings_database(self) -> Path:
-        return self.user_dir / "settings.sqlite3"
+        base = self.config_root if self.config_root is not None else self.user_dir
+        return base / "settings.sqlite3"
 
     @property
     def premium_database(self) -> Path:
-        return self.user_dir / "premium.sqlite3"
+        base = self.config_root if self.config_root is not None else self.user_dir
+        return base / "premium.sqlite3"
 
     @property
     def logs_dir(self) -> Path:
-        return self.user_dir / "logs"
+        base = self.state_root if self.state_root is not None else self.user_dir
+        return base / "logs"
 
     @property
     def crash_logs_dir(self) -> Path:
@@ -191,7 +250,8 @@ class ApplicationPaths:
 
     @property
     def tmp_dir(self) -> Path:
-        return self.user_dir / "tmp"
+        base = self.cache_root if self.cache_root is not None else self.user_dir
+        return base / "tmp"
 
     @property
     def themes_dir(self) -> Path:
@@ -203,7 +263,8 @@ class ApplicationPaths:
 
     @property
     def update_cache_dir(self) -> Path:
-        return self.user_dir / "update_cache"
+        base = self.cache_root if self.cache_root is not None else self.user_dir
+        return base / "update_cache"
 
     @property
     def stable_icon(self) -> Path:
@@ -327,7 +388,24 @@ except InvalidInstallLayout as exc:
     INSTALL_LAYOUT_ERROR = exc
     APPLICATION_ROOT = Path(sys.executable).resolve().parent
     RUNTIME_ROOT = None
-APPLICATION_PATHS = ApplicationPaths.from_root(APPLICATION_ROOT)
+def uses_xdg_layout(*, environ: dict | None = None, platform: str | None = None, packaged: bool | None = None) -> bool:
+    """True, если изменяемое состояние живёт в XDG-папках пользователя, а корень программы только для чтения.
+
+    Всегда в собранной программе под Linux. Из подготовленной папки (``ZAPRET_DEV_ROOT``) — по желанию:
+    ``ZAPRET_XDG_LAYOUT=1`` проверяет раскладку без установки. Windows всегда в одной папке.
+    """
+    env = os.environ if environ is None else environ
+    system = sys.platform if platform is None else platform
+    if not system.startswith("linux"):
+        return False
+    if (PACKAGED_RUNTIME if packaged is None else packaged):
+        return True
+    return str(env.get(XDG_LAYOUT_ENV) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+APPLICATION_PATHS = (
+    ApplicationPaths.for_xdg_layout(APPLICATION_ROOT) if uses_xdg_layout() else ApplicationPaths.from_root(APPLICATION_ROOT)
+)
 # Импортируемые тесты и сборочные инструменты читают ресурсы из src. Само приложение
 # из исходников всё равно останавливается require_packaged_application().
 APPLICATION_RESOURCE_PATHS = (
@@ -352,6 +430,8 @@ __all__ = [
     "RUNTIME_EXE_NAME",
     "RUNTIME_ROOT",
     "SourceApplicationLaunchForbidden",
+    "XDG_LAYOUT_ENV",
+    "uses_xdg_layout",
     "is_dev_root_run",
     "is_packaged_runtime",
     "resolve_dev_root",

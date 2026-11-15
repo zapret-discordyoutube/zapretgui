@@ -277,6 +277,15 @@ def main() -> None:
         pass
 
     try:
+        # Установка с XDG-папками (Linux): создать папки пользователя и заполнить встроенные пресеты.
+        from config.runtime_layout import APPLICATION_PATHS
+        from config.xdg_seed import seed_user_data
+
+        seed_user_data(APPLICATION_PATHS)
+    except Exception as exc:
+        log(f"Не удалось подготовить папки данных пользователя: {exc}", "WARNING")
+
+    try:
         t_settings = _time.perf_counter()
         from settings.store import prepare_settings_database
 
