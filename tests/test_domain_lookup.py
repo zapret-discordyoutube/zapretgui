@@ -1138,6 +1138,22 @@ class ProgramRoadTests(unittest.TestCase):
         self.assertEqual(hosts_file_ipv4("www.youtube.com", path=path), ("1.2.3.4",))
 
 
+class DeadlineTests(unittest.TestCase):
+    def test_page_gives_the_site_check_its_whole_time_and_more(self) -> None:
+        # ``halted`` страницы уходит в проверку сайта как «Стоп»: срок страницы короче — отчёт о сайте пропадает.
+        from diagnostics import engine as diagnostics_engine
+        from diagnostics.limits import SITE_CHECK_DEADLINE
+
+        self.assertGreaterEqual(engine.RUN_DEADLINE_S, SITE_CHECK_DEADLINE + 5.0)
+        self.assertEqual(diagnostics_engine.SITE_CHECK_DEADLINE, SITE_CHECK_DEADLINE)
+
+    def test_blocked_site_has_time_for_the_recheck_the_table_and_the_name_speed(self) -> None:
+        # Отчёт с МТС: youtubei занял 26 с, и при сроке 35 с повтор поодиночке, таблица и замер не успели.
+        from diagnostics.limits import QUIC_RECHECK_NEEDS_S, RECHECK_NEEDS_S, SITE_CHECK_DEADLINE
+
+        self.assertGreaterEqual(SITE_CHECK_DEADLINE, 26.0 + RECHECK_NEEDS_S + QUIC_RECHECK_NEEDS_S + 8.0)
+
+
 class WiringTests(unittest.TestCase):
     def test_server_list_is_large_and_has_encrypted_reference(self) -> None:
         with patch("settings.store.get_custom_dns_servers", return_value=[{"id": "1", "name": "Мой", "ipv4": ["10.9.8.7"]}]):

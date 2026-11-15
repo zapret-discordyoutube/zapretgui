@@ -217,6 +217,8 @@ class ReportRegressionTests(unittest.TestCase):
         self.assertEqual(row.level, "warn")
         self.assertIn("1.1.1.1 не пустили", row.text)
         self.assertIn("3.3.3.3 пустил", row.text)
+        # Строка адреса не знает, успела ли таблица «имя × адрес»: обещать её «ниже» нельзя (отчёт с МТС без таблицы).
+        self.assertNotIn("таблиц", row.text)
 
     def test_consistent_addresses_stay_a_reference(self) -> None:
         tried = [{"address": "1.1.1.1", "result": "ok"}, {"address": "2.2.2.2", "result": "ok"}]

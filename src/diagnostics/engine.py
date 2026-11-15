@@ -76,6 +76,7 @@ from diagnostics.limits import (
     REGISTRY_WAIT_S,
     RUN_DEADLINE,
     RUN_DEADLINE_ALL,
+    SITE_CHECK_DEADLINE,
     RUN_DEADLINE_FULL,
     SITES_AT_ONCE,
 )
@@ -941,8 +942,6 @@ def check_site(host: str, *, should_stop: ShouldStop | None = None, emit: Emit |
         run.close()
 
 
-# Один сайт проверяется быстрее целого набора: дольше ждать незачем.
-SITE_CHECK_DEADLINE = 35.0
 
 
 def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:

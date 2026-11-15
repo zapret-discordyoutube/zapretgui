@@ -21,6 +21,7 @@ import re
 import socket
 import time
 from diagnostics.levels import FAIL, OK, UNKNOWN, WARN, worst
+from diagnostics.limits import SITE_CHECK_DEADLINE
 from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -84,7 +85,9 @@ SOURCE_ERROR = "error"
 SOURCE_LIMIT = "limit"
 SOURCE_SKIPPED = "skipped"
 
-RUN_DEADLINE_S = 40.0
+# Срок проверки сайта внутри и запас сверху: ``halted`` уходит в проверку сайта как «Стоп», и при меньшем
+# сроке страница снимала бы проверку сайта раньше, чем та успела бы закончить, — отчёт о сайте пропал бы целиком.
+RUN_DEADLINE_S = SITE_CHECK_DEADLINE + 5.0
 # Сколько общего срока возвращается, когда проверка сайта построила таблицу избирательности.
 SELECTIVITY_BUDGET_S = 8.0
 DNS_TIMEOUT_S = 2.0
