@@ -107,4 +107,5 @@ def test_uninstall_keeps_the_users_data_unless_asked() -> None:
     for folder in (".config/zapretgui", ".local/share/zapretgui", ".local/state/zapretgui", ".cache/zapretgui", ".config/autostart/zapretgui.desktop"):
         assert folder in purge
     before_the_switch = uninstall.split('if [ "${1:-}" = "--purge-user-data" ]')[0]
+    before_the_switch = "\n".join(line for line in before_the_switch.splitlines() if not line.lstrip().startswith("#"))
     assert "$home" not in before_the_switch and ".config" not in before_the_switch and ".local" not in before_the_switch
