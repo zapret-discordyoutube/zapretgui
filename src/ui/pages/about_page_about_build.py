@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, QObject, Qt
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
 from ui.accessibility import set_state_text
@@ -26,6 +26,42 @@ from ui.widgets.motion_icon import MotionIcon
 from ui.widgets.responsive_row import ResponsiveRow
 from ui.widgets.shimmer_label import ShimmerLabel
 from ui.widgets.spinning_logo import SpinningLogo
+
+
+class HelpCardHeightFollowsText(QObject):
+    """Высота карточки с переносимым описанием берётся из самого текста.
+
+    SettingCard держит фиксированные 70 px, а QLabel с переносом при нехватке ширины
+    занимает несколько строк. Подпись отдаёт высоту по текущей ширине (heightForWidth)
+    после каждого изменения ширины; карточка не ниже прежних 70 px.
+    """
+
+    BASE_HEIGHT = 70
+    PADDING = 12
+
+    def __init__(self, card) -> None:
+        super().__init__(card)
+        self._card = card
+        self._label = card.contentLabel
+        self._label.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self._label and event.type() == QEvent.Type.Resize:
+            self._fit()
+        return False
+
+    def _fit(self) -> None:
+        label = self._label
+        if label.width() <= 0:
+            return
+        need = label.heightForWidth(label.width())
+        if need < 0:
+            return
+        if label.minimumHeight() != need:
+            label.setMinimumHeight(need)
+        height = max(self.BASE_HEIGHT, self._card.titleLabel.sizeHint().height() + need + 2 * self.PADDING)
+        if self._card.height() != height or self._card.maximumHeight() != height:
+            self._card.setFixedHeight(height)
 
 
 @dataclass(slots=True)
@@ -240,6 +276,15 @@ def build_about_page_about_content(
     # Описание переносится на вторую строку: иначе карточка требует ~660 px ширины и на
     # узкой странице (масштаб 150 %) тянет за собой всю страницу «О программе».
     help_card.contentLabel.setWordWrap(True)
+    # Одного переноса мало. QLabel с переносом сам просит узкую колонку (~190 px), а
+    # карточка qfluentwidgets прижимает его влево и оставляет всю свободную ширину пустой
+    # распорке: описание сжималось в 3-4 строки и обрезалось по высоте карточки (70 px).
+    # Колонка с текстом забирает свободную ширину, а подпись растягивается на неё.
+    help_card.hBoxLayout.setStretchFactor(help_card.vBoxLayout, 1000)
+    help_card.vBoxLayout.setAlignment(help_card.contentLabel, Qt.AlignmentFlag(0))
+    # На узкой странице описание уходит во 2-4 строки, а карточка fixed 70 px и раскладка
+    # отдаёт подписи высоту одной строки: карточка подстраивает высоту под перенесённый текст.
+    HelpCardHeightFollowsText(help_card)
     layout.addWidget(help_card)
 
     return AboutPageAboutWidgets(
