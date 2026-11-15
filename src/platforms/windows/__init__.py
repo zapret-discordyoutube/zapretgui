@@ -48,6 +48,8 @@ PLATFORM = Platform(
             Cap.ANTIVIRUS_PROBE,
             Cap.NETWORK_RESET,
             Cap.LOCAL_DNS_PROXY,
+            Cap.DIRECT_ENGINE_PROCESS,
+            Cap.BROWSER_POLICY_SWITCH,
         }
     ),
 )

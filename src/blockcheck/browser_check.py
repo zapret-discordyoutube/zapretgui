@@ -63,15 +63,6 @@ _NET_ERROR = re.compile(r"Page load failed: net::(ERR_[A-Z0-9_]+)")
 DETAIL_CHARS = 200
 _TIMED_OUT = "Page load timed out"
 
-# Где искать: сначала Edge (есть всегда), потом Chrome.
-_CANDIDATES = (
-    r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
-    r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
-    r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
-    r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
-    r"%LocalAppData%\Google\Chrome\Application\chrome.exe",
-)
-
 # Понятные слова к кодам ошибок браузера.
 _ERROR_TEXT = {
     "ERR_CONNECTION_RESET": "соединение сброшено",
@@ -114,14 +105,9 @@ class BrowserVisit:
 
 def find_browsers() -> list[str]:
     """Пути ко всем найденным браузерам: Edge первым, потом Chrome; по одному пути на браузер."""
-    found: list[str] = []
-    for candidate in _CANDIDATES:
-        path = os.path.expandvars(candidate)
-        if "%" in path or not os.path.isfile(path):
-            continue
-        if ntpath.basename(path).lower() not in {ntpath.basename(known).lower() for known in found}:
-            found.append(path)
-    return found
+    from platforms import current as current_platform
+
+    return list(current_platform().system_settings.browser_paths())
 
 
 def find_browser() -> str:
@@ -136,7 +122,17 @@ def error_text(code: str) -> str:
 
 
 def browser_title(name: str) -> str:
-    return {"msedge.exe": "Edge", "chrome.exe": "Chrome"}.get(str(name or "").lower(), str(name or "браузер"))
+    titles = {
+        "msedge.exe": "Edge",
+        "chrome.exe": "Chrome",
+        "microsoft-edge": "Edge",
+        "microsoft-edge-stable": "Edge",
+        "google-chrome": "Chrome",
+        "google-chrome-stable": "Chrome",
+        "chromium": "Chromium",
+        "chromium-browser": "Chromium",
+    }
+    return titles.get(str(name or "").lower(), str(name or "браузер"))
 
 
 def browser_command(browser: str, url: str, profile_dir: str, *, quic: bool, extra: tuple[str, ...] = (), net_log: str = "") -> list[str]:
@@ -197,9 +193,9 @@ def judge_output(output: str, browser: str, exit_code: int | None = None) -> Bro
 
 
 def _hidden_popen(command: list[str], output) -> subprocess.Popen:
-    from winws_runtime.public import CREATE_NO_WINDOW
+    from platforms import current as current_platform
 
-    return subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, creationflags=CREATE_NO_WINDOW)
+    return subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, **current_platform().processes.hidden_process_options())
 
 
 def _kill_on_close_job(process: subprocess.Popen):
@@ -292,6 +288,12 @@ def open_in_browser(
         if process is not None and process.poll() is None:
             process.kill()
             process.wait()
+        if process is not None and hasattr(os, "killpg") and isinstance(getattr(process, "pid", None), int):
+            # Браузер ведёт своих детей (рендерер, GPU): они в его группе процессов, группу гасим целиком.
+            try:
+                os.killpg(process.pid, 9)
+            except (OSError, ProcessLookupError):
+                pass
         if job is not None:
             from winws_runtime.engine import winapi
 

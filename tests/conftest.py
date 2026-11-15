@@ -101,6 +101,27 @@ def _tests_assume_the_encrypted_dns_service_exists(monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
+def _tests_assume_the_browser_policy_switches_exist(monkeypatch):
+    """The BlockCheck tests describe the Windows buttons that switch ECH/QUIC off through the registry policy; outside
+    Windows the platform has no such switch (``Cap.BROWSER_POLICY_SWITCH``), so the platform gets the capability here.
+    Tests that look at the gate itself patch ``platforms.current`` on their own."""
+    if sys.platform == "win32":
+        yield
+        return
+    import dataclasses
+
+    import platforms
+
+    real = platforms.current
+    monkeypatch.setattr(
+        platforms,
+        "current",
+        lambda: (lambda p: dataclasses.replace(p, capabilities=p.capabilities | {platforms.Cap.BROWSER_POLICY_SWITCH}))(real()),
+    )
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _tests_do_not_touch_the_real_dns(monkeypatch, request):
     """Outside Windows no test reads or changes the DNS of the machine it runs on (nmcli, resolvectl, the helper).
     Tests of the Linux backend build their own ``LinuxDns``; the mark ``real_dns`` switches the replacement off."""

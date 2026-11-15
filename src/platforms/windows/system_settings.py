@@ -45,6 +45,26 @@ class WindowsSystemSettings:
         except (OSError, ImportError):
             return ""
 
+    def browser_paths(self) -> list[str]:
+        import ntpath
+        import os
+
+        candidates = (
+            r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+            r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+            r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+            r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+            r"%LocalAppData%\Google\Chrome\Application\chrome.exe",
+        )
+        found: list[str] = []
+        for candidate in candidates:
+            path = os.path.expandvars(candidate)
+            if "%" in path or not os.path.isfile(path):
+                continue
+            if ntpath.basename(path).lower() not in {ntpath.basename(known).lower() for known in found}:
+                found.append(path)
+        return found
+
     def proxy_settings(self) -> tuple[str, str]:
         import winreg
 

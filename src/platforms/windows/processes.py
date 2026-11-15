@@ -94,6 +94,11 @@ class WindowsProcesses:
     Toolhelp / ntdll tables should only be prepared when somebody really looks at processes.
     """
 
+    def hidden_process_options(self) -> dict:
+        import subprocess
+
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+
     def list_processes(self) -> list[tuple[int, str]]:
         from platforms.windows.process_probe import iter_process_records_winapi
 

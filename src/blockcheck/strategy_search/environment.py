@@ -227,6 +227,10 @@ class RealEnvironment:
         return self._winws2
 
     def start_session(self, config_text: str) -> WinwsSession:
+        from platforms import Cap, current as current_platform
+
+        if not current_platform().has(Cap.DIRECT_ENGINE_PROCESS):
+            return self._start_helper_session(config_text)
         from winws_runtime.runtime.scan_guard import mark_external_winws_scan_active
 
         # Флаг «идёт подбор» живёт ограниченное время; полный подбор бывает
@@ -246,6 +250,21 @@ class RealEnvironment:
             self,
         )
 
+    def _start_helper_session(self, config_text: str):
+        """Системы, где движок запускает служба-помощник (Linux): временный @config пробы, запуск через запускатель."""
+        from blockcheck.strategy_search.helper_session import HelperSession
+        from platforms import current as current_platform
+
+        path = os.path.join(self._root, PROBE_CONFIG_NAME)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(config_text)
+
+        def _runner():
+            engine = current_platform().engine
+            return engine.current_runner() or engine.runner("")
+
+        return _ManagedSession(HelperSession(path, runner_getter=_runner, cancelled=lambda: self._cancel.cancelled), self)
+
     def _on_stop_failed(self) -> None:
         self._log("  winws2 не завершился — принудительная остановка")
         try:
@@ -255,12 +274,23 @@ class RealEnvironment:
         self._needs_readiness_check = True
 
     def recover_after_crash(self) -> None:
-        from winws_runtime.runtime.system_ops import stop_own_winws_processes_runtime
+        from platforms import Cap, current as current_platform
 
-        try:
-            stop_own_winws_processes_runtime()
-        except Exception:
-            logger.debug("winws stop after crash failed", exc_info=True)
+        if current_platform().has(Cap.DIRECT_ENGINE_PROCESS):
+            from winws_runtime.runtime.system_ops import stop_own_winws_processes_runtime
+
+            try:
+                stop_own_winws_processes_runtime()
+            except Exception:
+                logger.debug("winws stop after crash failed", exc_info=True)
+        else:
+            # Движок ведёт служба-помощник: остановка снимает и его процесс, и правила перехвата.
+            runner = current_platform().engine.current_runner()
+            try:
+                if runner is not None:
+                    runner.stop()
+            except Exception:
+                logger.debug("engine stop after crash failed", exc_info=True)
         # Пауза нужна только при Kaspersky: это не ожидание готовности, а
         # разрядка между запусками, чтобы фильтры антивируса успели отработать.
         pause = self.strategy_pause_seconds()

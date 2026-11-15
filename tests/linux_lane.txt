@@ -34,3 +34,5 @@ tests/test_platforms_windows_dns_adapters.py
 tests/test_platforms_hosts_file.py
 tests/test_dns_local_proxy_capability.py
 tests/test_updater_package_update.py
+tests/test_blockcheck_helper_session.py
+tests/test_blockcheck_platform_browsers.py

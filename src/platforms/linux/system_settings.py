@@ -28,6 +28,15 @@ class LinuxSystemSettings:
     def default_browser_id(self) -> str:
         return _run_text(["xdg-settings", "get", "default-web-browser"])
 
+    def browser_paths(self) -> list[str]:
+        found: list[str] = []
+        for name in ("microsoft-edge", "microsoft-edge-stable", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+            path = shutil.which(name)
+            real = os.path.realpath(path) if path else ""
+            if real and real not in found:
+                found.append(real)
+        return found
+
     def proxy_settings(self) -> tuple[str, str]:
         for name in ("https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "http_proxy", "HTTP_PROXY"):
             value = os.environ.get(name, "").strip()

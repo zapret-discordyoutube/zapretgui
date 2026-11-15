@@ -60,6 +60,9 @@ class _NoServices:
 
 
 class _NoProcesses:
+    def hidden_process_options(self) -> dict:
+        return {}
+
     def list_processes(self) -> list[tuple[int, str]]:
         return []
 
@@ -161,6 +164,9 @@ class _NoSystemSettings:
 
     def proxy_settings(self) -> tuple[str, str]:
         return "", ""
+
+    def browser_paths(self) -> list[str]:
+        return []
 
 
 class _NoDns:

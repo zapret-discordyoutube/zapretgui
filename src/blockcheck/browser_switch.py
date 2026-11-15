@@ -63,6 +63,11 @@ class SwitchResult:
 
 
 def can_switch(family: str) -> bool:
+    from platforms import Cap, current as current_platform
+
+    # The switches write the Windows registry policy of Edge and Chrome and the Firefox profile under %APPDATA%.
+    if not current_platform().has(Cap.BROWSER_POLICY_SWITCH):
+        return False
     return family in POLICY_KEYS or family == BROWSER_FIREFOX
 
 

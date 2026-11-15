@@ -10,6 +10,9 @@ from platforms.base import ProcessSnapshotError
 class LinuxProcesses:
     """Processes through psutil (already a runtime dependency) and /proc."""
 
+    def hidden_process_options(self) -> dict:
+        return {"start_new_session": True}
+
     def list_processes(self) -> list[tuple[int, str]]:
         try:
             return self.list_processes_strict()

@@ -102,6 +102,10 @@ class ProcessSnapshotError(OSError):
 class Processes(Protocol):
     """Looking at, measuring and stopping other processes."""
 
+    def hidden_process_options(self) -> dict:
+        """Extra ``subprocess.Popen`` arguments that start a helper program without a window of its own and, where the
+        system has process groups, as the leader of one (so the whole group can be stopped)."""
+
     def list_processes(self) -> list[tuple[int, str]]:
         """``(pid, executable name)`` of every process. Lenient: an empty list when the system refuses."""
 
@@ -331,6 +335,10 @@ class SystemSettings(Protocol):
     def proxy_settings(self) -> tuple[str, str]:
         """``(proxy server, automatic-config URL)`` the system hands to programs; empty strings when none."""
 
+    def browser_paths(self) -> list[str]:
+        """Paths of the installed Chromium-family browsers that can load a page without a window (Edge first, then
+        Chrome, then Chromium); one path per browser, empty when there is none."""
+
 
 class DnsAdapters(Protocol):
     """Reading and changing the DNS servers of the network interfaces (Windows: IP Helper API; Linux: NetworkManager
@@ -437,6 +445,8 @@ class Cap:
     MAX_BLOCKER = "max_blocker"  # blocking the MAX messenger through Explorer policies
     ANTIVIRUS_PROBE = "antivirus_probe"  # looking for antivirus programs that disturb the driver (Kaspersky ...)
     NETWORK_RESET = "windows_network_reset"  # "reset the Windows network stack" quick action
+    BROWSER_POLICY_SWITCH = "browser_policy_switch"  # turning ECH/QUIC off in Edge, Chrome (registry policy) and Firefox (profile)
+    DIRECT_ENGINE_PROCESS = "direct_engine_process"  # the program starts the engine process itself (no root helper in between)
     PACKAGE_UPDATE = "package_update"  # a newer version is announced and installed through the system's package manager
     LOCAL_DNS_PROXY = "local_dns_proxy"  # the built-in encrypted DNS (dnscrypt-proxy as a service) can be installed
     WORKING_SET = "working_set"  # the system pages out a hidden window's memory and the program can hold it
