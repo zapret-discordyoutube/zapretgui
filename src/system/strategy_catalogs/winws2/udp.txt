@@ -476,7 +476,7 @@ description = Добавлено, чтобы встроенный профиль
 name = Drop · выключить QUIC
 author = builtin
 label = stock
-description = Отбрасывает пакеты QUIC: браузер и приложение сами переходят на обычное TCP-соединение, которое обходит TCP-профиль. Из пресетов Default + YouTube no QUIC + wssize.
+description = Отбрасывает пакеты QUIC: браузер и приложение сами переходят на обычное TCP-соединение, которое обходит TCP-профиль. Из пресетов Default + YouTube no QUIC + wssize и wssize_ramp.
 --lua-desync=drop
 
 # --- end missing builtin strategy coverage ---

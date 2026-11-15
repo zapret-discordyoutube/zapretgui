@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from diagnostics.block_kind import KIND_OTHER, KINDS, kind_info
 from diagnostics import block_kind, protocol_probe, quic_probe, transfer_probe, volume_probe
+from diagnostics.video_sweep import FAR_RTT_MS
 from diagnostics.limits import DNS_ATTEMPTS, HTTPS_TIMEOUT, SOURCE_HOSTS, SOURCE_REFERENCE
 from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe
 from diagnostics.verdict import DnsState, Level, ReachState, describe_reach
@@ -339,7 +340,7 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
     if item.get("cause_text"):
         rows.append(ViewRow(FAIL, "Как блокируют", str(item["cause_text"])))
     rows.extend(video_node_rows(item.get("video_node")))
-    rows.extend(video_sweep_rows(item.get("video_sweep")))
+    rows.extend(video_sweep_rows(item.get("video_sweep"), item.get("coverage")))
     rows.extend(video_fix_rows(item.get("video_fixes")))
     if "registry" in item:
         rows.append(ViewRow(INFO, "Реестр РКН", _registry_text(item)))
@@ -388,6 +389,7 @@ def video_node_rows(node: object) -> tuple[ViewRow, ...]:
 _SWEEP_WORDS = {
     "ok": (OK, "ответ сервера приходит"),
     "cut_window": (WARN, "ответ сервера режут; с окном приёма в 1 байт приходит — поможет wssize"),
+    "flaky": (WARN, "ответ сервера приходит через раз: {passes} из {tries} попыток"),
     "silent": (FAIL, "соединение есть, а ответ сервера не приходит"),
     "reset": (FAIL, "соединение сбрасывают"),
     "no_route": (FAIL, "соединение не устанавливается"),
@@ -401,7 +403,14 @@ _FIX_WORDS = {
         "Можно сделать: закрыть молчащие кэши провайдера",
         "Кэш YouTube у вашего провайдера ({groups}) не отвечает, а серверы Google отвечают. Если закрыть эти кэши в файле "
         "hosts, плеер перейдёт на серверы Google. Помогает не всем: если видео станет хуже, верните как было. После "
-        "изменения перезапустите браузер.",
+        "изменения перезапустите браузер. Если потом ролик встал и буфер не растёт — обновите вкладку: плеер иногда "
+        "упорно возвращается к закрытому узлу.",
+    ),
+    "return_caches": (
+        "Можно сделать: вернуть кэши провайдера",
+        "Кэш YouTube у провайдера ({groups}) закрыт в hosts, а по настоящему адресу он снова отвечает. Закрытый узел "
+        "плеер иногда выбирает всё равно и стоит на нём, пока не обновить вкладку, — поэтому ожившие кэши лучше вернуть. "
+        "После изменения перезапустите браузер.",
     ),
     "quic_off": (
         "Можно сделать: выключить QUIC для YouTube",
@@ -410,8 +419,9 @@ _FIX_WORDS = {
     ),
     "wssize_preset": (
         "Можно сделать: пресет с малым окном приёма",
-        "Ответ видеосервера режут, но с окном приёма в 1 байт он приходит. Пресет «Default + YouTube no QUIC + wssize» "
-        "включает такое окно для видео YouTube и выключает для него QUIC.",
+        "Ответ видеосервера режут, но с окном приёма в 1 байт он приходит. Пресет «Default + YouTube no QUIC + wssize_ramp» "
+        "включает такое окно для видео YouTube только на начало ответа сервера — потом окно настоящее, и скорость "
+        "не падает в десятки раз, как у обычного wssize, — и выключает для видео QUIC.",
     ),
     "prefer_ipv6": (
         "Можно сделать: пользоваться IPv6",
@@ -439,21 +449,109 @@ def video_fix_rows(fixes: object) -> tuple[ViewRow, ...]:
     return tuple(rows)
 
 
-def video_sweep_rows(sweep: object) -> tuple[ViewRow, ...]:
+def video_sweep_rows(sweep: object, coverage: object = None) -> tuple[ViewRow, ...]:
     """Обход всех найденных видеосерверов: сколько открывается и чем закрыты остальные, по IPv4 и IPv6.
 
     Показывается, когда узлов (с учётом IPv4 и IPv6) больше одного: один узел и так описан выше.
     """
-    nodes = [node for node in (sweep or ()) if isinstance(node, dict)]
-    if len(nodes) < 2:
+    every = [node for node in (sweep or ()) if isinstance(node, dict)]
+    nodes = [node for node in every if not node.get("closed")]
+    closed = [node for node in every if node.get("closed")]
+    if len(nodes) < 2 and not closed:
         return ()
-    working = [node for node in nodes if node.get("code") == "ok"]
-    level = OK if len(working) == len(nodes) else (WARN if working else FAIL)
-    rows = [ViewRow(level, "Видеосерверы YouTube", f"отвечают {len(working)} из {len(nodes)} проверенных адресов")]
+    rows: list[ViewRow] = []
+    if nodes:
+        working = [node for node in nodes if node.get("code") == "ok"]
+        flaky = [node for node in nodes if node.get("code") == "flaky"]
+        level = OK if len(working) == len(nodes) else (WARN if working or flaky else FAIL)
+        text = f"отвечают {len(working)} из {len(nodes)} проверенных адресов"
+        if flaky:
+            text += f", ещё {len(flaky)} — через раз"
+        rows.append(ViewRow(level, "Видеосерверы YouTube", text))
     for node in nodes:
-        node_level, words = _SWEEP_WORDS.get(str(node.get("code")), _SWEEP_WORDS["unclear"])
-        rows.append(ViewRow(node_level, f"Видеосервер {node.get('host', '')} ({node.get('family', '')})", f"{node.get('ip', '')}: {words}"))
+        rows.append(_sweep_node_row(node))
+    rows.extend(_distance_rows(nodes, coverage))
+    for node in closed:
+        node_level, words = _sweep_node_words(node)
+        rows.append(
+            ViewRow(
+                INFO if node.get("code") not in ("ok", "flaky") else WARN,
+                f"Закрытый в hosts кэш {node.get('host', '')}",
+                f"по настоящему адресу {node.get('ip', '')}: {words}",
+            )
+        )
     return tuple(rows)
+
+
+def _sweep_node_words(node: dict) -> tuple[str, str]:
+    level, words = _SWEEP_WORDS.get(str(node.get("code")), _SWEEP_WORDS["unclear"])
+    words = words.format(passes=node.get("passes", 0), tries=node.get("tries", 0))
+    rtt = node.get("rtt_ms")
+    if isinstance(rtt, (int, float)):
+        words += f"; до узла {rtt:.0f} мс" + (" — далеко" if rtt >= FAR_RTT_MS else "")
+    return level, words
+
+
+def _sweep_node_row(node: dict) -> ViewRow:
+    level, words = _sweep_node_words(node)
+    return ViewRow(level, f"Видеосервер {node.get('host', '')} ({node.get('family', '')})", f"{node.get('ip', '')}: {words}")
+
+
+# Окно приёма, которое сервер видит у пресета с wssize_ramp: 65535 × 2 (множитель занижен до 1).
+_RAMP_WINDOW_BYTES = 65535 * 2
+
+
+def _cap_mbit(rtt_ms: float) -> float:
+    """Потолок скорости через окно ``_RAMP_WINDOW_BYTES`` при круге ``rtt_ms``: окно за круг."""
+    return _RAMP_WINDOW_BYTES * 8 / (rtt_ms / 1000.0) / 1_000_000
+
+
+def _wssize_kind(coverage: object) -> str:
+    """Какой wssize в профиле, который ловит видеосервер: "ramp", "stock" или пусто."""
+    if not isinstance(coverage, dict):
+        return ""
+    text = f"{coverage.get('strategy_name') or ''} {coverage.get('strategy_text') or ''}".lower()
+    if "wssize_ramp" in text or "wssize ramp" in text:
+        return "ramp"
+    return "stock" if "wssize" in text else ""
+
+
+def _distance_rows(nodes: list[dict], coverage: object) -> list[ViewRow]:
+    """Расстояние до видеосерверов и, если видео идёт через wssize, потолок скорости по нему."""
+    timed = [node for node in nodes if isinstance(node.get("rtt_ms"), (int, float)) and node["rtt_ms"] > 0]
+    rows: list[ViewRow] = []
+    far = [node for node in timed if node["rtt_ms"] >= FAR_RTT_MS]
+    if far:
+        names = ", ".join(f"{node.get('host', '')} ({node['rtt_ms']:.0f} мс)" for node in far)
+        rows.append(
+            ViewRow(
+                INFO,
+                "Далёкие видеосерверы",
+                f"{names}: такой узел далеко, скорее всего за границей. Видео с него грузится медленно и без всякой "
+                "блокировки: свежего ролика ещё нет в кэше рядом с вами, и YouTube отдаёт его издалека. Обычно через "
+                "некоторое время ролик попадает в ближний кэш — помогает подождать и обновить страницу.",
+            )
+        )
+    kind = _wssize_kind(coverage)
+    if kind and timed:
+        near, slow = min(node["rtt_ms"] for node in timed), max(node["rtt_ms"] for node in timed)
+        span = f"при {near:.0f} мс до узла — до {_cap_mbit(near):.0f} Мбит/с"
+        if slow - near >= 20:
+            span += f", при {slow:.0f} мс — до {_cap_mbit(slow):.0f} Мбит/с"
+        if kind == "ramp":
+            text = (
+                f"видео идёт через малое окно (wssize_ramp): окно приёма не больше 128 КБ, поэтому скорость ограничена "
+                f"расстоянием до узла — {span}."
+            )
+            rows.append(ViewRow(INFO, "Потолок скорости с wssize", text))
+        else:
+            text = (
+                "видео идёт через обычный wssize: он занижает множитель окна приёма на всё соединение, и сервер видит "
+                f"окно в десятки раз меньше настоящего. Даже в лучшем случае {span}, а обычно намного меньше. Пресет "
+                "«Default + YouTube no QUIC + wssize_ramp» открывает окно после начала ответа сервера."
+            )
+            rows.append(ViewRow(WARN, "Потолок скорости с wssize", text))
+    return rows
 
 
 def blocker_rows(item: dict) -> tuple[ViewRow, ...]:

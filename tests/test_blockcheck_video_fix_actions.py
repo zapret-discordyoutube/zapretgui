@@ -55,6 +55,21 @@ class PresetButtonTests(unittest.TestCase):
         self.assertTrue((folder / YOUTUBE_FIX_PRESET).is_file())
         self.assertTrue((folder / YOUTUBE_FIX_PRESET.replace(".txt", " (game filter).txt")).is_file())
 
+    def test_target_presets_keep_speed_with_wssize_ramp(self) -> None:
+        """Обычный wssize занижает множитель окна на всё соединение (скорость падает в десятки раз),
+        поэтому кнопка ведёт на пресет с wssize_ramp, а ему нужны пустые подтверждения (--wf-tcp-empty=1)."""
+        from pathlib import Path
+
+        from diagnostics.problems import YOUTUBE_FIX_PRESET
+
+        folder = Path(__file__).resolve().parents[1] / "src" / "presets" / "builtin" / "winws2"
+        for name in (YOUTUBE_FIX_PRESET, YOUTUBE_FIX_PRESET.replace(".txt", " (game filter).txt")):
+            lines = (folder / name).read_text(encoding="utf-8").splitlines()
+            with self.subTest(preset=name):
+                self.assertIn("--wf-tcp-empty=1", lines)
+                self.assertIn("--lua-desync=wssize_ramp:wsize=1:scale=1", lines)
+                self.assertFalse(any(line.startswith("--lua-desync=wssize:") for line in lines))
+
 
 class ActionWordsTests(unittest.TestCase):
     def test_every_video_fix_action_has_text_description_and_icon(self) -> None:

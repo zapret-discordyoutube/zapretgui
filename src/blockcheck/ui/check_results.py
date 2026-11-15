@@ -104,7 +104,7 @@ _ACTION_DESCRIPTION = {
     "telegram_proxy": "Открывает «Telegram Proxy»: Telegram закрыт по адресу, и обход Zapret ему обычно не помогает",
     "youtube_block_caches": "Закрывает в файле hosts молчащие кэши YouTube у провайдера: плеер перейдёт на серверы Google",
     "youtube_unblock_caches": "Убирает из файла hosts закрытые кэши YouTube",
-    "youtube_preset": "Включает пресет «Default + YouTube no QUIC + wssize»: малое окно приёма для видео и без QUIC",
+    "youtube_preset": "Включает пресет «Default + YouTube no QUIC + wssize_ramp»: малое окно приёма на начало видео и без QUIC",
     "profiles": "Открывает «Профили пресета»: закрытое имя не ловит ни один профиль со стратегией, его надо добавить в список профиля",
     "orchestra_settings": "Открывает «Настройки оркестратора»: закреплённые за сайтами стратегии и белый список",
 }

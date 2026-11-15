@@ -4299,3 +4299,21 @@ description = Составная стратегия: свои действия �
 --lua-desync=slowsplit:pos=1,midsld:delay=60:disorder
 --payload=http_req
 --lua-desync=slowsplit:pos=method+2,midsld:delay=60:disorder
+
+[wssize_ramp_multidisorder_complex]
+name = MultiDisorder Complex + WSSize Ramp · из googlevideo.com
+author = builtin
+label = experimental
+description = Составная стратегия: для узлов googlevideo, которые принимают приветствие и молчат. Окно приёма 1 байт только на начало ответа сервера, потом настоящее (wssize_ramp), поэтому скорость не падает в десятки раз, как у обычного wssize 1:1. Нужен --wf-tcp-empty=1 в пресете. Работает только по TCP, поэтому QUIC для YouTube выключают. Из пресета Default + YouTube no QUIC + wssize_ramp.
+--lua-desync=wssize_ramp:wsize=1:scale=1
+--out-range=-d8
+--lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
+[wssize_ramp_multisplit_complex]
+name = MultiSplit Complex + WSSize Ramp · из googlevideo.com
+author = builtin
+label = experimental
+description = Составная стратегия: для узлов googlevideo, которые принимают приветствие и молчат. Окно приёма 1 байт только на начало ответа сервера, потом настоящее (wssize_ramp), поэтому скорость не падает в десятки раз, как у обычного wssize 1:1. Нужен --wf-tcp-empty=1 в пресете. Работает только по TCP, поэтому QUIC для YouTube выключают. Из пресета Default + YouTube no QUIC + wssize_ramp (game filter).
+--lua-desync=wssize_ramp:wsize=1:scale=1
+--out-range=-d8
+--lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1

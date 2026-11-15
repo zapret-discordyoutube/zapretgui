@@ -552,7 +552,8 @@ def collect_problems(
 
 
 # Пресет, на который ведёт кнопка исправления видео; вариант «(game filter)» выбирает страница по текущему пресету.
-YOUTUBE_FIX_PRESET = "Default + YouTube no QUIC + wssize.txt"
+# wssize_ramp, а не обычный wssize: тот занижает множитель окна на всё соединение, и скорость падает в десятки раз.
+YOUTUBE_FIX_PRESET = "Default + YouTube no QUIC + wssize_ramp.txt"
 YOUTUBE_SITE = "youtube"
 
 
@@ -567,6 +568,7 @@ _FIX_ACTION = {
     video_fixes.FIX_BLOCK_CACHES: "youtube_block_caches",
     video_fixes.FIX_QUIC_OFF: "youtube_preset",
     video_fixes.FIX_WSSIZE_PRESET: "youtube_preset",
+    video_fixes.FIX_RETURN_CACHES: "youtube_unblock_caches",
 }
 
 
@@ -665,7 +667,23 @@ def video_fix_problems(
             key = str(fix["key"])
             if video_fix_journal.tried_without_luck(journal, _FIX_ACTION.get(key, ""), network):
                 continue
-            if key == video_fixes.FIX_BLOCK_CACHES and key not in offered:
+            if key == video_fixes.FIX_RETURN_CACHES and key not in offered:
+                groups = ", ".join(fix["groups"])
+                rows.append(
+                    problem(
+                        Level.WARN,
+                        f"Кэши YouTube, закрытые в hosts ({groups}), снова отвечают: их лучше вернуть",
+                        (
+                            "Закрытый узел плеер иногда выбирает всё равно и стоит на нём, пока не обновить вкладку.",
+                            "После изменения перезапустите браузер.",
+                        ),
+                        action="youtube_unblock_caches",
+                        title="Закрытые кэши YouTube ожили",
+                        site=YOUTUBE_SITE,
+                    )
+                )
+                offered.add(key)
+            elif key == video_fixes.FIX_BLOCK_CACHES and key not in offered:
                 groups = ", ".join(fix["groups"])
                 rows.append(
                     problem(
@@ -674,6 +692,7 @@ def video_fix_problems(
                         "их можно закрыть в hosts, и плеер перейдёт на серверы Google",
                         (
                             "Помогает не всем: если видео станет хуже, верните кэши кнопкой «Вернуть кэши YouTube».",
+                            "Если ролик встал и буфер не растёт, обновите вкладку: плеер иногда упорно возвращается к закрытому узлу.",
                             "После изменения перезапустите браузер.",
                         ),
                         action="youtube_block_caches",
@@ -692,8 +711,9 @@ def video_fix_problems(
                         if window
                         else "QUIC до видеосерверов YouTube режут",
                         (
-                            "Пресет «Default + YouTube no QUIC + wssize» включает малое окно приёма для видео YouTube "
-                            "и выключает для него QUIC: видео пойдёт по TCP.",
+                            "Пресет «Default + YouTube no QUIC + wssize_ramp» включает малое окно приёма для видео YouTube только "
+                            "на начало ответа сервера (потом окно настоящее, и скорость не падает в десятки раз, как у обычного wssize) и выключает для него QUIC: "
+                            "видео пойдёт по TCP.",
                         ),
                         action="youtube_preset",
                         target=YOUTUBE_FIX_PRESET,
@@ -702,12 +722,15 @@ def video_fix_problems(
                     )
                 )
                 offered.add("preset")
-    if cache_block:
+    if cache_block and video_fixes.FIX_RETURN_CACHES not in offered:
         rows.append(
             problem(
                 Level.OK,
                 f"Кэши YouTube закрыты в hosts ({', '.join(cache_block)}). Если видео стало хуже, их можно вернуть",
-                ("После изменения перезапустите браузер.",),
+                (
+                    "Если ролик встал и буфер не растёт, обновите вкладку: плеер иногда упорно возвращается к закрытому узлу.",
+                    "После изменения перезапустите браузер.",
+                ),
                 action="youtube_unblock_caches",
                 title="Кэши YouTube закрыты",
                 site=YOUTUBE_SITE,

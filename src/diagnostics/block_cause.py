@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import socket
 import ssl
 import threading
@@ -165,6 +166,9 @@ class HelloResult:
     detail: str = ""
     # За сколько установилось шифрование. None — не установилось.
     ms: float | None = None
+    # За сколько установилось соединение TCP (один круг до сервера и обратно): мера расстояния до узла,
+    # видна и тогда, когда шифрование режут. None — соединения не было.
+    connect_ms: float | None = None
 
     @property
     def answered(self) -> bool:
@@ -287,29 +291,34 @@ def tls_hello(
     sock: socket.socket | None = None
     wrapped: ssl.SSLSocket | None = None
     connected = False
+    connect_ms: float | None = None
     try:
         sock = socket.socket(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM)
         if not token.track(sock):
             return HelloResult(HELLO_CANCELLED)
         sock.settimeout(timeout)
+        dialed = time.perf_counter()
         sock.connect((ip, int(port)))
         connected = True
         started = time.perf_counter()
+        connect_ms = (started - dialed) * 1000.0
         wrapped = context.wrap_socket(sock, server_hostname=name, do_handshake_on_connect=False)
         token.track(wrapped)
         wrapped.settimeout(timeout)
         wrapped.do_handshake()
-        return HelloResult(HELLO_OK, ms=(time.perf_counter() - started) * 1000.0)
+        return HelloResult(HELLO_OK, ms=(time.perf_counter() - started) * 1000.0, connect_ms=connect_ms)
     except (socket.timeout, TimeoutError):
         if token.cancelled:
             return HelloResult(HELLO_CANCELLED)
-        return HelloResult(HELLO_TIMEOUT if connected else HELLO_CONNECT)
+        return HelloResult(HELLO_TIMEOUT, connect_ms=connect_ms) if connected else HelloResult(HELLO_CONNECT)
     except ssl.SSLError as error:
-        return HelloResult(HELLO_CANCELLED) if token.cancelled else _hello_failure(error)
+        if token.cancelled:
+            return HelloResult(HELLO_CANCELLED)
+        return dataclasses.replace(_hello_failure(error), connect_ms=connect_ms)
     except OSError as error:
         if token.cancelled:
             return HelloResult(HELLO_CANCELLED)
-        return HelloResult(HELLO_RESET if connected else HELLO_CONNECT, str(error))
+        return HelloResult(HELLO_RESET, str(error), connect_ms=connect_ms) if connected else HelloResult(HELLO_CONNECT, str(error))
     finally:
         for item in (wrapped, sock):
             if item is not None:

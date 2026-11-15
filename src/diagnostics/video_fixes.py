@@ -18,6 +18,7 @@ __all__ = [
     "FIX_BLOCK_CACHES",
     "FIX_PREFER_IPV6",
     "FIX_QUIC_OFF",
+    "FIX_RETURN_CACHES",
     "FIX_WAIT_RELOAD",
     "FIX_WSSIZE_PRESET",
     "recommend",
@@ -33,8 +34,12 @@ FIX_WSSIZE_PRESET = "wssize_preset"
 FIX_PREFER_IPV6 = "prefer_ipv6"
 # Видео идёт через кэш провайдера: если ролика в кэше нет, помогает подождать и обновить страницу.
 FIX_WAIT_RELOAD = "wait_reload"
+# Кэш, закрытый в hosts, по настоящему адресу снова отвечает: его пора вернуть. Плеер иногда упорно
+# возвращается к закрытому узлу и стоит, пока не обновить вкладку (форум, ноябрь 2026).
+FIX_RETURN_CACHES = "return_caches"
 
-_ANSWERS = {"ok", "cut_window"}
+# «Через раз» — тоже ответ: узел не мёртв, закрывать его в hosts незачем.
+_ANSWERS = {"ok", "cut_window", "flaky"}
 
 
 def _nodes(sweep: object) -> list[dict]:
@@ -56,10 +61,16 @@ def recommend(sweep: object, *, quic: str = "") -> list[dict]:
 
     ``quic`` — код QUIC видеосервера (``quic_probe``): «blocked_by_name» значит, что QUIC режут.
     """
-    nodes = _nodes(sweep)
-    if not nodes:
-        return []
+    every = _nodes(sweep)
+    # Закрытые в hosts узлы браузер не видит: по ним решается только, не пора ли их вернуть.
+    closed = [node for node in every if node.get("closed")]
+    nodes = [node for node in every if not node.get("closed")]
     fixes: list[dict] = []
+    alive = sorted({str(node.get("group")) for node in closed if node.get("group") and node.get("code") in _ANSWERS})
+    if alive:
+        fixes.append({"key": FIX_RETURN_CACHES, "groups": alive})
+    if not nodes:
+        return fixes
     google_answers = any(not node.get("provider") and node.get("owner") and node.get("code") in _ANSWERS for node in nodes)
     groups = _failing_provider_groups(nodes)
     # Закрывать кэш имеет смысл, только если есть куда уйти: хоть один сервер Google отвечает.

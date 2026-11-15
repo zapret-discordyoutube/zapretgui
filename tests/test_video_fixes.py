@@ -76,3 +76,26 @@ class ViewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClosedAndFlakyTests(unittest.TestCase):
+    """Закрытые в hosts кэши проверяются по настоящему адресу; «через раз» — не повод закрывать узел."""
+
+    def test_closed_cache_answering_again_is_offered_back_first(self) -> None:
+        found = fixes.recommend([{**_node("ok", group="sn-c"), "closed": True}, _google("ok")])
+        self.assertEqual(_keys(found)[0], fixes.FIX_RETURN_CACHES)
+        self.assertEqual(found[0]["groups"], ["sn-c"])
+
+    def test_closed_cache_still_silent_is_left_closed(self) -> None:
+        found = fixes.recommend([{**_node("silent", group="sn-c"), "closed": True}, _google("ok")])
+        self.assertNotIn(fixes.FIX_RETURN_CACHES, _keys(found))
+        # И снова закрыть его не предлагается: он уже закрыт.
+        self.assertNotIn(fixes.FIX_BLOCK_CACHES, _keys(found))
+
+    def test_flaky_cache_is_not_closed(self) -> None:
+        self.assertNotIn(fixes.FIX_BLOCK_CACHES, _keys(fixes.recommend([_node("flaky"), _google("ok")])))
+
+    def test_return_words_explain_the_stuck_player(self) -> None:
+        rows = view.video_fix_rows([{"key": fixes.FIX_RETURN_CACHES, "groups": ["sn-c"]}])
+        self.assertIn("sn-c", rows[0].text)
+        self.assertIn("обновить вкладку", rows[0].text)

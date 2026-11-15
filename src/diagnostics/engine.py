@@ -215,8 +215,10 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool, volume
             run, target, service, host, f"{nodes.note}; первый видеосервер не ответил, проверен запасной", full=full, volume=volume
         )
     best = probe if probe.reach_state == ReachState.OK else first
-    if full and len(nodes.hosts) > 1 and not run.dns_cancelled():
-        best.video_sweep = video_sweep.collect(run, nodes.hosts)
+    # Закрытые кнопкой «Закрыть кэши YouTube» группы проверяются по настоящему адресу: ожили — их пора вернуть.
+    closed_groups = youtube_cache_block.read_blocked_groups() if full else ()
+    if full and (len(nodes.hosts) > 1 or closed_groups) and not run.dns_cancelled():
+        best.video_sweep = video_sweep.collect(run, nodes.hosts, closed_groups)
     if full and best.reach is not None and best.reach.ip and best.reach_state != ReachState.OK and not run.dns_cancelled():
         # Видеосервер не открылся: чей он и отдаёт ли он видео через другие адреса Google.
         best.video_facts = video_node_check.collect(run, best.host, best.reach, best.cause_facts)

@@ -116,3 +116,23 @@ class NormalizeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClosedCacheProblemTests(unittest.TestCase):
+    def test_closed_nodes_do_not_count_in_the_before_after_share(self) -> None:
+        sweep = [{"code": "ok"}, {"code": "silent"}, {"code": "ok", "closed": True}, {"code": "flaky"}]
+        self.assertEqual(journal.summary(sweep), {"answering": 2, "total": 3})
+
+    def test_revived_closed_cache_gets_a_return_button_instead_of_the_plain_note(self) -> None:
+        closed = SweepFacts("rr1---sn-hxb54vo-3046.googlevideo.com", "203.0.113.5", video_sweep.FAMILY_V4,
+                            HelloResult(block_cause.HELLO_OK), None, _PROVIDER, closed=True)
+        rows = problems.video_fix_problems(_collected(closed, _GOOGLE_OK), cache_block=("sn-hxb54vo-3046",), journal=[])
+        self.assertEqual(_titles(rows), ["Закрытые кэши YouTube ожили"])
+        self.assertEqual(rows[0]["action"], "youtube_unblock_caches")
+
+    def test_still_silent_closed_cache_keeps_the_plain_note_with_the_reload_hint(self) -> None:
+        closed = SweepFacts("rr1---sn-hxb54vo-3046.googlevideo.com", "203.0.113.5", video_sweep.FAMILY_V4,
+                            HelloResult(block_cause.HELLO_TIMEOUT), None, _PROVIDER, closed=True)
+        rows = problems.video_fix_problems(_collected(closed, _GOOGLE_OK), cache_block=("sn-hxb54vo-3046",), journal=[])
+        self.assertEqual(_titles(rows), ["Кэши YouTube закрыты"])
+        self.assertTrue(any("обновите вкладку" in line for line in rows[0]["advice"]))

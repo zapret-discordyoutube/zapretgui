@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import socket
+import struct
 import ssl
 import subprocess
 import tempfile
@@ -80,6 +81,24 @@ class HelloTests(unittest.TestCase):
 
         self.assertEqual(result.kind, bc.HELLO_RESET)
         self.assertFalse(result.answered)
+
+    def test_connect_time_is_kept_even_when_the_hello_is_cut(self) -> None:
+        """Время соединения TCP — мера расстояния до узла; оно нужно и тогда, когда шифрование режут."""
+        cut = self._hello(self._port(lambda connection: connection.recv(4096)))
+        self.assertEqual(cut.kind, bc.HELLO_RESET)
+        self.assertIsNotNone(cut.connect_ms)
+        self.assertGreaterEqual(cut.connect_ms, 0.0)
+        self.assertIsNone(self._hello(_closed_port()).connect_ms)
+
+    def test_connect_time_is_kept_on_a_hard_reset(self) -> None:
+        def rst(connection) -> None:
+            connection.recv(4096)
+            # Закрытие с нулевым ожиданием — сброс (RST), как у фильтра, который рвёт соединение.
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+
+        result = self._hello(self._port(rst))
+        self.assertEqual(result.kind, bc.HELLO_RESET)
+        self.assertIsNotNone(result.connect_ms)
 
     def test_hello_silently_swallowed_is_timeout(self) -> None:
         release = threading.Event()

@@ -38,12 +38,13 @@ VERDICT_HELPED = "helped"
 VERDICT_WORSE = "worse"
 VERDICT_SAME = "same"
 
-_ANSWERS = {"ok", "cut_window"}
+_ANSWERS = {"ok", "cut_window", "flaky"}
 
 
 def summary(sweep: object) -> dict:
-    """Сколько адресов видеосерверов ответило из проверенных."""
-    nodes = [node for node in (sweep or ()) if isinstance(node, dict)]
+    """Сколько адресов видеосерверов ответило из проверенных. Закрытые в hosts узлы не считаются:
+    браузер до них не дойдёт, их проверка — только ради совета вернуть кэши."""
+    nodes = [node for node in (sweep or ()) if isinstance(node, dict) and not node.get("closed")]
     return {"answering": sum(1 for node in nodes if node.get("code") in _ANSWERS), "total": len(nodes)}
 
 
