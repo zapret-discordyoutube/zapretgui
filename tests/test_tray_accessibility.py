@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from tray import SystemTrayManager
+from platforms.windows.tray import SystemTrayManager
 
 
 class _DialogButton:
@@ -70,7 +70,7 @@ class TrayAccessibilityTests(unittest.TestCase):
         manager = SystemTrayManager.__new__(SystemTrayManager)
         _MessageBox.instances = []
 
-        with patch("tray.QMessageBox", _MessageBox):
+        with patch("platforms.windows.tray.QMessageBox", _MessageBox):
             confirmed = SystemTrayManager._confirm_disable_discord_restart(manager)
 
         self.assertTrue(confirmed)

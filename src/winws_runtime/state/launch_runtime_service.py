@@ -102,7 +102,7 @@ class LaunchRuntimeService:
                 "winws_runtime.runtime.lifecycle_feedback.on_dpi_start_finished",
                 "presets.ui.control.zapret1.page.Zapret1ModeControlPage._get_current_dpi_runtime_state",
                 "presets.ui.control.zapret2.page.Zapret2ModeControlPage._on_ui_state_changed",
-                "tray.SystemTrayManager._is_launch_running/_launch_phase via RuntimeFeature.snapshot",
+                "platforms.windows.tray.SystemTrayManager._is_launch_running/_launch_phase via RuntimeFeature.snapshot",
             ),
             allowed_auxiliary_writers=(
                 "нет: внешние места должны вызывать методы LaunchRuntimeService",

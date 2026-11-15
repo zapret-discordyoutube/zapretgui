@@ -322,7 +322,7 @@ def check_page_navigation_uses_page_host(files: list[Path]) -> list[Problem]:
 def check_main_window_not_business_container(files: list[Path]) -> list[Problem]:
     scopes = [
         path for path in files
-        if _under(path, "src/main/", "src/ui/") or path.relative_to(REPO_ROOT).as_posix() == "src/tray.py"
+        if _under(path, "src/main/", "src/ui/") or path.relative_to(REPO_ROOT).as_posix() == "src/platforms/windows/tray.py"
     ]
     return _scan_lines(
         scopes,
@@ -427,7 +427,7 @@ def check_window_hidden_dependency_bags_not_used(files: list[Path]) -> list[Prob
 
 def check_tray_uses_window_port() -> list[Problem]:
     scopes = [
-        SRC_ROOT / "tray.py",
+        SRC_ROOT / "platforms" / "windows" / "tray.py",
         SRC_ROOT / "tray_commands.py",
         SRC_ROOT / "main" / "tray_window_port.py",
     ]
@@ -664,7 +664,7 @@ def check_background_code_does_not_create_widgets(sources: list[tuple[Path, str]
 
 def check_discord_tray_command_does_not_receive_window() -> list[Problem]:
     scopes = [
-        SRC_ROOT / "tray.py",
+        SRC_ROOT / "platforms" / "windows" / "tray.py",
         SRC_ROOT / "tray_commands.py",
         SRC_ROOT / "discord" / "discord_restart.py",
         SRC_ROOT / "app" / "feature_facades" / "tray.py",
@@ -721,7 +721,7 @@ def check_no_qfluentwidgets_fallbacks(files: list[Path]) -> list[Problem]:
     )
     scopes = [
         path for path in files
-        if _under(path, *ui_roots) or path.relative_to(REPO_ROOT).as_posix() == "src/tray.py"
+        if _under(path, *ui_roots) or path.relative_to(REPO_ROOT).as_posix() == "src/platforms/windows/tray.py"
     ]
     fluent_flags = "|".join(
         re.escape(value)
@@ -862,7 +862,7 @@ def check_external_imports(files: list[Path]) -> list[Problem]:
     )
     scopes = [
         path for path in files
-        if _under(path, *external_roots) or path.relative_to(REPO_ROOT).as_posix() == "src/tray.py"
+        if _under(path, *external_roots) or path.relative_to(REPO_ROOT).as_posix() == "src/platforms/windows/tray.py"
     ]
     return _scan_lines(
         scopes,
@@ -890,7 +890,7 @@ def check_no_feature_internals_from_external(files: list[Path]) -> list[Problem]
     )
     scopes = [
         path for path in files
-        if _under(path, *external_roots) or path.relative_to(REPO_ROOT).as_posix() == "src/tray.py"
+        if _under(path, *external_roots) or path.relative_to(REPO_ROOT).as_posix() == "src/platforms/windows/tray.py"
     ]
     return _scan_lines(
         scopes,

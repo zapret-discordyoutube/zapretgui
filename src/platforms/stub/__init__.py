@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from typing import Callable, Sequence
 
+from platforms.no_tray import NoTrayManager
 from platforms.netprobe_types import HOP_UNSUPPORTED, DnsAnswer, PingResult, TraceHopResult
 from platforms.base import (
     GuiAutostartResult,
@@ -140,6 +141,13 @@ class _NoDesktop:
         return None
 
 
+class _NoTray:
+    def create_manager(self, *, window_port, icon_path: str, app_version: str, tray_feature):
+        return NoTrayManager(
+            window_port=window_port, icon_path=icon_path, app_version=app_version, tray_feature=tray_feature
+        )
+
+
 class _NoLaunch:
     def process_creation_unix_seconds(self) -> float | None:
         return None
@@ -162,5 +170,6 @@ PLATFORM = Platform(
     netprobe=_NoNetProbe(),
     autostart=_NoAutostart(),
     desktop=_NoDesktop(),
+    tray=_NoTray(),
     working_set=NoWorkingSet(),
 )

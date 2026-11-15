@@ -691,7 +691,7 @@ class AccessibilityHelpersTests(unittest.TestCase):
         for relative_path in (
             "src/hosts/ui/page.py",
             "src/ui/combo_accessibility.py",
-            "src/tray.py",
+            "src/platforms/windows/tray.py",
         ):
             with self.subTest(path=relative_path):
                 source = (root / relative_path).read_text(encoding="utf-8")

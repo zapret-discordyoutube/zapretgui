@@ -17,7 +17,6 @@ src/startup/admin_check_debug.py 19
 src/startup/check_start.py 31
 src/support_request_bundle.py 2
 src/telegram_proxy/config/settings.py 2
-src/tray.py 90
 src/ui/popup_menu.py 1
 src/ui/popup_menu_style.py 1
 src/ui/runtime_ui_bridge.py 1

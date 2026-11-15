@@ -27,7 +27,7 @@ class SingleOwnerGuardTests(unittest.TestCase):
     # права менять его состояние напрямую.
     ORCHESTRATOR_FILES = (
         "src/ui/window_adapter.py",
-        "src/tray.py",
+        "src/platforms/windows/tray.py",
         "src/main/tray_window_port.py",
         "src/main/window_native_commands.py",
         "src/ui/window_close_flow.py",

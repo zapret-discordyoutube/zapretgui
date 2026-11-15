@@ -31,7 +31,7 @@ class TrayMenuContractTests(unittest.TestCase):
         self.assertEqual(feature.launch_state(), (True, "running"))
 
     def test_legacy_right_click_callback_opens_context_menu_at_cursor(self) -> None:
-        import tray
+        from platforms.windows import tray
 
         tray.WM_CONTEXTMENU = 0x007B
         tray.WM_RBUTTONUP = 0x0205
@@ -51,7 +51,7 @@ class TrayMenuContractTests(unittest.TestCase):
         manager._schedule_visibility_toggle.assert_not_called()
 
     def _manager(self, *, phase: str = "running", snapshot=None, visible: bool = False):
-        import tray
+        from platforms.windows import tray
 
         feature = SimpleNamespace(
             launch_phase=Mock(return_value=phase),
@@ -141,7 +141,7 @@ class TrayMenuContractTests(unittest.TestCase):
     def test_native_backend_schedules_the_prewarm(self) -> None:
         import inspect
 
-        import tray
+        from platforms.windows import tray
 
         source = inspect.getsource(tray.SystemTrayManager._create_native_backend)
         self.assertIn("prewarm_menu", source)
@@ -202,7 +202,7 @@ class TrayMenuContractTests(unittest.TestCase):
                      "exit_and_stop", "_toggle_tg_proxy", "_set_window_opacity"):
             setattr(manager, name, Mock())
 
-        with patch("tray.log") as log:
+        with patch("platforms.windows.tray.log") as log:
             for command in sorted(commands):
                 arg = ("game.txt", "Game filter") if command == "activate_preset" else 50
                 manager._run_menu_command(command, arg)
@@ -375,7 +375,7 @@ class TrayMenuContractTests(unittest.TestCase):
 
     def test_tray_menu_does_not_use_library_menu(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src"
-        sources = [root / "tray.py", *sorted((root / "ui" / "tray_menu").glob("*.py"))]
+        sources = [root / "platforms" / "windows" / "tray.py", *sorted((root / "ui" / "tray_menu").glob("*.py"))]
 
         for path in sources:
             with self.subTest(file=path.name):
@@ -384,7 +384,7 @@ class TrayMenuContractTests(unittest.TestCase):
                 self.assertNotIn("QMenu", source)
 
     def test_tray_icon_dot_color_by_phase(self) -> None:
-        import tray
+        from platforms.windows import tray
 
         self.assertEqual(tray.tray_icon_dot_color("running"), "#6ccb5f")
         self.assertEqual(tray.tray_icon_dot_color("starting"), "#f5a623")
@@ -393,7 +393,7 @@ class TrayMenuContractTests(unittest.TestCase):
         self.assertIsNone(tray.tray_icon_dot_color("failed"))
 
     def test_status_icon_draws_dot_in_corner_and_keeps_logo(self) -> None:
-        import tray
+        from platforms.windows import tray
         from PyQt6.QtGui import QColor, QImage
 
         base = QImage(64, 64, QImage.Format.Format_ARGB32)
@@ -407,7 +407,7 @@ class TrayMenuContractTests(unittest.TestCase):
         self.assertEqual(QColor(plain.pixel(16, 16)).name(), "#3366cc")
 
     def test_tray_tooltip_has_mode_status_and_preset(self) -> None:
-        import tray
+        from platforms.windows import tray
 
         tooltip = tray.build_tray_tooltip(
             phase="running",
@@ -447,7 +447,7 @@ class TrayMenuContractTests(unittest.TestCase):
         manager._modify_icon.assert_called_once_with()
 
     def test_stop_notification_is_skipped_when_restart_follows(self) -> None:
-        import tray
+        from platforms.windows import tray
 
         manager, _feature, _port = self._manager()
         manager.show_notification = Mock()
@@ -572,7 +572,7 @@ class TrayMenuContractTests(unittest.TestCase):
         self.assertEqual(orchestra.presets, ())
 
     def test_native_tray_winapi_calls_have_pointer_safe_ctypes_signatures(self) -> None:
-        source = (Path(__file__).resolve().parents[1] / "src" / "tray.py").read_text(encoding="utf-8")
+        source = (Path(__file__).resolve().parents[1] / "src" / "platforms" / "windows" / "tray.py").read_text(encoding="utf-8")
 
         required_signatures = [
             "kernel32.GetModuleHandleW.restype",
@@ -599,12 +599,12 @@ class TrayMenuContractTests(unittest.TestCase):
         self.assertEqual(missing, [])
 
     def test_native_tray_message_window_unregisters_class_on_destroy(self) -> None:
-        source = (Path(__file__).resolve().parents[1] / "src" / "tray.py").read_text(encoding="utf-8")
+        source = (Path(__file__).resolve().parents[1] / "src" / "platforms" / "windows" / "tray.py").read_text(encoding="utf-8")
 
         self.assertIn("user32.UnregisterClassW(self.owner._class_name, instance)", source)
 
     def test_native_tray_class_name_is_unique_per_manager_instance(self) -> None:
-        source = (Path(__file__).resolve().parents[1] / "src" / "tray.py").read_text(encoding="utf-8")
+        source = (Path(__file__).resolve().parents[1] / "src" / "platforms" / "windows" / "tray.py").read_text(encoding="utf-8")
 
         self.assertIn('self._class_name = f"Zapret2TrayWindow_{os.getpid()}_{id(self):x}"', source)
 

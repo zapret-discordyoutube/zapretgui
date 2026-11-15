@@ -50,13 +50,13 @@ class TrayFeature:
         commands = self._commands()
         icon_path = commands.resolve_tray_icon_path()
         from config.build_info import APP_VERSION
-        from tray import SystemTrayManager
+        from platforms import current as current_platform
 
         self._tray_manager = commands.init_tray(
             window_port=self._deps.window_port,
             icon_path=icon_path,
             app_version=APP_VERSION,
-            tray_manager_factory=SystemTrayManager,
+            tray_manager_factory=current_platform().tray.create_manager,
             startup_state=self._deps.startup_state,
             tray_feature=self,
             notify=self._notify,

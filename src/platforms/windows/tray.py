@@ -1,4 +1,4 @@
-# tray.py
+# platforms/windows/tray.py: native Windows notification-area icon (Shell_NotifyIcon)
 
 from __future__ import annotations
 

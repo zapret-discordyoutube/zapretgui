@@ -294,6 +294,19 @@ class Desktop(Protocol):
         """Follows the system light/dark setting; returns an object with ``cleanup()`` or None."""
 
 
+class Tray(Protocol):
+    """The icon in the notification area and its menu.
+
+    ``create_manager`` returns an object the program drives: ``apply_launch_status``, ``show_notification``,
+    ``show_window``, ``hide_to_tray``, ``hide_icon``, ``cleanup`` ... Where the desktop has no tray the
+    manager is a quiet stand-in whose ``hide_to_tray`` answers False, so a window is never hidden with no
+    way to bring it back.
+    """
+
+    def create_manager(self, *, window_port, icon_path: str, app_version: str, tray_feature):
+        """Builds the tray manager for the main window."""
+
+
 class Cap:
     """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.
 
@@ -375,6 +388,7 @@ class Platform:
     netprobe: NetProbe
     autostart: GuiAutostart
     desktop: Desktop
+    tray: Tray
     working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()
 
