@@ -32,3 +32,4 @@ tests/test_linux_system_theme.py
 tests/test_linux_dns.py
 tests/test_platforms_windows_dns_adapters.py
 tests/test_platforms_hosts_file.py
+tests/test_dns_local_proxy_capability.py

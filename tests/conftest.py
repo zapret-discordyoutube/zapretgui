@@ -38,6 +38,7 @@ sys.excepthook = _qt_slot_excepthook
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_network: do not replace the platform network probes with the safe stub")
+    config.addinivalue_line("markers", "real_local_proxy: keep the real capability check of the built-in encrypted DNS")
     config.addinivalue_line("markers", "real_dns: keep the real DNS backend of the platform (tests of the backend itself)")
     config.addinivalue_line("markers", "real_engine: keep the engine of the running platform (not the shared Windows runner factory)")
 
@@ -66,6 +67,20 @@ def _tests_do_not_measure_the_real_network(monkeypatch, request):
         "tcp_server_window",
     ):
         monkeypatch.setattr(probe, name, getattr(stub.netprobe, name), raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _tests_assume_the_encrypted_dns_service_exists(monkeypatch, request):
+    """The DNS tests describe the Windows behaviour of the built-in encrypted DNS; outside Windows the platform does not
+    have it (``Cap.LOCAL_DNS_PROXY``), so the check says yes here. tests/test_dns_local_proxy_capability.py marks
+    ``real_local_proxy`` and sees the real answer."""
+    if sys.platform == "win32" or request.node.get_closest_marker("real_local_proxy"):
+        yield
+        return
+    from dns import local_proxy
+
+    monkeypatch.setattr(local_proxy, "available", lambda system=None: True)
     yield
 
 

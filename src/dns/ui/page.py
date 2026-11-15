@@ -49,6 +49,7 @@ from dns.dns_providers import (
     is_encrypted_only,
     zapret_dns_provider,
 )
+from dns import local_proxy as dns_local_proxy
 from dns.server_check_plans import CARD_NETWORK, CARD_OK, CARD_SILENT, CARD_TITLES
 from dns.state import LineCheck
 from dns.ui.now_panel import AdapterChip, DnsNowPanel, NowState
@@ -700,6 +701,13 @@ class NetworkPage(BasePage):
         fastest_address = min(measured, key=measured.get) if measured else ""
 
         groups = list(self._providers.items())
+        if not dns_local_proxy.available():
+            # Tiles that exist only through the built-in encrypted DNS are not offered where it cannot be installed.
+            groups = [
+                (name, {key: value for key, value in items.items() if not (value.get("local_proxy") or is_encrypted_only(value))})
+                for name, items in groups
+            ]
+            groups = [(name, items) for name, items in groups if items or name not in (LOCAL_PROXY_GROUP,)]
         if CUSTOM_DNS_CATEGORY not in self._providers:
             groups.append((CUSTOM_DNS_CATEGORY, {}))
         if self._filter != FILTER_ALL:

@@ -61,6 +61,9 @@ def _feature(state=STATE):
     )
 
 
+from dns.dns_providers import is_encrypted_only  # noqa: E402
+
+
 class DnsPageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -163,6 +166,20 @@ class DnsPageTests(unittest.TestCase):
         self.assertEqual(page.grid.tiles()[-1].kind, "add")
         self.assertEqual(page.now_panel.title_label.text(), "Загружаю настройки сети…")
         page._load_lane.request.assert_not_called()
+
+    def test_tiles_that_need_the_built_in_encrypted_dns_are_not_offered_where_it_cannot_run(self) -> None:
+        with patch("dns.local_proxy.available", return_value=False):
+            page = self._page(load=False)
+            titles = {tile.title for tile in self._provider_tiles(page)}
+        with patch("dns.local_proxy.available", return_value=True):
+            full = self._page(load=False)
+            all_titles = {tile.title for tile in self._provider_tiles(full)}
+
+        hidden = {name for group in DNS_PROVIDERS.values() for name, data in group.items() if data.get("local_proxy") or is_encrypted_only(data)}
+        self.assertTrue(hidden, "the catalog has tiles that need the engine")
+        self.assertFalse(hidden & titles)
+        self.assertTrue(hidden <= all_titles)
+        self.assertEqual(all_titles - titles, hidden)
 
     def test_first_open_shows_current_dns_without_badge_motion(self) -> None:
         """Комета и переворот значка — ответ на выбор сервера, а не на открытие страницы."""

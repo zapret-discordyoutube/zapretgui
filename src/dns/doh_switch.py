@@ -48,6 +48,10 @@ def proxy_mode(data: dict, *, doh_supported: bool, doh_enabled: bool = True) -> 
     Плитка-режим идёт через движок всегда. Обычный сервер с DoH — только если
     переключатель включён и Windows сама шифровать не умеет (dns_providers.proxy_mode_for).
     """
+    from dns import local_proxy
+
+    if not local_proxy.available():
+        return ""
     if not data.get("local_proxy") and not doh_enabled:
         return ""
     return proxy_mode_for(data, doh_supported=doh_supported)

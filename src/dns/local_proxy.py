@@ -59,6 +59,18 @@ class LocalProxyResult:
     listen_ipv6: bool = False
 
 
+def available(system=None) -> bool:
+    """Whether this system can run the built-in encrypted DNS (a test-supplied ``system`` always can)."""
+    if system is not None:
+        return True
+    from platforms import Cap, current
+
+    return current().has(Cap.LOCAL_DNS_PROXY)
+
+
+NOT_AVAILABLE_TEXT = "Встроенный шифрованный DNS есть только в Windows: здесь серверы ставятся обычными адресами."
+
+
 def _system(system):
     if system is not None:
         return system
@@ -102,6 +114,8 @@ def active_mode(system=None) -> str:
     Режим есть, только когда есть и служба, и её файл настроек: без службы
     на 127.0.0.1 никто не отвечает, что бы ни было записано в файле.
     """
+    if not available(system):
+        return ""
     system = _system(system)
     if not system.service_state(SERVICE_NAME):
         return ""
@@ -110,6 +124,8 @@ def active_mode(system=None) -> str:
 
 def active_server(system=None) -> str:
     """Название плитки, чей сервер работает в режиме DoH; у остальных режимов и без службы — пусто."""
+    if not available(system):
+        return ""
     system = _system(system)
     if not system.service_state(SERVICE_NAME):
         return ""
@@ -198,6 +214,8 @@ def start(
 
     Режиму DoH нужны серверы плитки (upstreams) и её название (server_name).
     """
+    if not available(system):
+        return LocalProxyResult(False, NOT_AVAILABLE_TEXT)
     system = _system(system)
     if mode not in catalog.MODES:
         return LocalProxyResult(False, f"Неизвестный режим шифрованного DNS: {mode}")
@@ -282,6 +300,8 @@ def start(
 
 def stop(*, system=None) -> None:
     """Убирает службу шифрованного DNS и её файл настроек."""
+    if not available(system):
+        return
     system = _system(system)
     had_service = bool(system.service_state(SERVICE_NAME))
     _remove_service(system)
@@ -295,6 +315,8 @@ def stop(*, system=None) -> None:
 
 def stop_if_unused(adapter_addresses: Iterable[str], *, system=None) -> bool:
     """Останавливает движок, если ни один адаптер больше не смотрит на 127.0.0.1."""
+    if not available(system):
+        return False
     system = _system(system)
     if uses_local_proxy(adapter_addresses) or not system.service_state(SERVICE_NAME):
         return False
@@ -309,6 +331,8 @@ def repair(adapter_addresses: Iterable[str], *, system=None) -> str:
       или движок в ней старый — служба поднимается заново;
     - служба есть, а ни один адаптер ею не пользуется — она убирается.
     """
+    if not available(system):
+        return ""
     system = _system(system)
     state = system.service_state(SERVICE_NAME)
     work = system.work_dir()

@@ -421,6 +421,7 @@ class Cap:
     MAX_BLOCKER = "max_blocker"  # blocking the MAX messenger through Explorer policies
     ANTIVIRUS_PROBE = "antivirus_probe"  # looking for antivirus programs that disturb the driver (Kaspersky ...)
     NETWORK_RESET = "windows_network_reset"  # "reset the Windows network stack" quick action
+    LOCAL_DNS_PROXY = "local_dns_proxy"  # the built-in encrypted DNS (dnscrypt-proxy as a service) can be installed
     WORKING_SET = "working_set"  # the system pages out a hidden window's memory and the program can hold it
 
 

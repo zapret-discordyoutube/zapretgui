@@ -45,6 +45,7 @@ PLATFORM = Platform(
             Cap.MAX_BLOCKER,
             Cap.ANTIVIRUS_PROBE,
             Cap.NETWORK_RESET,
+            Cap.LOCAL_DNS_PROXY,
         }
     ),
 )
