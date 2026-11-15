@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from platforms.stub import make_platform
+
 """Распознавание сорвавшегося обновления при следующем запуске.
 
 Пользователь не должен гадать, почему версия осталась прежней: программа
@@ -325,7 +327,7 @@ class StartupDuringInstallationTests(unittest.TestCase):
         privileges.is_elevated.return_value = True
         single_instance = MagicMock()
         single_instance.acquire.return_value = InstanceLock(already_running=False)
-        fake_platform = Platform(
+        fake_platform = make_platform(
             name="fake", messages=MagicMock(), privileges=privileges, single_instance=single_instance,
             services=MagicMock(), launch=MagicMock(),
         )

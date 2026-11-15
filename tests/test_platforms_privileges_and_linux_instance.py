@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from platforms.stub import make_platform
+
 import ctypes
 import os
 import threading
@@ -72,7 +74,7 @@ def test_shell_does_not_ask_for_elevation_when_the_platform_does_not_need_it():
     privileges.is_elevated.return_value = False
     single = MagicMock()
     single.acquire.return_value = InstanceLock(already_running=False)
-    platform = Platform(name="fake", messages=MagicMock(), privileges=privileges, single_instance=single,
+    platform = make_platform(name="fake", messages=MagicMock(), privileges=privileges, single_instance=single,
                         services=MagicMock(), launch=MagicMock())
     with (
         patch.object(shell, "current_platform", return_value=platform),
@@ -91,7 +93,7 @@ def test_shell_exits_with_a_message_when_the_elevation_request_is_refused():
     privileges = MagicMock(gui_needs_elevation=True)
     privileges.is_elevated.return_value = False
     privileges.relaunch_elevated.return_value = False
-    platform = Platform(name="fake", messages=messages, privileges=privileges, single_instance=MagicMock(),
+    platform = make_platform(name="fake", messages=messages, privileges=privileges, single_instance=MagicMock(),
                         services=MagicMock(), launch=MagicMock())
     with (
         patch.object(shell, "current_platform", return_value=platform),

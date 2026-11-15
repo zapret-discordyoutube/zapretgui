@@ -190,3 +190,10 @@ PLATFORM = Platform(
     engine=FactoryEngine(),
     working_set=NoWorkingSet(),
 )
+
+
+def make_platform(**overrides) -> Platform:
+    """A complete ``Platform`` for tests: the stub backend with the given fields replaced."""
+    from dataclasses import replace
+
+    return replace(PLATFORM, **overrides)

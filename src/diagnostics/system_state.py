@@ -77,6 +77,8 @@ class SystemFacts:
     # (проверка состоялась, каких файлов нет, какие повреждены).
     integrity: tuple[bool, tuple[str, ...], tuple[str, ...]] | None = None
     bfe_running: bool | None = None
+    # False — у этой системы нет службы BFE: строки о ней в отчёте нет (не «не удалось определить»).
+    bfe_applicable: bool = True
     # Программы, которые мешают драйверу перехвата.
     conflicts: tuple[str, ...] | None = None
     # Службы GoodbyeDPI, оставшиеся в системе.
@@ -181,6 +183,12 @@ def _read_integrity() -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
 
     report = verify_fast()
     return bool(report.checked), tuple(report.missing), tuple(report.corrupted)
+
+
+def _bfe_applicable() -> bool:
+    from platforms import Cap, current as current_platform
+
+    return bool(current_platform().has(Cap.BFE))
 
 
 def _read_bfe() -> bool:
@@ -304,6 +312,7 @@ def collect_facts(
         free_mb=_safe(_read_free_mb),
         integrity=_safe(_read_integrity),
         bfe_running=_safe(_read_bfe),
+        bfe_applicable=_bfe_applicable(),
         conflicts=_safe(_read_conflicts),
         goodbyedpi_services=_safe(_read_goodbyedpi_services),
         bypass_tools=_safe(_read_bypass_tools),
@@ -441,7 +450,9 @@ def judge(facts: SystemFacts, *, zapret_running: bool | None = None) -> tuple[Sy
             add("files", title, LEVEL_OK, "все на месте")
 
     title = "Служба фильтрации Windows (BFE)"
-    if facts.bfe_running is None:
+    if not facts.bfe_applicable:
+        pass  # такой службы в этой системе нет: строки в отчёте тоже нет
+    elif facts.bfe_running is None:
         items.append(_unknown("bfe", title))
     elif facts.bfe_running:
         add("bfe", title, LEVEL_OK, "работает")

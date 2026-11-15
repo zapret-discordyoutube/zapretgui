@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from platforms.stub import make_platform
+
 import sys
 import unittest
 from pathlib import Path
@@ -148,7 +150,7 @@ def _fake_platform(*, already_running: bool, signal_delivered: bool = True):
     release = Mock()
     single.acquire.return_value = InstanceLock(already_running=already_running, _release=release)
     single.signal_running_instance.return_value = signal_delivered
-    platform = Platform(name="fake", messages=messages, privileges=privileges, single_instance=single,
+    platform = make_platform(name="fake", messages=messages, privileges=privileges, single_instance=single,
                         services=MagicMock(), launch=MagicMock())
     return platform, messages, single, release
 

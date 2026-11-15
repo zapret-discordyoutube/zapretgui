@@ -339,3 +339,23 @@ class ClockSkewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BfeApplicabilityTests(unittest.TestCase):
+    def test_the_row_is_absent_where_the_system_has_no_such_service(self) -> None:
+        keys = [item.key for item in ss.judge(replace(HEALTHY, bfe_running=None, bfe_applicable=False))]
+        self.assertNotIn("bfe", keys)
+        self.assertEqual(len(keys), len(ss.judge(HEALTHY)) - 1)
+
+    def test_an_unreadable_service_on_a_system_that_has_it_stays_unknown(self) -> None:
+        self.assertEqual(_item(replace(HEALTHY, bfe_running=None), "bfe").level, ss.LEVEL_UNKNOWN)
+
+    def test_facts_ask_the_platform_whether_the_service_exists(self) -> None:
+        from platforms import Cap
+
+        fake = SimpleNamespace(has=lambda name: name != Cap.BFE)
+        with patch("platforms.current", return_value=fake):
+            self.assertFalse(ss._bfe_applicable())
+        fake = SimpleNamespace(has=lambda name: True)
+        with patch("platforms.current", return_value=fake):
+            self.assertTrue(ss._bfe_applicable())

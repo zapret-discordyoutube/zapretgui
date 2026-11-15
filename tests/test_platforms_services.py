@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from platforms.stub import make_platform
+
 import os
 import subprocess
 import sys
@@ -151,7 +153,7 @@ def test_capabilities_by_backend():
 def test_system_state_bfe_is_unknown_not_stopped_without_the_capability():
     from diagnostics import system_state
 
-    other = Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
+    other = make_platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
                      services=MagicMock(), launch=MagicMock())
     with patch("platforms.current", return_value=other):
         with pytest.raises(LookupError):
@@ -163,7 +165,7 @@ def test_startup_checks_skip_bfe_when_the_platform_has_no_such_service():
     from main import post_startup_check_workers as workers
 
     # Windows-style startup checks are on, but this system has no BFE service.
-    no_bfe = Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
+    no_bfe = make_platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
                       services=MagicMock(), launch=MagicMock(), capabilities=frozenset({Cap.WINDOWS_STARTUP_CHECKS}))
     with (
         patch("platforms.current", return_value=no_bfe),
@@ -184,7 +186,7 @@ def test_startup_checks_skip_bfe_when_the_platform_has_no_such_service():
 def test_startup_checks_run_bfe_when_the_platform_has_it():
     from main import post_startup_check_workers as workers
 
-    with_bfe = Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
+    with_bfe = make_platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
                         services=MagicMock(), launch=MagicMock(), capabilities=frozenset({Cap.BFE, Cap.WINDOWS_STARTUP_CHECKS}))
     with (
         patch("platforms.current", return_value=with_bfe),
@@ -214,7 +216,7 @@ def test_only_windows_has_self_update():
 
 
 def _platform(*caps):
-    return Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
+    return make_platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
                     services=MagicMock(), launch=MagicMock(), capabilities=frozenset(caps))
 
 
