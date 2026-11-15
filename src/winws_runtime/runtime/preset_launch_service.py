@@ -198,7 +198,7 @@ class PresetLaunchService:
             return True
         try:
             from profile.launch_validation import preset_has_enabled_profiles_for_launch
-            from winws_runtime.runners.runner_factory import get_strategy_runner
+            from platforms import current as current_platform
 
             try:
                 preset_text = read_preset_file_text(preset_path)
@@ -214,7 +214,7 @@ class PresetLaunchService:
                 self._progress(message)
                 return False
 
-            runner = get_strategy_runner(self._get_winws_exe())
+            runner = current_platform().engine.runner(self._get_winws_exe())
             self._configure_runner_runtime_callbacks(runner)
             if hasattr(runner, "validate_preset_file"):
                 ok, report = runner.validate_preset_file(preset_path)
@@ -286,9 +286,9 @@ class PresetLaunchService:
         if payload is None:
             return None
         preset_path, strategy_name = payload
-        from winws_runtime.runners.runner_factory import get_strategy_runner
+        from platforms import current as current_platform
 
-        runner = get_strategy_runner(self._get_winws_exe())
+        runner = current_platform().engine.runner(self._get_winws_exe())
         adopt = getattr(runner, "adopt_running_engine", None)
         if not callable(adopt) or not adopt():
             return None
@@ -336,9 +336,9 @@ class PresetLaunchService:
         return preset_path, strategy_name
 
     def _start_presets_with_runner(self, preset_path: str, strategy_name: str) -> bool:
-        from winws_runtime.runners.runner_factory import get_strategy_runner
+        from platforms import current as current_platform
 
-        runner = get_strategy_runner(self._get_winws_exe())
+        runner = current_platform().engine.runner(self._get_winws_exe())
         self._configure_runner_runtime_callbacks(runner)
         start_kwargs = {}
         if self._startup_autostart:

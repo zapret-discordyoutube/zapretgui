@@ -21,9 +21,9 @@ def run_with_direct_network_access(operation: Callable[[], T]) -> T:
     if not callable(operation):
         raise TypeError("operation must be callable")
 
-    from winws_runtime.runners.runner_factory import get_current_runner
+    from platforms import current as current_platform
 
-    runner = get_current_runner()
+    runner = current_platform().engine.current_runner()
     execute_direct = getattr(runner, "run_with_direct_network_access", None)
     if not callable(execute_direct):
         return operation()
@@ -33,9 +33,9 @@ def run_with_direct_network_access(operation: Callable[[], T]) -> T:
 def direct_network_pause_needed() -> bool:
     """True, если прямой запрос сейчас потребует остановить работающий winws2."""
 
-    from winws_runtime.runners.runner_factory import get_current_runner
+    from platforms import current as current_platform
 
-    runner = get_current_runner()
+    runner = current_platform().engine.current_runner()
     if not callable(getattr(runner, "run_with_direct_network_access", None)):
         return False
     is_running = getattr(runner, "is_running", None)

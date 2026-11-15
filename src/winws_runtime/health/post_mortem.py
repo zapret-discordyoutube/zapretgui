@@ -158,9 +158,9 @@ def resolve_unexpected_exit() -> PostMortemResolution | None:
         return None
 
     try:
-        from winws_runtime.runners.runner_factory import get_current_runner
+        from platforms import current as current_platform
 
-        runner = get_current_runner()
+        runner = current_platform().engine.current_runner()
     except Exception:
         runner = None
     if runner is None:

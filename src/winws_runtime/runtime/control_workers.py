@@ -149,7 +149,7 @@ class PresetSwitchWorker(QObject):
 
                 self.progress.emit("Применяем пресет...")
 
-                from winws_runtime.runners.runner_factory import get_strategy_runner
+                from platforms import current as current_platform
 
                 snapshot = self._presets_feature.get_launch_snapshot(
                     self.launch_method,
@@ -161,7 +161,7 @@ class PresetSwitchWorker(QObject):
                     self.finished.emit(True, "", self.generation, self.launch_method, True)
                     return
 
-                runner = get_strategy_runner(self._get_winws_exe())
+                runner = current_platform().engine.runner(self._get_winws_exe())
                 success = bool(
                     runner.switch_preset_file_fast(
                         str(preset.preset_path),

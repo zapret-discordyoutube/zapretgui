@@ -326,6 +326,27 @@ class SystemSettings(Protocol):
         """``(proxy server, automatic-config URL)`` the system hands to programs; empty strings when none."""
 
 
+class Engine(Protocol):
+    """The DPI engine: the object that starts, switches and stops the bypass process for a preset.
+
+    ``runner`` returns the one object the program drives (``start_from_preset_file``,
+    ``switch_preset_file_fast``, ``stop``, ``is_running``, ``get_runner_state_snapshot`` ...). It is created on
+    first use for a given engine program and replaced when the engine program changes.
+    """
+
+    def runner(self, engine_exe_path: str):
+        """The runner for ``engine_exe_path``; creates or replaces it when needed."""
+
+    def current_runner(self):
+        """The runner that exists now, or None. Never creates one."""
+
+    def reset_runner(self) -> None:
+        """Stops the runner (waits for it) and forgets it."""
+
+    def invalidate_runner(self) -> None:
+        """Forgets the runner without waiting (its background watchers are stopped)."""
+
+
 class Cap:
     """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.
 
@@ -409,6 +430,7 @@ class Platform:
     desktop: Desktop
     tray: Tray
     system_settings: SystemSettings
+    engine: Engine
     working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()
 

@@ -90,9 +90,10 @@ def shutdown_runtime_sync(
         log(f"Sync runtime shutdown requested: {reason}", "INFO")
 
     try:
-        from winws_runtime.runners.runner_factory import get_current_runner, invalidate_strategy_runner
+        from platforms import current as current_platform
 
-        runner = get_current_runner()
+        engine = current_platform().engine
+        runner = engine.current_runner()
         if runner is not None:
             try:
                 stop_ok = bool(runner.stop(cleanup_services=cleanup_services)) and stop_ok
@@ -102,7 +103,7 @@ def shutdown_runtime_sync(
             finally:
                 if not keep_runner:
                     try:
-                        invalidate_strategy_runner()
+                        engine.invalidate_runner()
                     except Exception:
                         pass
     except Exception as e:

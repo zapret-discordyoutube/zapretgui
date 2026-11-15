@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from typing import Callable, Sequence
 
+from platforms.factory_engine import FactoryEngine
 from platforms.no_tray import NoTrayManager
 from platforms.netprobe_types import HOP_UNSUPPORTED, DnsAnswer, PingResult, TraceHopResult
 from platforms.base import (
@@ -186,5 +187,6 @@ PLATFORM = Platform(
     desktop=_NoDesktop(),
     tray=_NoTray(),
     system_settings=_NoSystemSettings(),
+    engine=FactoryEngine(),
     working_set=NoWorkingSet(),
 )
