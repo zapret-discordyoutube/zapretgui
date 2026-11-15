@@ -1,0 +1,57 @@
+#!/bin/sh
+# Start of the AppImage. The window needs the system part (the root helper, the service that owns the firewall table,
+# the group) of the SAME version. The helper reads the program files from /opt/zapretgui, and root cannot read an
+# AppImage's own mount (it belongs to the user), so on first start (or after an update) the files are copied to a
+# temporary folder and install.sh puts them into /opt/zapretgui. After that the installed program runs, like the .deb.
+HERE="$(dirname "$(readlink -f "$0")")"
+ROOT="$HERE/zapretgui-root"
+export PYTHONUTF8=1
+
+bundled="$(cat "$ROOT/VERSION" 2>/dev/null)"
+installed="$(cat /opt/zapretgui/VERSION 2>/dev/null)"
+
+say() {
+  echo "zapretgui: $*" >&2
+  if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    command -v zenity >/dev/null && zenity --info --no-wrap --title=Zapret --text="$*" 2>/dev/null && return 0
+    command -v kdialog >/dev/null && kdialog --msgbox "$*" 2>/dev/null && return 0
+    command -v notify-send >/dev/null && notify-send Zapret "$*" 2>/dev/null
+  fi
+  return 0
+}
+
+system_part_ready() {
+  [ "$bundled" = "$installed" ] && [ -x /opt/zapretgui/bin/zapretgui ] && getent group zapretgui >/dev/null \
+    && systemctl is-active --quiet zapretgui-helper.service 2>/dev/null
+}
+
+install_system_part() {
+  tmp="$(mktemp -d /var/tmp/zapretgui-install.XXXXXX)" || return 1
+  status=1
+  if cp -a "$ROOT"/. "$tmp"/; then
+    if [ "$(id -u)" = 0 ]; then
+      "$tmp/install.sh"
+    elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v pkexec >/dev/null; then
+      pkexec "$tmp/install.sh" --user "$(id -un)"
+    elif command -v sudo >/dev/null; then
+      sudo "$tmp/install.sh" --user "$(id -un)"
+    else
+      false
+    fi
+    status=$?
+  fi
+  rm -rf "$tmp"   # not a trap: the script ends with exec, which would skip it
+  return $status
+}
+
+if [ "$1" = "--install-system-part" ] || ! system_part_ready; then
+  say "First start: Zapret installs its system part (a small root service and the firewall table). It asks for your password once."
+  if ! install_system_part; then
+    say "The system part was not installed. Run:  sudo $(readlink -f "$0") --install-system-part"
+    exit 1
+  fi
+  [ "$1" = "--install-system-part" ] && exit 0
+  getent group zapretgui | grep -qw "$(id -un)" || say "You were added to the group zapretgui. Log out and in once, then start Zapret again."
+fi
+
+exec /opt/zapretgui/bin/zapretgui "$@"

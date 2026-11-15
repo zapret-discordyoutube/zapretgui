@@ -166,3 +166,25 @@ def test_the_deb_files_are_valid_and_match_the_installer() -> None:
     # the people's own data is never deleted by a package script
     code = "\n".join(line for line in postrm.splitlines() if not line.lstrip().startswith("#"))
     assert ".local/share" not in code and ".config" not in code
+
+
+def test_install_leaves_the_uninstaller_with_the_program_and_knows_pkexec() -> None:
+    install = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+    assert '"$TARGET/uninstall.sh"' in install
+    assert "PKEXEC_UID" in install and "VERSION" in install.split("for item in", 1)[1].split(";", 1)[0]
+
+
+def test_the_appimage_launcher_installs_the_system_part_and_starts_the_installed_program() -> None:
+    import os
+    import subprocess
+
+    apprun = PACKAGING / "appimage" / "AppRun"
+    text = apprun.read_text(encoding="utf-8")
+    assert os.access(apprun, os.X_OK)
+    assert subprocess.run(["sh", "-n", str(apprun)], capture_output=True, text=True).returncode == 0
+    # root cannot read the AppImage's own mount: files are copied out first, and the copy is removed explicitly
+    assert "mktemp -d /var/tmp/zapretgui-install" in text and 'rm -rf "$tmp"' in text and "trap" not in text.split("\n", 1)[1].replace("# not a trap", "")
+    assert "pkexec" in text and "sudo" in text and "--install-system-part" in text
+    assert text.rstrip().endswith('exec /opt/zapretgui/bin/zapretgui "$@"')
+    # the version the launcher compares is the one the bundle script writes
+    assert "VERSION" in text
