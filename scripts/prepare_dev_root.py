@@ -115,6 +115,7 @@ def prepare(root: Path, private: Path | None) -> list[str]:
         _copy_tree(private / "dist" / "lua", paths.lua_dir, report, "Lua files")
         _copy_tree(private / "dist" / "bin", paths.bin_dir, report, "engine blobs (bin)")
         _copy_tree(private / "dist" / "windivert.filter", paths.root / "windivert.filter", report, "capture filters (windivert.filter)")
+        _copy_tree(private / "dist" / "lists", paths.lists_dir, report, "shipped final lists (lists/*.txt)", pattern="*.txt")
         _copy_tree(private / "dist" / "ico", paths.ico_dir, report, "icons (application)")
         _copy_tree(private / "resources" / "profile" / "templates", paths.profile_templates_dir, report, "profile templates", "*.txt")
         _copy_file(private / "resources" / "system" / "hosts_catalog.sqlite3", paths.hosts_catalog_database, report, "hosts catalog")

@@ -30,7 +30,7 @@ def test_windows_layout_is_unchanged(tmp_path) -> None:
     assert paths.premium_database == root / "user" / "premium.sqlite3"
     assert paths.logs_dir == root / "user" / "logs" and paths.crash_logs_dir == root / "user" / "logs" / "crashes"
     assert paths.tmp_dir == root / "user" / "tmp" and paths.update_cache_dir == root / "user" / "update_cache"
-    assert paths.lists_user_dir == root / "lists" / "user" and paths.lists_dir == root / "lists" == paths.lists_base_dir.parent
+    assert paths.lists_user_dir == root / "lists" / "user" and paths.lists_dir == root / "lists" == paths.lists_base_dir.parent == paths.shipped_lists_base_dir.parent
     assert paths.presets_dir == root / "presets" == paths.shipped_presets_dir
     assert paths.user_data_root == root
     assert paths.user_lua_dir == root / "user" / "lua" and paths.engine_state_dir == root / "user" / "winws2"
@@ -80,7 +80,7 @@ def test_every_writable_thing_leaves_the_read_only_program_folder(tmp_path) -> N
     for name, path in writable.items():
         assert program not in path.parents and path != program, name
     # and what the installer ships stays under the program folder
-    for path in (paths.bin_dir, paths.exe_dir, paths.system_dir, paths.lua_dir, paths.lists_base_dir, paths.shipped_presets_dir):
+    for path in (paths.bin_dir, paths.exe_dir, paths.system_dir, paths.lua_dir, paths.shipped_lists_base_dir, paths.shipped_presets_dir):
         assert program in path.parents, path
 
 
@@ -90,7 +90,8 @@ def test_settings_and_state_live_in_their_own_xdg_folders(tmp_path) -> None:
     assert paths.logs_dir == paths.state_root / "logs"
     assert paths.tmp_dir == paths.cache_root / "tmp"
     assert paths.lists_dir == paths.data_root / "lists" and paths.lists_user_dir == paths.data_root / "lists" / "user"
-    assert paths.lists_base_dir == paths.root / "lists" / "base"  # shipped, read-only
+    assert paths.lists_base_dir == paths.data_root / "lists" / "base"  # a copy the program can rebuild the final lists from
+    assert paths.shipped_lists_base_dir == paths.root / "lists" / "base"  # the shipped original, read-only
     assert paths.presets_dir == paths.data_root / "presets"
 
 
@@ -243,3 +244,45 @@ def test_update_state_falls_back_to_the_cache_folder_in_the_xdg_layout(tmp_path)
     assert resolve_update_state_dir(channel="stable", application_root=tmp_path, program_data=None, local_app_data=None) == (
         tmp_path / "user" / "update_cache"
     )
+
+
+def _ship_lists(paths, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        path = paths.shipped_lists_base_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+def test_seed_copies_the_shipped_base_lists_next_to_the_final_lists(tmp_path) -> None:
+    paths = _xdg(tmp_path)
+    _ship_lists(paths, {"other.txt": "a.example\n", "ipset-ru.txt": "10.0.0.0/8\n"})
+    assert seed_user_data(paths) is True
+    assert (paths.lists_base_dir / "other.txt").read_text() == "a.example\n"
+    assert (paths.lists_base_dir / "ipset-ru.txt").exists()
+    assert (paths.lists_base_dir / MARKER_NAME).exists()
+
+
+def test_seed_refreshes_base_lists_when_the_shipped_set_changes_and_keeps_user_lists(tmp_path) -> None:
+    paths = _xdg(tmp_path)
+    _ship_lists(paths, {"other.txt": "a.example\n"})
+    seed_user_data(paths)
+    mine = paths.lists_user_dir / "other.txt"
+    mine.write_text("mine.example\n")
+    assert seed_user_data(paths) is False
+    _ship_lists(paths, {"other.txt": "a.example\nb.example\n"})
+    assert seed_user_data(paths) is True
+    assert (paths.lists_base_dir / "other.txt").read_text() == "a.example\nb.example\n"
+    assert mine.read_text() == "mine.example\n"
+
+
+def test_shipped_final_lists_are_copied_only_when_missing(tmp_path) -> None:
+    paths = _xdg(tmp_path)
+    paths.shipped_lists_dir.mkdir(parents=True, exist_ok=True)
+    (paths.shipped_lists_dir / "netrogat.txt").write_text("shipped.example\n")
+    (paths.shipped_lists_dir / "other.txt").write_text("shipped-other.example\n")
+    paths.lists_dir.mkdir(parents=True, exist_ok=True)
+    (paths.lists_dir / "other.txt").write_text("edited by the person\n")
+    assert seed_user_data(paths) is True
+    assert (paths.lists_dir / "netrogat.txt").read_text() == "shipped.example\n"
+    assert (paths.lists_dir / "other.txt").read_text() == "edited by the person\n"
+    assert seed_user_data(paths) is False

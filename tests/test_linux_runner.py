@@ -62,7 +62,7 @@ def test_every_tree_folder_maps_to_its_place_in_the_xdg_layout(paths) -> None:
     assert resolve_relative("lua/x.lua", paths) == str(paths.root / "lua" / "x.lua")
     assert resolve_relative("lists/youtube.txt", paths) == str(paths.data_root / "lists" / "youtube.txt")
     assert resolve_relative("lists/user/mine.txt", paths) == str(paths.data_root / "lists" / "user" / "mine.txt")
-    assert resolve_relative("lists/base/skip.txt", paths) == str(paths.root / "lists" / "base" / "skip.txt")
+    assert resolve_relative("lists/base/skip.txt", paths) == str(paths.data_root / "lists" / "base" / "skip.txt")
     assert resolve_relative("user/fakes/f.bin", paths) == str(paths.data_root / "fakes" / "f.bin")
     assert resolve_relative("elsewhere/x", paths) is None and resolve_relative("justfile", paths) is None
     assert resolve_relative("/abs/path", paths) is None
@@ -73,7 +73,7 @@ def test_arguments_get_absolute_files_and_everything_else_stays(paths) -> None:
     assert f"--lua-init=@{paths.root}/lua/zapret-lib.lua" in result
     assert f"--blob=tls1:@{paths.root}/bin/tls_clienthello_1.bin" in result
     assert f"--hostlist={paths.data_root}/lists/youtube.txt" in result
-    assert f"--ipset-exclude={paths.root}/lists/base/skip.txt" in result
+    assert f"--ipset-exclude={paths.data_root}/lists/base/skip.txt" in result
     for kept in ("--wf-tcp-out=80,443", "--filter-tcp=443", "--lua-desync=fake:blob=tls1"):
         assert kept in result
 

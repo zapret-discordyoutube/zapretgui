@@ -95,6 +95,12 @@ class LinuxStrategyRunner:
 
     def _fail(self, message: str) -> bool:
         self.last_error_message = message
+        try:
+            from log.log import log
+
+            log(f"Запуск движка на Linux не удался: {message}", "❌ ERROR")
+        except Exception:
+            pass
         for key in ("launch_error", "runner_failure"):
             callback = self._callbacks.get(key)
             if callable(callback):

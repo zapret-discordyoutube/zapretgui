@@ -208,6 +208,18 @@ class ApplicationPaths:
 
     @property
     def lists_base_dir(self) -> Path:
+        """Поставляемые списки, из которых пересобираются итоговые. В Linux это копия в данных пользователя
+        (программа ждёт ``base`` рядом с итоговыми списками); ``config.xdg_seed`` обновляет её из поставки."""
+        return self.lists_dir / "base"
+
+    @property
+    def shipped_lists_dir(self) -> Path:
+        """Поставляемые итоговые списки (``netrogat.txt`` и др.), только чтение."""
+        return self.root / "lists"
+
+    @property
+    def shipped_lists_base_dir(self) -> Path:
+        """Поставляемые базовые списки (только чтение)."""
         return self.root / "lists" / "base"
 
     @property
