@@ -181,6 +181,20 @@ class DnsPageTests(unittest.TestCase):
         self.assertTrue(hidden <= all_titles)
         self.assertEqual(all_titles - titles, hidden)
 
+    def test_the_encrypted_tab_and_the_doh_switch_are_not_offered_where_the_built_in_encrypted_dns_cannot_run(self) -> None:
+        """Seen on a real Linux desktop: the tab "Шифрованные" and the switch "Шифровать DNS (DoH)" stood there with nothing behind them."""
+        from dns.dns_providers import LOCAL_PROXY_GROUP
+
+        with patch("dns.local_proxy.available", return_value=False):
+            page = self._page(load=False)
+            self.assertNotIn(LOCAL_PROXY_GROUP, page.filter_bar.items)
+            self.assertFalse(page.doh_toggle.isVisibleTo(page.filter_row))
+            self.assertFalse(page.doh_label.isVisibleTo(page.filter_row))
+        with patch("dns.local_proxy.available", return_value=True):
+            full = self._page(load=False)
+            self.assertIn(LOCAL_PROXY_GROUP, full.filter_bar.items)
+            self.assertTrue(full.doh_toggle.isVisibleTo(full.filter_row))
+
     def test_first_open_shows_current_dns_without_badge_motion(self) -> None:
         """Комета и переворот значка — ответ на выбор сервера, а не на открытие страницы."""
         page = self._page(load=False)

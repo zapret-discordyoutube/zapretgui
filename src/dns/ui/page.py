@@ -319,6 +319,10 @@ class NetworkPage(BasePage):
         self.doh_toggle.setChecked(True)
         self.doh_toggle.checkedChanged.connect(self._on_doh_toggled)
         doh_layout.addWidget(self.doh_toggle, 0, Qt.AlignmentFlag.AlignVCenter)
+        if not dns_local_proxy.available():
+            # The switch chooses between the built-in encrypted DNS and plain addresses: without it there is no choice.
+            self.doh_label.setVisible(False)
+            self.doh_toggle.setVisible(False)
         self.filter_row = ResponsiveRow(self.filter_strip, doh_group, spacing=16, fill_lead=True, parent=self.content)
         self.add_widget(self.filter_row)
         self.add_spacing(6)
@@ -333,8 +337,20 @@ class NetworkPage(BasePage):
         self._rebuild_filter_bar()
         self._retranslate()
 
+    def _offered_groups(self) -> list[tuple[str, dict]]:
+        """The groups of the catalog as this system can use them (tabs and tiles share this answer)."""
+        groups = list(self._providers.items())
+        if not dns_local_proxy.available():
+            # Tiles that exist only through the built-in encrypted DNS are not offered where it cannot be installed.
+            groups = [
+                (name, {key: value for key, value in items.items() if not (value.get("local_proxy") or is_encrypted_only(value))})
+                for name, items in groups
+            ]
+            groups = [(name, items) for name, items in groups if items or name not in (LOCAL_PROXY_GROUP,)]
+        return groups
+
     def _rebuild_filter_bar(self) -> None:
-        keys = [FILTER_ALL, *self._providers.keys()]
+        keys = [FILTER_ALL, *(name for name, _items in self._offered_groups())]
         if CUSTOM_DNS_CATEGORY not in keys:
             keys.append(CUSTOM_DNS_CATEGORY)
         if self._filter not in keys:
@@ -700,14 +716,7 @@ class NetworkPage(BasePage):
         }
         fastest_address = min(measured, key=measured.get) if measured else ""
 
-        groups = list(self._providers.items())
-        if not dns_local_proxy.available():
-            # Tiles that exist only through the built-in encrypted DNS are not offered where it cannot be installed.
-            groups = [
-                (name, {key: value for key, value in items.items() if not (value.get("local_proxy") or is_encrypted_only(value))})
-                for name, items in groups
-            ]
-            groups = [(name, items) for name, items in groups if items or name not in (LOCAL_PROXY_GROUP,)]
+        groups = self._offered_groups()
         if CUSTOM_DNS_CATEGORY not in self._providers:
             groups.append((CUSTOM_DNS_CATEGORY, {}))
         if self._filter != FILTER_ALL:
