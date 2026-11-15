@@ -161,6 +161,9 @@ def zapret_status() -> tuple[bool | None, str]:
             for pid, name in current_platform().processes.list_processes()
             if str(name or "").lower() in ALL_WINWS_EXE_NAME_SET
         ]
+        # Where the engine is not a program of the process list by that name (Linux: nfqws2 behind the root helper)
+        # the engine interface knows it; Windows answers an empty list.
+        running += [f"nfqws2 (PID {pid})" for pid in current_platform().engine.running_pids()]
     except Exception as exc:
         return None, f"⚠️ Zapret: не удалось проверить процессы ({exc})"
     if running:

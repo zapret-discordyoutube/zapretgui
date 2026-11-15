@@ -551,7 +551,7 @@ def _check_winws2_running() -> bool:
         for _pid, process_name in current_platform().processes.list_processes():
             if str(process_name or "").strip().lower() in ALL_WINWS_EXE_NAME_SET:
                 return True
-        return False
+        return bool(current_platform().engine.running_pids())  # Linux: the engine of the root helper
     except Exception:
         return False
 

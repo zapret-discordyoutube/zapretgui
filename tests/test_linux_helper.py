@@ -505,3 +505,39 @@ def test_the_windivert_driver_cleanup_is_skipped_where_there_is_no_driver(monkey
     monkeypatch.setattr("platforms.current", lambda: make_platform(capabilities=frozenset({Cap.DIRECT_ENGINE_PROCESS})))
     api.cleanup_windivert_service()
     assert calls == [1]
+
+
+def test_the_blockcheck_header_knows_the_engine_of_the_helper(monkeypatch) -> None:
+    """Seen on the real Linux desktop: BlockCheck said "Zapret выключен" while the engine ran."""
+    from diagnostics import sections
+    from platforms.stub import make_platform
+
+    class Engine:
+        def __init__(self, pids):
+            self.pids = pids
+
+        def running_pids(self):
+            return self.pids
+
+    monkeypatch.setattr("platforms.current", lambda: make_platform(engine=Engine([4321])))
+    running, line = sections.zapret_status()
+    assert running is True and "4321" in line
+    monkeypatch.setattr("platforms.current", lambda: make_platform(engine=Engine([])))
+    assert sections.zapret_status()[0] is False
+
+
+def test_the_telegram_diagnostics_know_the_engine_of_the_helper(monkeypatch) -> None:
+    from platforms.stub import make_platform
+    from telegram_proxy.diagnostics import runner
+
+    class Engine:
+        def __init__(self, pids):
+            self.pids = pids
+
+        def running_pids(self):
+            return self.pids
+
+    monkeypatch.setattr(runner, "current_platform", lambda: make_platform(engine=Engine([4321])))
+    assert runner._check_winws2_running() is True
+    monkeypatch.setattr(runner, "current_platform", lambda: make_platform(engine=Engine([])))
+    assert runner._check_winws2_running() is False
