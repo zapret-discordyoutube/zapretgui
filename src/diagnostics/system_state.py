@@ -184,9 +184,13 @@ def _read_integrity() -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
 
 
 def _read_bfe() -> bool:
-    from startup.bfe_util import is_service_running
+    from platforms import Cap, current as current_platform
 
-    return bool(is_service_running("BFE"))
+    platform = current_platform()
+    if not platform.has(Cap.BFE):
+        # Not a Windows system: the fact does not exist, so it is "unknown", never "stopped".
+        raise LookupError("BFE exists on Windows only")
+    return bool(platform.services.is_running("BFE"))
 
 
 def _read_conflicts() -> tuple[str, ...]:

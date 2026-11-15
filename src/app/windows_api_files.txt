@@ -19,7 +19,6 @@ src/main/window_native_commands.py 2
 src/presets/native_dir_watcher.py 1
 src/settings/store.py 5
 src/startup/admin_check_debug.py 19
-src/startup/bfe_util.py 10
 src/startup/check_start.py 31
 src/support_request_bundle.py 2
 src/telegram_proxy/config/settings.py 2

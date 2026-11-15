@@ -53,6 +53,26 @@ class Privileges(Protocol):
         """
 
 
+class Services(Protocol):
+    """The system's background services (Windows services, systemd units)."""
+
+    def is_running(self, name: str) -> bool:
+        """True when the service exists and runs. A service that does not exist is "not running"."""
+
+    def start(self, name: str, timeout: float = 10) -> bool:
+        """Tries to start the service and waits up to ``timeout`` seconds. True when it runs afterwards."""
+
+
+class Cap:
+    """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.
+
+    Features that exist on one system only (Windows Defender, the BFE firewall service ...) are
+    switched off by their capability instead of failing; the interface hides them.
+    """
+
+    BFE = "windows_bfe"  # Base Filtering Engine: the Windows service WinDivert depends on
+
+
 WAIT_SIGNALLED = 0
 """What a ``wait_fn`` returns when the "show window" signal arrived. Any other value ends the watcher."""
 
@@ -115,6 +135,11 @@ class Platform:
     messages: MessageBox
     privileges: Privileges
     single_instance: SingleInstance
+    services: Services
+    capabilities: frozenset[str] = frozenset()
+
+    def has(self, capability: str) -> bool:
+        return capability in self.capabilities
 
 
 def print_to_stderr(title: str, message: str) -> None:

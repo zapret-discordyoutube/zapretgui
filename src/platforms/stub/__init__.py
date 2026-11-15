@@ -39,9 +39,18 @@ class _NoSingleInstance:
         return None
 
 
+class _NoServices:
+    def is_running(self, name: str) -> bool:
+        return False
+
+    def start(self, name: str, timeout: float = 10) -> bool:
+        return False
+
+
 PLATFORM = Platform(
     name="stub",
     messages=_StderrMessageBox(),
     privileges=_NoPrivileges(),
     single_instance=_NoSingleInstance(),
+    services=_NoServices(),
 )

@@ -2,35 +2,10 @@
 
 from typing import Optional
 import time
-import win32service
-import win32serviceutil
 import threading
 
 from app_notifications import advisory_notification
-
-SERVICE_RUNNING = win32service.SERVICE_RUNNING
-ERROR_SERVICE_DOES_NOT_EXIST = 1060
-
-def is_service_running(name: str) -> bool:
-    """Быстрая проверка состояния службы через Win32 API."""
-    scm = win32service.OpenSCManager(None, None,
-                                     win32service.SC_MANAGER_CONNECT)
-    try:
-        try:
-            svc = win32service.OpenService(scm, name,
-                                           win32service.SERVICE_QUERY_STATUS)
-        except win32service.error as e:
-            # Если службы нет – просто возвращаем False
-            if e.winerror == ERROR_SERVICE_DOES_NOT_EXIST:
-                return False
-            raise                       # остальные ошибки пробрасываем
-        try:
-            status = win32service.QueryServiceStatus(svc)[1]
-            return status == SERVICE_RUNNING
-        finally:
-            win32service.CloseServiceHandle(svc)
-    finally:
-        win32service.CloseServiceHandle(scm)
+from platforms import current as current_platform
 
 
 class ServiceCache:
@@ -72,7 +47,7 @@ def _check_service_once_async(service_name: str, callback=None) -> None:
     """Запускает одну фоновую проверку службы без постоянного worker-потока."""
     def _worker() -> None:
         try:
-            result = is_service_running(service_name)
+            result = current_platform().services.is_running(service_name)
             service_cache.set(service_name, result)
             if callback:
                 callback(service_name, result)
@@ -87,27 +62,6 @@ def _check_service_once_async(service_name: str, callback=None) -> None:
         name=f"ServiceCheck:{service_name}",
     )
     thread.start()
-
-
-def start_service(service_name: str, timeout: int = 10) -> bool:
-    """Запустить службу Windows."""
-    try:
-        win32serviceutil.StartService(service_name)
-        
-        # Ждём запуска
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if is_service_running(service_name):
-                return True
-            time.sleep(0.5)
-        
-        return False
-        
-    except Exception as e:
-        # Если служба уже запущена
-        if "уже запущена" in str(e) or "already running" in str(e).lower():
-            return True
-        return False
 
 
 def ensure_bfe_running() -> tuple[bool, dict | None]:
@@ -143,13 +97,13 @@ def ensure_bfe_running() -> tuple[bool, dict | None]:
     
     try:
         # 3. Выполняем быструю проверку через Win32 API
-        is_running = is_service_running("BFE")
+        is_running = current_platform().services.is_running("BFE")
         
         if not is_running:
             log("Служба BFE остановлена, пытаемся запустить", "⚠ WARNING")
 
             # Пытаемся запустить службу
-            is_running = start_service("BFE", timeout=5)
+            is_running = current_platform().services.start("BFE", timeout=5)
 
             if not is_running:
                 log("Не удалось запустить службу BFE", "❌ ERROR")

@@ -623,9 +623,9 @@ def _check_windivert_files() -> List[str]:
 def _check_bfe_service() -> bool:
     """Return True if Base Filtering Engine service is running."""
     try:
-        from startup.bfe_util import is_service_running
+        from platforms import current as current_platform
 
-        return bool(is_service_running("BFE"))
+        return bool(current_platform().services.is_running("BFE"))
     except Exception:
         return True  # assume OK
 

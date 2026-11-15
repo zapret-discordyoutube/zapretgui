@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-from platforms.base import MessageBox, MessageKind, Platform
+from platforms.base import Cap, MessageBox, MessageKind, Platform
 
 _current: Platform | None = None
 
@@ -31,4 +31,4 @@ def current() -> Platform:
     return _current
 
 
-__all__ = ["MessageBox", "MessageKind", "Platform", "current"]
+__all__ = ["Cap", "MessageBox", "MessageKind", "Platform", "current"]

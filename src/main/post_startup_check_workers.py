@@ -10,16 +10,19 @@ def collect_startup_checks_payload(*, verbose_logging_enabled: bool) -> dict:
     started_at = time.perf_counter()
     notifications: list[dict] = []
 
-    from startup.bfe_util import preload_service_status, ensure_bfe_running
+    from platforms import Cap, current as current_platform
     from startup.check_start import collect_startup_notifications, check_goodbyedpi, check_mitmproxy
 
-    preload_service_status("BFE")
+    if current_platform().has(Cap.BFE):
+        from startup.bfe_util import preload_service_status, ensure_bfe_running
 
-    bfe_ok, bfe_notification = ensure_bfe_running()
-    if bfe_notification is not None:
-        notifications.append(bfe_notification)
-    if not bfe_ok:
-        log("BFE не запущен, продолжаем работу после предупреждения", "⚠ WARNING")
+        preload_service_status("BFE")
+
+        bfe_ok, bfe_notification = ensure_bfe_running()
+        if bfe_notification is not None:
+            notifications.append(bfe_notification)
+        if not bfe_ok:
+            log("BFE не запущен, продолжаем работу после предупреждения", "⚠ WARNING")
 
     startup_notifications = collect_startup_notifications()
     notifications.extend(startup_notifications or [])

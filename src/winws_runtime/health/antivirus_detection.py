@@ -72,9 +72,9 @@ def _find_known_antivirus_name() -> Optional[str]:
 def _is_windows_defender_active() -> bool:
     """Возвращает True, если Windows Defender выглядит активным по прямым Windows-признакам."""
     try:
-        from startup.bfe_util import is_service_running
+        from platforms import current as current_platform
 
-        if is_service_running("WinDefend"):
+        if current_platform().services.is_running("WinDefend"):
             return True
     except Exception:
         pass
