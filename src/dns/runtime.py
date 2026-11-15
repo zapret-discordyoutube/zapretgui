@@ -1,6 +1,6 @@
 """DNS-слой программы: состояние адаптеров и действия над ними.
 
-Цепочка: dns.winapi (вызовы Windows) → dns.adapters (какие адаптеры наши)
+Цепочка: dns.system_dns (платформа: Windows, NetworkManager, systemd-resolved) → dns.adapters (какие адаптеры наши)
 → этот модуль (что сделать) → dns.commands (публичные команды для фасада).
 
 Адаптеры опознаются по GUID. Всё здесь блокирующее и вызывается только из
@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import replace
 from threading import RLock
 
-from dns import winapi
+from dns import system_dns
 from dns.adapters import DnsAdapter, build_dns_adapters, is_dns_adapter
 from dns import doh_switch
 from dns.custom_servers import custom_doh_templates
@@ -31,20 +31,20 @@ _warmed_lock = RLock()
 
 def load_state() -> DnsState:
     """Адаптеры для страницы DNS с их текущими DNS, наличие IPv6 и DoH."""
-    interfaces = winapi.list_interfaces()
-    route = winapi.internet_route()
+    interfaces = system_dns.list_interfaces()
+    route = system_dns.internet_route()
     static = {}
     for interface in interfaces:
         if not is_dns_adapter(interface, route):
             continue
         try:
-            static[interface.guid] = winapi.read_static_dns(interface.guid)
-        except winapi.DnsWinApiError as exc:
+            static[interface.guid] = system_dns.read_static_dns(interface.guid)
+        except system_dns.DnsBackendError as exc:
             log(f"DNS: не удалось прочитать DNS адаптера «{interface.name}»: {exc}", "WARNING")
     return DnsState(
         adapters=build_dns_adapters(interfaces, route, static),
         ipv6_available=route.has_ipv6,
-        doh_supported=winapi.is_doh_supported(),
+        doh_supported=system_dns.is_doh_supported(),
         doh_enabled=doh_switch.is_enabled(),
         local_proxy_mode=_local_proxy_mode(),
         local_proxy_server=_local_proxy_server(),
@@ -73,7 +73,7 @@ def write_doh_templates() -> dict[str, str] | None:
     записи тогда снимает с адаптера прежние ссылки DoH, а не оставляет их
     (None этого не делает: поля DoH в запись не попадают).
     """
-    if not winapi.is_doh_supported():
+    if not system_dns.is_doh_supported():
         return None
     if not doh_switch.is_enabled():
         return {}
@@ -159,13 +159,13 @@ def apply_dns(guids: list[str], ipv4: list[str], ipv6: list[str]) -> DnsCommandR
             continue
         try:
             with timed_step(f"запись DNS адаптеру «{names[guid]}»"):
-                winapi.write_dns(guid, ipv4, ipv6=False, doh_templates=templates)
-                winapi.write_dns(guid, ipv6, ipv6=True, doh_templates=templates)
-        except (winapi.DnsWinApiError, ValueError) as exc:
+                system_dns.write_dns(guid, ipv4, ipv6=False, doh_templates=templates)
+                system_dns.write_dns(guid, ipv6, ipv6=True, doh_templates=templates)
+        except (system_dns.DnsBackendError, ValueError) as exc:
             errors.append(f"«{names[guid]}»: {exc}")
     if len(errors) < len(guids):
         with timed_step("очистка кэша DNS"):
-            winapi.flush_resolver_cache()
+            system_dns.flush_resolver_cache()
     message = "; ".join(errors)
     if message:
         log(f"DNS: {message}", "WARNING")
@@ -186,7 +186,7 @@ def reset_to_auto(guids: list[str]) -> DnsCommandResult:
 
 
 def flush_dns_cache() -> DnsCommandResult:
-    if winapi.flush_resolver_cache():
+    if system_dns.flush_resolver_cache():
         return DnsCommandResult(success=True)
     return DnsCommandResult(success=False, message="Windows не смогла очистить кэш DNS")
 
@@ -230,7 +230,7 @@ def repair_local_proxy() -> str:
     summary = local_proxy.repair(_static_addresses())
     if summary:
         log(f"DNS: {summary}", "INFO")
-        winapi.flush_resolver_cache()
+        system_dns.flush_resolver_cache()
     return summary
 
 

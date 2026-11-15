@@ -5,6 +5,7 @@ from __future__ import annotations
 from platforms.base import NoWorkingSet, Platform
 from platforms.linux.autostart import LinuxGuiAutostart
 from platforms.linux.desktop import LinuxDesktop
+from platforms.linux.dns import LinuxDns
 from platforms.linux.engine import LinuxEngine
 from platforms.linux.launch import LinuxLaunch
 from platforms.linux.messages import LinuxMessageBox
@@ -29,6 +30,7 @@ PLATFORM = Platform(
     desktop=LinuxDesktop(),
     tray=LinuxTray(),
     system_settings=LinuxSystemSettings(),
+    dns=LinuxDns(),
     engine=LinuxEngine(),
     working_set=NoWorkingSet(),
 )

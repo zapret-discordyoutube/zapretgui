@@ -1,4 +1,4 @@
-"""One JSON object per line over a Unix socket. Requests: ``{"op": "start" | "stop" | "status" | "cleanup", ...}``.
+"""One JSON object per line over a Unix socket. Requests: ``{"op": "start" | "stop" | "status" | "cleanup" | "dns_set" | "dns_flush" | "hosts_write", ...}``.
 Answers: ``{"ok": true, ...}`` or ``{"ok": false, "error": "text"}``."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import socket
 SOCKET_PATH = "/run/zapretgui/helper.sock"
 SOCKET_GROUP = "zapretgui"
 MAX_MESSAGE_BYTES = 1 << 20
-OPERATIONS = frozenset({"start", "stop", "status", "cleanup"})
+OPERATIONS = frozenset({"start", "stop", "status", "cleanup", "dns_set", "dns_flush", "hosts_write"})
 
 
 class ProtocolError(ValueError):

@@ -53,3 +53,12 @@ class HelperClient:
 
     def cleanup(self) -> dict:
         return self.call("cleanup")
+
+    def dns_set(self, interface: str, servers: list[str]) -> dict:
+        return self.call("dns_set", interface=interface, servers=list(servers))
+
+    def dns_flush(self) -> dict:
+        return self.call("dns_flush")
+
+    def hosts_write(self, content: str) -> dict:
+        return self.call("hosts_write", content=content)

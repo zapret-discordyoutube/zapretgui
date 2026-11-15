@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from dns.adapters import build_dns_adapters, is_dns_adapter
-from dns.winapi import IF_TYPE_ETHERNET_CSMACD as ETH, IF_TYPE_IEEE80211 as WIFI, InternetRoute, RawInterface, StaticDns
+from platforms.dns_types import IF_TYPE_ETHERNET_CSMACD as ETH, IF_TYPE_IEEE80211 as WIFI, InternetRoute, RawInterface, StaticDns
 
 
 def _iface(index, name, *, if_type=ETH, hw=False, connector=False, filter=False, connected=True, dns=()):

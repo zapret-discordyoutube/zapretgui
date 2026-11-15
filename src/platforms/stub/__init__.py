@@ -163,6 +163,32 @@ class _NoSystemSettings:
         return "", ""
 
 
+class _NoDns:
+    def list_interfaces(self):
+        return []
+
+    def internet_route(self):
+        from platforms.dns_types import InternetRoute
+
+        return InternetRoute()
+
+    def read_static_dns(self, guid):
+        from platforms.dns_types import StaticDns
+
+        return StaticDns()
+
+    def write_dns(self, guid, servers, *, ipv6, doh_templates=None):
+        from platforms.dns_types import DnsBackendError
+
+        raise DnsBackendError("DNS cannot be changed on this system")
+
+    def flush_resolver_cache(self) -> bool:
+        return False
+
+    def is_doh_supported(self) -> bool:
+        return False
+
+
 class _NoLaunch:
     def process_creation_unix_seconds(self) -> float | None:
         return None
@@ -190,6 +216,7 @@ PLATFORM = Platform(
     desktop=_NoDesktop(),
     tray=_NoTray(),
     system_settings=_NoSystemSettings(),
+    dns=_NoDns(),
     engine=FactoryEngine(),
     working_set=NoWorkingSet(),
 )

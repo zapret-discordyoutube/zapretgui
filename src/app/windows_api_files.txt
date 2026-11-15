@@ -5,7 +5,6 @@ src/blockcheck/browser_switch.py 16
 src/config/window_metrics.py 4
 src/diagnostics/tcp_stats.py 3
 src/dns/local_proxy_windows.py 5
-src/dns/winapi.py 2
 src/hosts/commands.py 1
 src/hosts/ipv6_detection.py 1
 src/presets/native_dir_watcher.py 1

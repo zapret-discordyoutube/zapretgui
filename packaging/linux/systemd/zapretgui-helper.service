@@ -22,6 +22,10 @@ RuntimeDirectoryPreserve=no
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SETUID CAP_SETGID CAP_SYS_NICE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_DAC_OVERRIDE CAP_SYS_ADMIN
 ProtectSystem=strict
 ProtectHome=read-only
+# The window may ask the helper to rewrite the hosts file (an in-place write of exactly this file, with a first backup
+# in /var/lib/zapretgui). The "-" lets the unit start even on a machine without the file.
+ReadWritePaths=-/etc/hosts
+StateDirectory=zapretgui
 PrivateTmp=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes

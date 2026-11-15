@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from platforms.linux import capture_rules
-from platforms.linux.helper import policy
+from platforms.linux.helper import policy, system_ops
 from platforms.linux.helper.protocol import answer_error, answer_ok
 
 DEFAULT_QUEUE = 200
@@ -137,7 +137,9 @@ class HelperService:
         queue_num: int = DEFAULT_QUEUE,
         log_path: str = ENGINE_LOG_PATH,
         clock: Callable[[], float] = time.time,
+        ops: system_ops.SystemOps | None = None,
     ) -> None:
+        self._ops = ops or system_ops.SystemOps()
         self._system = system or real_system_calls()
         self._state_path = state_path
         self._engine_path = str(engine_path)
@@ -161,6 +163,8 @@ class HelperService:
                 return self.status()
             if op == "cleanup":
                 return self.cleanup_stale()
+            if op in system_ops.OPERATIONS:
+                return self._ops.handle(op, request)
         except Exception as exc:  # the service must never die from one bad request
             return answer_error(f"internal error: {type(exc).__name__}: {exc}")
         return answer_error(f"unknown operation {op!r}")

@@ -222,17 +222,17 @@ def save_custom_server(server: dict, *, cancel=None) -> CustomServerResult:
     record = custom.copy_server(server)
     notice = ""
     if record["doh"] and not record["ipv4"] and not record["ipv6"]:
-        from dns import winapi
+        from dns import system_dns
         from dns.doh_lookup import find_doh_addresses
 
         template = custom.parse_doh_template(record["doh"])
         if template is None:
             return CustomServerResult(success=False, error="Адрес DoH записан неверно.", field=custom.FIELD_DOH)
         try:
-            ipv6 = bool(winapi.internet_route().has_ipv6)
+            ipv6 = bool(system_dns.internet_route().has_ipv6)
         except Exception:
             ipv6 = False
-        found = find_doh_addresses(template, ipv6=ipv6, doh_supported=winapi.is_doh_supported(), cancel=cancel)
+        found = find_doh_addresses(template, ipv6=ipv6, doh_supported=system_dns.is_doh_supported(), cancel=cancel)
         if not found.found:
             return CustomServerResult(success=False, error=found.error, field=custom.FIELD_DOH)
         record["ipv4"], record["ipv6"], notice = list(found.ipv4), list(found.ipv6), found.notice
@@ -473,7 +473,7 @@ def build_server_check_targets():
 
     custom_servers = load_custom_servers()
     try:
-        from dns.winapi import internet_route
+        from dns.system_dns import internet_route
 
         ipv6 = bool(internet_route().has_ipv6)
     except Exception:

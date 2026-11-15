@@ -5,7 +5,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from dns import winapi
+from platforms.windows import dns_adapters as winapi
 
 
 class _FakeIpHelper:

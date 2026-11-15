@@ -241,7 +241,7 @@ def _read_proxy() -> tuple[str, str]:
 
 
 def _read_tunnels() -> tuple[str, ...]:
-    from dns.winapi import list_interfaces
+    from dns.system_dns import list_interfaces
 
     return tunnel_adapters(list_interfaces())
 
@@ -258,7 +258,7 @@ def routed_tunnels(interfaces, ipv4_index: int, ipv6_index: int = 0) -> tuple[st
 
 
 def _read_tunnels_routed() -> tuple[str, ...]:
-    from dns.winapi import internet_route, list_interfaces
+    from dns.system_dns import internet_route, list_interfaces
 
     route = internet_route()
     return routed_tunnels(list_interfaces(), route.ipv4_index, route.ipv6_index)

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dns.winapi import IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211, InternetRoute, RawInterface, StaticDns
+from platforms.dns_types import IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211, InternetRoute, RawInterface, StaticDns
 
 DNS_ADAPTER_TYPES = (IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211)
 

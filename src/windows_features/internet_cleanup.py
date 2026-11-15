@@ -157,7 +157,7 @@ def _reset_winsock() -> str:
 
 
 def _flush_dns_cache() -> str:
-    from dns.winapi import flush_resolver_cache
+    from dns.system_dns import flush_resolver_cache
 
     if not flush_resolver_cache():
         raise OSError("Windows не смогла очистить кэш DNS")

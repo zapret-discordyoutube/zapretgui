@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
 
-from dns import doh_switch, runtime, winapi
+from dns import doh_switch, runtime, system_dns
 from dns.adapters import DnsAdapter
 from dns.dns_providers import DNS_PROVIDERS, zapret_dns_provider
 from dns.state import DnsCommandResult, DnsState
@@ -78,7 +78,7 @@ class DohSwitchSettingsTests(unittest.TestCase):
 
 class DohSwitchWindowsWriteTests(unittest.TestCase):
     def _templates(self, *, supported: bool, enabled: bool):
-        with patch.object(winapi, "is_doh_supported", return_value=supported), patch.object(
+        with patch.object(system_dns, "is_doh_supported", return_value=supported), patch.object(
             doh_switch, "is_enabled", return_value=enabled
         ), patch.object(runtime, "load_custom_servers", return_value=[]):
             return runtime.write_doh_templates()
@@ -96,9 +96,9 @@ class DohSwitchWindowsWriteTests(unittest.TestCase):
     def test_switch_off_writes_plain_addresses_with_empty_doh_list(self) -> None:
         writes = []
         known = DnsState(adapters=(DnsAdapter(ETH, "Ethernet", "", "ethernet", True, True),))
-        with patch.object(winapi, "is_doh_supported", return_value=True), patch.object(
-            winapi, "write_dns", side_effect=lambda guid, servers, *, ipv6, doh_templates=None: writes.append(doh_templates)
-        ), patch.object(winapi, "flush_resolver_cache", return_value=True), patch.object(
+        with patch.object(system_dns, "is_doh_supported", return_value=True), patch.object(
+            system_dns, "write_dns", side_effect=lambda guid, servers, *, ipv6, doh_templates=None: writes.append(doh_templates)
+        ), patch.object(system_dns, "flush_resolver_cache", return_value=True), patch.object(
             doh_switch, "is_enabled", return_value=False
         ), patch.object(runtime, "load_state", return_value=known), patch.object(
             runtime, "load_custom_servers", return_value=[]

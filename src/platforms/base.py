@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Protocol, Sequence
 
 if TYPE_CHECKING:
+    from platforms.dns_types import InternetRoute, RawInterface, StaticDns
     from platforms.netprobe_types import DnsAnswer, PingResult, TraceHopResult
 
 
@@ -330,6 +331,32 @@ class SystemSettings(Protocol):
         """``(proxy server, automatic-config URL)`` the system hands to programs; empty strings when none."""
 
 
+class DnsAdapters(Protocol):
+    """Reading and changing the DNS servers of the network interfaces (Windows: IP Helper API; Linux: NetworkManager
+    or systemd-resolved). ``guid`` is the backend's own interface name, see ``platforms.dns_types``.
+
+    Every method that changes something raises ``DnsBackendError`` with a readable text when the system refuses.
+    """
+
+    def list_interfaces(self) -> list[RawInterface]:
+        """The interfaces a person could mean (no hidden service interfaces). Lenient: an empty list when unknown."""
+
+    def internet_route(self) -> InternetRoute:
+        """Which interfaces the internet goes through right now."""
+
+    def read_static_dns(self, guid: str) -> StaticDns:
+        """The DNS servers set by hand on the interface (empty: automatic)."""
+
+    def write_dns(self, guid: str, servers: Sequence[str], *, ipv6: bool, doh_templates: dict[str, str] | None = None) -> None:
+        """Set the DNS servers of one family; an empty list gives back the automatic ones."""
+
+    def flush_resolver_cache(self) -> bool:
+        """Empty the system's DNS cache; False when it could not be done."""
+
+    def is_doh_supported(self) -> bool:
+        """Whether the system can encrypt DNS itself (DNS over HTTPS) for the servers written."""
+
+
 class Engine(Protocol):
     """The DPI engine: the object that starts, switches and stops the bypass process for a preset.
 
@@ -438,6 +465,7 @@ class Platform:
     desktop: Desktop
     tray: Tray
     system_settings: SystemSettings
+    dns: DnsAdapters
     engine: Engine
     working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()

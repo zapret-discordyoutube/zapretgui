@@ -101,7 +101,7 @@ def migrate_outdated_dns_addresses(
     Трогает только адреса, прописанные вручную; автоматические (DHCP) не
     меняются. Возвращает список изменений в виде строк для лога.
     """
-    from dns import runtime, winapi
+    from dns import runtime, system_dns
 
     if replacements is None:
         replacements, planned_removals = outdated_address_plan()
@@ -119,14 +119,14 @@ def migrate_outdated_dns_addresses(
             family = "IPv6" if ipv6 else "IPv4"
             summary = f"{adapter.name} ({family}): {', '.join(current)} -> {', '.join(new_servers) or 'автоматически'}"
             try:
-                winapi.write_dns(adapter.guid, new_servers, ipv6=ipv6, doh_templates=templates)
-            except winapi.DnsWinApiError as exc:
+                system_dns.write_dns(adapter.guid, new_servers, ipv6=ipv6, doh_templates=templates)
+            except system_dns.DnsBackendError as exc:
                 log(f"DNS: не удалось заменить старые адреса провайдера: {summary}: {exc}", "WARNING")
                 continue
             log(f"DNS: старые адреса провайдера заменены на новые: {summary}", "INFO")
             changes.append(summary)
     if changes:
-        winapi.flush_resolver_cache()
+        system_dns.flush_resolver_cache()
     return changes
 
 

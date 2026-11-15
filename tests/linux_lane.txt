@@ -29,3 +29,5 @@ tests/test_onboarding_tour_drift.py
 tests/test_onboarding_tour_targets.py
 tests/test_onboarding_tour_pages.py
 tests/test_linux_system_theme.py
+tests/test_linux_dns.py
+tests/test_platforms_windows_dns_adapters.py

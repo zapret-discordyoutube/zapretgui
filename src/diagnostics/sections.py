@@ -224,7 +224,7 @@ def _system_has_ipv6_route() -> bool | None:
     """Считает ли Windows, что по IPv6 есть дорога в интернет. None — не Windows или ошибка."""
     if sys.platform != "win32":
         return None
-    from dns.winapi import internet_route
+    from dns.system_dns import internet_route
 
     return bool(internet_route().has_ipv6)
 

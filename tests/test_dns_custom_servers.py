@@ -231,7 +231,7 @@ class CommandTests(unittest.TestCase):
 
     def _lookup(self, result):
         winapi = patch.multiple(
-            "dns.winapi",
+            "dns.system_dns",
             internet_route=lambda: type("Route", (), {"has_ipv6": True})(),
             is_doh_supported=lambda: True,
         )

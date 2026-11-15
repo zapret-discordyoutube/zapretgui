@@ -23,8 +23,19 @@ import ctypes
 import socket
 import sys
 from ctypes import POINTER, Structure, Union, byref, c_int32, c_uint32, c_uint64, c_ubyte, c_ushort, c_void_p, c_wchar_p
-from dataclasses import dataclass, field
 from functools import lru_cache
+
+from platforms.dns_types import (
+    IF_OPER_STATUS_UP,
+    IF_TYPE_ETHERNET_CSMACD,
+    IF_TYPE_IEEE80211,
+    IF_TYPE_SOFTWARE_LOOPBACK,
+    DnsBackendError,
+    InternetRoute,
+    RawInterface,
+    StaticDns,
+    split_name_servers,
+)
 
 ERROR_SUCCESS = 0
 ERROR_BUFFER_OVERFLOW = 111
@@ -37,10 +48,6 @@ GAA_FLAG_SKIP_UNICAST = 0x0001
 GAA_FLAG_SKIP_ANYCAST = 0x0002
 GAA_FLAG_SKIP_MULTICAST = 0x0004
 
-IF_TYPE_ETHERNET_CSMACD = 6
-IF_TYPE_SOFTWARE_LOOPBACK = 24
-IF_TYPE_IEEE80211 = 71
-IF_OPER_STATUS_UP = 1
 
 # Биты MIB_IF_ROW2.InterfaceAndOperStatusFlags.
 IF_FLAG_HARDWARE = 0x01
@@ -65,7 +72,7 @@ INTERNET_PROBE_V4 = "1.1.1.1"
 INTERNET_PROBE_V6 = "2606:4700:4700::1111"
 
 
-class DnsWinApiError(OSError):
+class DnsWinApiError(DnsBackendError):
     """Windows вернула ошибку; текст уже понятен человеку."""
 
 
@@ -194,47 +201,6 @@ class DNS_INTERFACE_SETTINGS3(Structure):
     ]
 
 
-# ── данные наружу ─────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class RawInterface:
-    """Сетевой интерфейс так, как его описывает Windows."""
-
-    guid: str
-    index: int
-    ipv6_index: int
-    name: str
-    description: str
-    if_type: int
-    connected: bool
-    hardware: bool = False
-    filter: bool = False
-    connector: bool = False
-    dns_ipv4: tuple[str, ...] = ()
-    dns_ipv6: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class InternetRoute:
-    """Индексы интерфейсов, через которые идёт интернет (0 — маршрута нет)."""
-
-    ipv4_index: int = 0
-    ipv6_index: int = 0
-
-    @property
-    def has_ipv6(self) -> bool:
-        return self.ipv6_index != 0
-
-
-@dataclass(frozen=True, slots=True)
-class StaticDns:
-    """DNS, прописанные вручную; пусто — адаптер получает DNS автоматически."""
-
-    ipv4: tuple[str, ...] = field(default_factory=tuple)
-    ipv6: tuple[str, ...] = field(default_factory=tuple)
-
-
 # ── библиотеки ────────────────────────────────────────────────────────────
 
 
@@ -286,12 +252,6 @@ def _sockaddr_to_ip(address: SOCKET_ADDRESS) -> str:
     if family == AF_INET6 and len(data) >= 24:
         return socket.inet_ntop(socket.AF_INET6, data[8:24])
     return ""
-
-
-def split_name_servers(value: str | None) -> tuple[str, ...]:
-    """«1.1.1.1,1.0.0.1» / «a b» / «a;b» → кортеж адресов без повторов."""
-    text = str(value or "").replace(";", " ").replace(",", " ")
-    return tuple(dict.fromkeys(part for part in text.split() if part))
 
 
 # ── адаптеры ──────────────────────────────────────────────────────────────
@@ -458,7 +418,30 @@ def flush_resolver_cache() -> bool:
     return bool(_dnsapi().DnsFlushResolverCache())
 
 
+class WindowsDns:
+    """``Platform.dns`` on Windows: the IP Helper and DNS API calls above."""
+
+    def list_interfaces(self) -> list[RawInterface]:
+        return list_interfaces()
+
+    def internet_route(self) -> InternetRoute:
+        return internet_route()
+
+    def read_static_dns(self, guid: str) -> StaticDns:
+        return read_static_dns(guid)
+
+    def write_dns(self, guid: str, servers, *, ipv6: bool, doh_templates=None) -> None:
+        write_dns(guid, servers, ipv6=ipv6, doh_templates=doh_templates)
+
+    def flush_resolver_cache(self) -> bool:
+        return flush_resolver_cache()
+
+    def is_doh_supported(self) -> bool:
+        return is_doh_supported()
+
+
 __all__ = [
+    "WindowsDns",
     "DnsWinApiError",
     "InternetRoute",
     "RawInterface",

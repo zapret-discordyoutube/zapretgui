@@ -38,6 +38,7 @@ sys.excepthook = _qt_slot_excepthook
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_network: do not replace the platform network probes with the safe stub")
+    config.addinivalue_line("markers", "real_dns: keep the real DNS backend of the platform (tests of the backend itself)")
     config.addinivalue_line("markers", "real_engine: keep the engine of the running platform (not the shared Windows runner factory)")
 
 
@@ -65,6 +66,22 @@ def _tests_do_not_measure_the_real_network(monkeypatch, request):
         "tcp_server_window",
     ):
         monkeypatch.setattr(probe, name, getattr(stub.netprobe, name), raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _tests_do_not_touch_the_real_dns(monkeypatch, request):
+    """Outside Windows no test reads or changes the DNS of the machine it runs on (nmcli, resolvectl, the helper).
+    Tests of the Linux backend build their own ``LinuxDns``; the mark ``real_dns`` switches the replacement off."""
+    if sys.platform == "win32" or request.node.get_closest_marker("real_dns"):
+        yield
+        return
+    from platforms import current
+    from platforms.stub import PLATFORM as stub
+
+    dns = current().dns
+    for name in ("list_interfaces", "internet_route", "read_static_dns", "write_dns", "flush_resolver_cache", "is_doh_supported"):
+        monkeypatch.setattr(dns, name, getattr(stub.dns, name), raising=False)
     yield
 
 

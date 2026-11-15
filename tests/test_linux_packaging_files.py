@@ -188,3 +188,13 @@ def test_the_appimage_launcher_installs_the_system_part_and_starts_the_installed
     assert text.rstrip().endswith('exec /opt/zapretgui/bin/zapretgui "$@"')
     # the version the launcher compares is the one the bundle script writes
     assert "VERSION" in text
+
+
+def test_the_unit_lets_the_helper_write_exactly_the_hosts_file_and_its_backup() -> None:
+    service = _unit()["Service"]
+    assert service["ReadWritePaths"] == "-/etc/hosts"
+    assert service["StateDirectory"] == "zapretgui"
+    from platforms.linux.helper import system_ops
+
+    assert system_ops.HOSTS_PATH == "/etc/hosts"
+    assert system_ops.HOSTS_BACKUP.startswith("/var/lib/zapretgui/")

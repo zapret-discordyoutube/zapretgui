@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from dns import runtime, winapi
+from dns import runtime, system_dns
 from dns.adapters import DnsAdapter
 from dns.address_migration import migrate_outdated_dns_addresses
 from dns.dns_providers import DNS_PROVIDERS, doh_templates
@@ -23,7 +23,7 @@ class _FakeWinApi:
 
     def write_dns(self, guid, servers, *, ipv6, doh_templates=None):
         if guid in self.fail:
-            raise winapi.DnsWinApiError("SetInterfaceDnsSettings: ошибка Windows 5 — Отказано в доступе.")
+            raise system_dns.DnsBackendError("SetInterfaceDnsSettings: ошибка Windows 5 — Отказано в доступе.")
         self.writes.append((guid, tuple(servers), ipv6, doh_templates))
 
     def flush_resolver_cache(self):
@@ -35,7 +35,7 @@ class _FakeWinApi:
 
     def patches(self):
         return [
-            patch.object(winapi, name, getattr(self, name))
+            patch.object(system_dns, name, getattr(self, name))
             for name in ("write_dns", "flush_resolver_cache", "is_doh_supported")
         ]
 
@@ -140,9 +140,9 @@ class DnsRuntimeTests(unittest.TestCase):
     def test_state_carries_custom_servers_from_settings(self) -> None:
         custom = [{"id": "a", "name": "Мой", "ipv4": ["203.0.113.5"], "ipv6": [], "doh": ""}]
         route = type("Route", (), {"has_ipv6": False})()
-        with patch.object(winapi, "list_interfaces", return_value=[]), patch.object(
-            winapi, "internet_route", return_value=route
-        ), patch.object(winapi, "is_doh_supported", return_value=True), patch.object(
+        with patch.object(system_dns, "list_interfaces", return_value=[]), patch.object(
+            system_dns, "internet_route", return_value=route
+        ), patch.object(system_dns, "is_doh_supported", return_value=True), patch.object(
             runtime, "_local_proxy_mode", return_value=""
         ), patch("settings.store.get_custom_dns_servers", return_value=custom):
             state = runtime.load_state()

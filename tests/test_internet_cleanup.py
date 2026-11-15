@@ -101,7 +101,7 @@ class InternetCleanupTests(unittest.TestCase):
         )
         patchers = [
             *(patch.object(internet_cleanup.winapi, name, getattr(windows, name)) for name in winapi_names),
-            patch("dns.winapi.flush_resolver_cache", windows.flush_resolver_cache),
+            patch("dns.system_dns.flush_resolver_cache", windows.flush_resolver_cache),
             patch.object(internet_cleanup, "_accepts_connections", windows.accepts_connections),
             patch.object(internet_cleanup, "_run_netsh", windows.run_netsh),
         ]
