@@ -165,3 +165,9 @@ def test_the_shared_tray_helpers_are_still_importable_from_the_windows_module() 
     from platforms.windows import tray
 
     assert callable(tray.render_status_icon_image) and callable(tray.build_tray_tooltip) and callable(tray.tray_icon_dot_color)
+
+
+def test_without_an_application_object_no_tray_is_reported_instead_of_crashing() -> None:
+    """QSystemTrayIcon.isSystemTrayAvailable() segfaults when no QApplication exists yet."""
+    with patch.object(qt_tray.QApplication, "instance", return_value=None):
+        assert qt_tray.tray_available() is False

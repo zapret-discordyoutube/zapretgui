@@ -1,0 +1,30 @@
+# The Linux test lane: files that must pass on Linux (offscreen Qt). The whole suite is NOT run (project rule);
+# this is the explicit list for the platform layer and what depends on it. Add a file here when it gets a Linux job.
+tests/test_platform_contract.py
+tests/test_platforms_launch.py
+tests/test_platforms_processes.py
+tests/test_platforms_netprobe.py
+tests/test_platforms_autostart.py
+tests/test_platforms_desktop.py
+tests/test_platforms_tray.py
+tests/test_platforms_system_settings.py
+tests/test_platforms_engine.py
+tests/test_platforms_integrations.py
+tests/test_platforms_messages.py
+tests/test_platforms_services.py
+tests/test_platforms_privileges_and_linux_instance.py
+tests/test_linux_capture_rules.py
+tests/test_linux_helper.py
+tests/test_linux_runner.py
+tests/test_linux_qt_tray.py
+tests/test_linux_packaging_files.py
+tests/test_xdg_layout.py
+tests/test_dev_root.py
+tests/test_runtime_layout.py
+tests/test_launch_gate.py
+tests/test_windows_api_fence.py
+tests/test_control_quick_actions_capabilities.py
+tests/test_onboarding_tour.py
+tests/test_onboarding_tour_drift.py
+tests/test_onboarding_tour_targets.py
+tests/test_onboarding_tour_pages.py

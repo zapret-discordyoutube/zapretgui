@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QObject, Qt, QTimer
 from PyQt6.QtGui import QAction, QIcon, QImage, QPixmap
-from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
+from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from ui.launch_control import normalize_launch_phase
 from ui.tray_status import build_tray_tooltip, render_status_icon_image, tray_icon_dot_color
@@ -31,6 +31,9 @@ STOPPED_NOTIFY_DELAY_MS = 1500
 
 
 def tray_available() -> bool:
+    """Whether the desktop has a tray. Asking Qt before the application object exists crashes the process, so: no."""
+    if QApplication.instance() is None:
+        return False
     try:
         return bool(QSystemTrayIcon.isSystemTrayAvailable())
     except Exception:
