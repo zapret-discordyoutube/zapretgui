@@ -194,3 +194,22 @@ Only the four "Пресеты не найдены" toasts are left (same cause: 
 ## Fourth probe, with `ZAPRET_DEV_ROOT` and the real launch gate (2026-11-15)
 
 The program starts through the real gate (no patches) and shows the first-run welcome tour. The four "Пресеты не найдены" toasts are gone. Two toasts remain: "ФАЙЛ ИЛИ ПАПКА НЕ НАЙДЕНЫ" ("Ошибка запуска Zapret"), expected because there is no `winws2` engine binary on Linux yet (phase 3). Screenshot: `/root/.agent-todo/zapretgui/2026-11-15-linux-gui-with-dev-root.png`.
+
+## UI audit for Linux (first guess from page names and the Windows-only code found above; confirm each when it is touched)
+
+Pages (`app/page_names.py`) and what Linux needs:
+
+| Page | On Linux | Work |
+|---|---|---|
+| Управление Zapret 2, Мои пресеты, редакторы, Настройка пресета/профилей, Фейки, Порядок профилей | keep | needs the Linux engine (phase 3); presets stay the source of truth |
+| Zapret 1 pages (winws1) | keep, later | Linux has `nfqws` (zapret1-src); same engine interface, second runner |
+| Настройки DPI, Оркестр, Анализ лога winws2 | keep | engine-bound; the log analyzer reads the same debug log format |
+| Настройка DNS (`NETWORK`, `NETWORK_CUSTOM_DNS`) | rework | Windows adapter settings (`dns/winapi.py`, `local_proxy_windows.py`) become `systemd-resolved` / NetworkManager; the Zapret DNS server and DoH/DoT parts are portable |
+| Редактор hosts (`HOSTS`, `HOSTS_FILE`) | rework | `/etc/hosts` needs root: through the helper service or polkit; `hosts/commands.py` uses `runas notepad` today |
+| BlockCheck | keep, later | portable logic; probes move to `netprobe`; `blockcheck/default_browser.py`, `browser_switch.py` read the Windows registry |
+| Оформление | rework | system theme and accent colour from the registry (`ui/windows_system_theme.py`, `settings/store.py`) become the XDG portal |
+| Telegram Proxy | keep, later | local SOCKS5/WSS relay is portable; the `tg://` handler check reads the registry (`config/telegram_links.py`) |
+| Серверы обновлений, О программе (update parts) | hide updates | `Cap.SELF_UPDATE` is off; show "updates come through the package" |
+| Донат/Premium, Логи, Поддержка | keep | |
+
+Control-page items that exist only on Windows (to hide by capability): quick action «Сбросить сеть Windows» (`presets/ui/control/quick_actions.py`; the builder and the language update already accept a missing tile, but the tour text in `app/ui_texts_tour.py` names it, so it needs a Linux wording and the tour tests), Windows Defender and MAX toggles (`presets/ui/control/windows_features/`), autostart choices (scheduled task, service, shortcut), BFE row in diagnostics, Kaspersky/GoodbyeDPI advisories (already off through `Cap.WINDOWS_STARTUP_CHECKS`).
