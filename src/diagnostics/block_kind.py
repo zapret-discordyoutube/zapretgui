@@ -298,7 +298,7 @@ def site_kind(reach: str, cause: str = "", *, address_confirmed: bool = False) -
         return KIND_CUT
     if reach == "cert":
         return KIND_CERT
-    if cause in ("by_name", "name_whitelist"):
+    if cause in ("by_name", "name_whitelist", "by_name_elsewhere"):
         return KIND_SNI
     if cause == _CAUSE_REPLY_WINDOW:
         return KIND_TLS_REPLY

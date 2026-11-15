@@ -365,6 +365,8 @@ def _refine_cause(run: _Run, probe: _Probe) -> None:
         ping=net_access.ping_ok,
         # Видеосервер Google принимает любое имя: отказ на всех именах у него — закрытый адрес.
         any_name=probe.target.discover_googlevideo,
+        # Один молчащий адрес — ещё не «закрыт адрес»: на других адресах сайта сравниваем имена.
+        other_ips=[ip for ip, _kind in probe.tried] + list(probe.dns.ips if probe.dns is not None else ()),
     )
     # Проверку могли снять, пока шли пробы: по обрывкам вывод не делаем.
     if not run.dns_cancelled():

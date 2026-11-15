@@ -33,7 +33,7 @@ import socket
 import ssl
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -104,6 +104,12 @@ HELLO_ERROR = "error"  # ошибка, которую не удалось ист
 
 CAUSE_STUB_PAGE = "stub_page"
 CAUSE_BY_NAME = "by_name"
+# Главный адрес молчит на любое имя, но на другом адресе того же сайта постороннее имя проходит,
+# а настоящее режут: блокировка по имени (стратегия её обходит) плюс один закрытый адрес.
+# Отдельный код: пробы «по имени» на самом адресе (``sections.annotate_filter_habits``) здесь не к месту.
+CAUSE_BY_NAME_ELSEWHERE = "by_name_elsewhere"
+# Сколько других адресов сайта проверить, когда главный молчит на любое имя.
+ELSEWHERE_ADDRESSES = 3
 # К адресу пускают только имена из разрешённого списка.
 CAUSE_NAME_WHITELIST = "name_whitelist"
 CAUSE_BY_ADDRESS = "by_address"
@@ -204,6 +210,9 @@ class CauseFacts:
     # Контроль после ответа малого окна: то же с окном в ``CONTROL_WINDOW_BYTES``. Фильтр по ответу
     # его режет; ответ здесь значит, что дело не в окне. None — не проверяли.
     window_control: HelloResult | None = None
+    # Другие адреса того же сайта, когда на главном не прошло ни одно имя: (адрес, настоящее имя,
+    # постороннее имя). Пусто — не проверяли (главный адрес ответил хоть на что-то или других нет).
+    elsewhere: tuple[tuple[str, HelloResult, HelloResult], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -488,10 +497,13 @@ def collect(
     cancel: SocketCancel,
     ping: Callable[[str], bool | None] | None = None,
     any_name: bool = False,
+    other_ips: Sequence[str] = (),
 ) -> CauseFacts:
     """Дополнительные пробы к адресу, на котором сайт не открылся. Идут одновременно.
 
     ``any_name`` — сервер заведомо принимает любое имя (видеосервер Google).
+    ``other_ips`` — другие адреса сайта: если на главном не прошло ни одно имя, на них сравниваются
+    настоящее и постороннее имя (один молчащий адрес ещё не значит, что дело не в имени).
     """
     ip = result.ip
     http = submit(http_probe, host, ip, cancel=cancel)
@@ -523,8 +535,15 @@ def collect(
     allowed_name, allowed_result = next((item for item in answers if item[1].answered), answers[-1])
     hellos = (neutral.result(), nameless.result(), allowed_result, real_again.result(), *([recased.result()] if recased is not None else []))
     small_window = window_control = None
+    elsewhere: tuple[tuple[str, HelloResult, HelloResult], ...] = ()
     if result.kind in (KIND_RESET, KIND_TIMEOUT) and not any(item.answered for item in hellos):
+        others = [item for item in dict.fromkeys(other_ips) if item and item != ip and ":" not in item][:ELSEWHERE_ADDRESSES]
+        pairs = [
+            (other, submit(tls_hello, other, host, cancel=cancel), submit(tls_hello, other, NEUTRAL_NAME, cancel=cancel))
+            for other in others
+        ]
         small_window, window_control = window_facts(ip, cancel)
+        elsewhere = tuple((other, real.result(), neutral_other.result()) for other, real, neutral_other in pairs)
     return CauseFacts(
         host=host,
         result=result,
@@ -538,6 +557,7 @@ def collect(
         recased_name=recased_name,
         any_name=any_name,
         small_window=small_window,
+        elsewhere=elsewhere,
         window_control=window_control,
     )
 
@@ -574,6 +594,14 @@ def reply_window_proven(small: HelloResult | None, control: HelloResult | None) 
         and control is not None
         and control.kind in (HELLO_RESET, HELLO_TIMEOUT)
     )
+
+
+def _name_cut_elsewhere(facts: CauseFacts) -> tuple[str, HelloResult] | None:
+    """Другой адрес сайта, где постороннее имя проходит, а настоящее режут; None — такого нет."""
+    for other, real, neutral in facts.elsewhere:
+        if neutral.answered and real.kind in (HELLO_RESET, HELLO_TIMEOUT):
+            return other, real
+    return None
 
 
 def _how(result: ProbeResult) -> str:
@@ -672,6 +700,17 @@ def judge(facts: CauseFacts) -> Cause | None:
             "говорит серверу, что может принять всего 1 байт, начало его ответа приходит (дважды подряд), а с "
             "окном в 1 КБ — снова нет. Фильтр на пути режет любое шифрованное соединение с этого адреса, узнавая "
             "его по первым байтам ответа сервера, и читает этот ответ только в пределах окна приёма",
+            confident=True,
+        )
+    elsewhere = _name_cut_elsewhere(facts)
+    if elsewhere is not None:
+        other, real = elsewhere
+        return Cause(
+            CAUSE_BY_NAME_ELSEWHERE,
+            f"блокировка по имени сайта: адрес {result.ip} не отвечает {checked}, но на другом адресе этого сайта "
+            f"({other}) с именем {facts.host} соединение {'молча пропадает' if real.kind == HELLO_TIMEOUT else 'обрывается'}, "
+            "а с посторонним именем тот же сервер отвечает. Режут именно имя — такую блокировку обходит стратегия; "
+            f"закрытый адрес {result.ip} браузер просто пропустит",
             confident=True,
         )
     if all(item.kind == HELLO_TIMEOUT for item in probes):

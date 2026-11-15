@@ -166,6 +166,9 @@ class NetLaneTests(unittest.TestCase):
             reach=ProbeResult(ip="203.0.113.5", kind=KIND_RESET, stage=STAGE_TLS),
             reach_state=ReachState.DPI,
             target=SimpleNamespace(discover_googlevideo=False),
+            # Адреса, которые сайт перебирал, и ответ DNS — пробы причины сравнивают имена и на них.
+            tried=(("203.0.113.5", KIND_RESET),),
+            dns=SimpleNamespace(ips=("203.0.113.5",)),
         )
         seen = {}
 

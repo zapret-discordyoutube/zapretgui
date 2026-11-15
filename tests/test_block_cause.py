@@ -748,3 +748,88 @@ class WindowHelloTests(unittest.TestCase):
             self._window(reply)
 
         self.assertEqual(order[:2], [f"rcvbuf={bc.SMALL_WINDOW_BYTES}", "connect"])
+
+
+class NameCutElsewhereTests(unittest.TestCase):
+    """МТС, 2026-11-15: у youtubei.googleapis.com один адрес молчал на любое имя, а на других адресах того же
+    имени постороннее имя проходило, а настоящее резали. Отчёт сказал «бан по адресу, стратегия не поможет»,
+    хотя «Подбор стратегии» тут же нашёл рабочую. Один молчащий адрес — ещё не закрытый сайт."""
+
+    def test_name_cut_on_another_address_of_the_site_is_a_block_by_name(self) -> None:
+        elsewhere = (("172.217.113.4", SILENCE, ANSWER),)
+        cause = bc.judge(_facts(_broken(KIND_TIMEOUT), neutral=SILENCE, nameless=SILENCE, elsewhere=elsewhere))
+        self.assertEqual((cause.code, cause.confident), (bc.CAUSE_BY_NAME_ELSEWHERE, True))
+        self.assertIn("203.0.113.5", cause.text)
+        self.assertIn("172.217.113.4", cause.text)
+        self.assertIn("стратегия", cause.text)
+        # Вид блокировки — по имени: совет и кнопка ведут к подбору стратегии, а не к VPN.
+        self.assertEqual(bk.site_kind("dpi", cause.code), bk.KIND_SNI)
+        # Так же и на сервере, который принимает любое имя, и при сбросах вместо тишины.
+        any_name = bc.judge(_facts(neutral=RESET, nameless=RESET, any_name=True, elsewhere=(("198.51.100.7", RESET, REFUSAL),)))
+        self.assertEqual(any_name.code, bc.CAUSE_BY_NAME_ELSEWHERE)
+
+    def test_other_address_that_is_dead_too_keeps_the_address_verdict(self) -> None:
+        for real, neutral in ((SILENCE, SILENCE), (ANSWER, ANSWER), (RESET, RESET)):
+            with self.subTest(real=real.kind, neutral=neutral.kind):
+                cause = bc.judge(_facts(_broken(KIND_TIMEOUT), neutral=SILENCE, nameless=SILENCE, elsewhere=(("172.217.113.4", real, neutral),)))
+                self.assertEqual(cause.code, bc.CAUSE_BY_ADDRESS)
+
+    def test_other_addresses_are_probed_only_when_no_name_passed_on_the_main_one(self) -> None:
+        from unittest.mock import patch
+
+        calls: list[tuple] = []
+
+        def hello(ip, name, **_kwargs):
+            calls.append((ip, name))
+            if ip == "203.0.113.5":
+                return SILENCE
+            return ANSWER if name == bc.NEUTRAL_NAME else SILENCE
+
+        with (
+            ThreadPoolExecutor(8) as pool,
+            patch.object(bc, "tls_hello", hello),
+            patch.object(bc, "http_probe", lambda *_args, **_kwargs: bc.HttpFacts()),
+            patch.object(bc, "window_facts", lambda *_args: (None, None)),
+            patch.object(bc, "STAGGER_S", 0.0),
+        ):
+            others = ["203.0.113.5", "172.217.113.4", "2001:db8::1", "172.217.116.4", "172.217.113.4", "172.217.119.4", "172.217.112.4"]
+            facts = bc.collect("youtubei.googleapis.com", _broken(KIND_TIMEOUT), submit=pool.submit, cancel=SocketCancel(), other_ips=others)
+
+        # Сам главный адрес, IPv6 и повторы — не «другие адреса»; не больше трёх.
+        self.assertEqual([item[0] for item in facts.elsewhere], ["172.217.113.4", "172.217.116.4", "172.217.119.4"])
+        self.assertIn(("172.217.113.4", "youtubei.googleapis.com"), calls)
+        self.assertIn(("172.217.113.4", bc.NEUTRAL_NAME), calls)
+        self.assertEqual(bc.judge(facts).code, bc.CAUSE_BY_NAME_ELSEWHERE)
+
+        # Постороннее имя прошло на главном адресе — другие адреса не нужны.
+        with ThreadPoolExecutor(8) as pool, patch.object(bc, "tls_hello", lambda *_a, **_k: ANSWER), patch.object(
+            bc, "http_probe", lambda *_args, **_kwargs: bc.HttpFacts()
+        ), patch.object(bc, "STAGGER_S", 0.0):
+            facts = bc.collect("discord.com", _broken(), submit=pool.submit, cancel=SocketCancel(), other_ips=["172.217.113.4"])
+        self.assertEqual(facts.elsewhere, ())
+
+    def test_engine_hands_the_other_addresses_of_the_site_to_the_cause_probes(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from diagnostics import engine
+
+        seen: dict = {}
+
+        def collect(host, result, **kwargs):
+            seen.update(kwargs)
+            return _facts(_broken(KIND_TIMEOUT), neutral=SILENCE, nameless=SILENCE)
+
+        run = SimpleNamespace(net_lane=SimpleNamespace(submit=None), probe_cancel=SocketCancel(), dns_cancelled=lambda: False)
+        probe = SimpleNamespace(
+            host="youtubei.googleapis.com",
+            reach=_broken(KIND_TIMEOUT),
+            tried=(("203.0.113.5", "timeout"), ("172.217.113.4", "timeout")),
+            dns=SimpleNamespace(ips=("172.217.116.4",)),
+            target=SimpleNamespace(discover_googlevideo=False),
+            cause_facts=None,
+            cause=None,
+        )
+        with patch.object(engine.block_cause, "collect", collect):
+            engine._refine_cause(run, probe)
+        self.assertEqual(seen["other_ips"], ["203.0.113.5", "172.217.113.4", "172.217.116.4"])

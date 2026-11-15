@@ -853,6 +853,7 @@ def service_roads(probes, dns_note: str = "") -> list[dict]:
 # Как именно блокируют — коротким словом для метки (код из ``block_cause``).
 _CAUSE_WORDS = {
     "by_name": "блокировка по имени",
+    "by_name_elsewhere": "блокировка по имени",
     "name_whitelist": "проходят только разрешённые имена",
     "by_address": "закрыт адрес",
     "reply_window": "режут ответ сервера",
