@@ -54,7 +54,7 @@ def test_window_native_event_is_consumed_only_when_the_platform_says_so() -> Non
 
     class Base:
         def nativeEvent(self, event_type, message):  # noqa: N802
-            return ("base", message)
+            return (False, message)
 
     class Window(window_lifecycle.WindowLifecycleMixin, Base):
         pass
@@ -65,7 +65,7 @@ def test_window_native_event_is_consumed_only_when_the_platform_says_so() -> Non
         fake.desktop.handle_native_event.return_value = True
         assert window.nativeEvent(b"t", 7) == (True, 0)
         fake.desktop.handle_native_event.return_value = False
-        assert window.nativeEvent(b"t", 7) == ("base", 7)
+        assert window.nativeEvent(b"t", 7) == (False, 7)
     fake.desktop.handle_native_event.assert_called_with(window, 7)
 
 
@@ -80,3 +80,36 @@ def test_minimize_request_is_neutral_and_needs_the_tray_mode() -> None:
     assert handle_minimize_request(window, minimize_to_tray_enabled=lambda: True) is True
     window.close_to_tray.side_effect = RuntimeError("boom")
     assert handle_minimize_request(window, minimize_to_tray_enabled=lambda: True) is False
+
+
+def test_native_event_never_hands_none_back_to_qt() -> None:
+    """QWidget.nativeEvent answers (False, None); PyQt crashes in C++ (assign_qintptr) when a Python override returns that."""
+    from main import window_lifecycle
+
+    class Base:
+        def nativeEvent(self, event_type, message):  # noqa: N802 - what QWidget does on X11
+            return (False, None)
+
+    class Window(window_lifecycle.WindowLifecycleMixin, Base):
+        pass
+
+    fake = MagicMock()
+    fake.desktop.handle_native_event.return_value = False
+    with patch.object(window_lifecycle, "current_platform", return_value=fake):
+        assert Window.__new__(Window).nativeEvent(b"xcb_generic_event_t", 7) == (False, 0)
+
+
+def test_native_event_keeps_a_real_result_of_the_base_class() -> None:
+    from main import window_lifecycle
+
+    class Base:
+        def nativeEvent(self, event_type, message):  # noqa: N802 - the frameless-window layer on Windows
+            return (True, 5)
+
+    class Window(window_lifecycle.WindowLifecycleMixin, Base):
+        pass
+
+    fake = MagicMock()
+    fake.desktop.handle_native_event.return_value = False
+    with patch.object(window_lifecycle, "current_platform", return_value=fake):
+        assert Window.__new__(Window).nativeEvent(b"MSG", 7) == (True, 5)

@@ -144,7 +144,10 @@ class WindowLifecycleMixin:
         # True — сообщение обработано полностью и Qt его не трогает.
         if current_platform().desktop.handle_native_event(self, message):
             return (True, 0)
-        return super().nativeEvent(event_type, message)
+        handled, result = super().nativeEvent(event_type, message)
+        # QWidget.nativeEvent отдаёт (False, None) там, где окно не знает системных сообщений (Linux/X11):
+        # None вместо числа PyQt при разборе ответа в C++ роняет процесс (segfault в assign_qintptr).
+        return (bool(handled), 0 if result is None else result)
 
     def _note_away_intent(self) -> None:
         """Окно сейчас уйдёт в фон: запомнить «горячую» память, пока Windows её не сжала."""
