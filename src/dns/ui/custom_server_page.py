@@ -61,6 +61,8 @@ from ui.widgets.win11_controls import Win11ControlRow
 SERVER_ICON = "fa5s.edit"
 SERVER_COLOR = "#22c55e"
 FIELD_WIDTH = 440
+# Поле сжимается до этой ширины, когда страница узкая (масштаб 150 %).
+FIELD_MIN_WIDTH = 200
 BUTTON_MIN_WIDTH = 120
 
 # Строки формы: ключ перевода и текст по умолчанию для названия и пояснения.
@@ -76,6 +78,13 @@ ROW_NAME = (
     ("page.network.custom_server.name", "Название"),
     ("page.network.custom_server.name.hint", "Подпись плитки в списке DNS"),
 )
+
+
+class _FieldEdit(LineEdit):
+    """Поле, которое хочет FIELD_WIDTH, но на узкой странице сжимается, а не вылезает за строку."""
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(FIELD_WIDTH, super().sizeHint().height())
 
 
 class _FormHost(QWidget):
@@ -226,8 +235,9 @@ class CustomDnsServerPage(BasePage):
         """
         title, hint = texts
         row = Win11ControlRow(icon_name, self._t(*title), self._t(*hint), parent=self.card)
-        edit = LineEdit(row)
-        edit.setFixedWidth(FIELD_WIDTH)
+        edit = _FieldEdit(row)
+        edit.setMinimumWidth(FIELD_MIN_WIDTH)
+        edit.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         edit.setClearButtonEnabled(True)
         edit.returnPressed.connect(self._save)
         remove_line_edit_buttons_from_tab_order(edit)

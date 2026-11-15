@@ -50,6 +50,26 @@ class CustomDnsServerPageTests(unittest.TestCase):
         page._save_lane.request = Mock()
         return page
 
+    def test_fields_keep_their_width_on_a_wide_page_and_shrink_on_a_narrow_one(self) -> None:
+        from dns.ui.custom_server_page import FIELD_MIN_WIDTH, FIELD_WIDTH
+
+        page = self._page()
+        page.resize(1100, 700)
+        page.show()
+        QApplication.processEvents()
+        QApplication.processEvents()
+        self.assertEqual(page.doh_edit.width(), FIELD_WIDTH)
+
+        # Масштаб 150 % на экране 1280 px: страница около 530 px.
+        page.resize(530, 700)
+        QApplication.processEvents()
+        QApplication.processEvents()
+        edit = page.doh_edit
+        self.assertLess(edit.width(), FIELD_WIDTH)
+        self.assertGreaterEqual(edit.width(), FIELD_MIN_WIDTH)
+        right = edit.mapTo(page, edit.rect().topRight()).x()
+        self.assertLessEqual(right, page.width())
+
     @staticmethod
     def _type(edit, text: str) -> None:
         """Ввод текста пользователем: setText сам сигнал правки не шлёт."""
