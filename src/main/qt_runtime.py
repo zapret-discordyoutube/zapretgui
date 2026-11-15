@@ -4,7 +4,7 @@ import os
 import sys
 import time as _time
 
-from PyQt6.QtCore import QCoreApplication, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from main.runtime_state import log_startup_metric as emit_startup_metric
@@ -89,12 +89,47 @@ def skip_frameless_wmi_version_probe() -> None:
     win32_utils.isWin7 = lambda: False
 
 
-def _set_attr_if_exists(name: str, on: bool = True) -> None:
-    attr = getattr(Qt.ApplicationAttribute, name, None)
-    if attr is None:
-        attr = getattr(Qt, name, None)
-    if attr is not None:
-        QCoreApplication.setAttribute(attr, on)
+def apply_high_dpi_policy() -> bool:
+    """Закрепляет дробное масштабирование экрана до создания QApplication.
+
+    В Qt 6 масштаб экрана включён всегда, а старые Qt 5-атрибуты
+    (AA_EnableHighDpiScaling, AA_UseHighDpiPixmaps) и переменная
+    QT_AUTO_SCREEN_SCALE_FACTOR ничего не делают. Остаётся одно решение:
+    как округлять масштаб. «PassThrough» берёт его как есть (125 %, 150 %),
+    а «Round» округлил бы до 100 или 200 % и сделал бы окно мелким или
+    огромным. Правило задаётся только до создания QApplication, поэтому, если
+    приложение уже есть, функция ничего не меняет и возвращает False.
+    """
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+    # Переменная окружения пользователя не должна сбивать округление.
+    os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"
+    from PyQt6.QtGui import QGuiApplication
+
+    if QGuiApplication.instance() is not None:
+        return False
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+    return True
+
+
+def apply_text_antialiasing(app: QApplication) -> bool:
+    """Просит у системы сглаженный текст для шрифта приложения по умолчанию.
+
+    Без этого Qt идёт за настройкой Windows «сглаживать шрифты»: если её
+    выключили, весь текст рисуется ступеньками. Стратегия PreferAntialias
+    просит сглаживание всегда, где шрифт его умеет. Рисунки (круги, скруглённые
+    рамки, значки) сглаживает сам код каждого виджета через setRenderHint.
+    Возвращает True, если шрифт был изменён.
+    """
+    from PyQt6.QtGui import QFont
+
+    font = app.font()
+    if font.styleStrategy() == QFont.StyleStrategy.PreferAntialias:
+        return False
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    app.setFont(font)
+    return True
 
 
 def _install_animation_py314_compat() -> None:
@@ -170,14 +205,13 @@ def _connect_qfluent_accent_signal_lazy() -> None:
 def ensure_qt_runtime() -> QApplication:
     global _QT_RUNTIME_READY
 
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["QT_API"] = "pyqt6"
     apply_gui_gil_switch_interval()
-    _set_attr_if_exists("AA_EnableHighDpiScaling")
-    _set_attr_if_exists("AA_UseHighDpiPixmaps")
+    apply_high_dpi_policy()
 
     t_qapp = _time.perf_counter()
     app = QApplication.instance() or QApplication(sys.argv)
+    apply_text_antialiasing(app)
     emit_startup_metric(
         "StartupQtRuntimeQApplication",
         f"{(_time.perf_counter() - t_qapp) * 1000:.0f}ms",
