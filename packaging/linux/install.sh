@@ -31,10 +31,8 @@ getent group zapretgui >/dev/null || groupadd --system zapretgui
 install -m 0644 "$HERE/packaging/linux/systemd/zapretgui-helper.service" /usr/lib/systemd/system/zapretgui-helper.service
 install -d /usr/share/polkit-1/rules.d && install -m 0644 "$HERE/packaging/linux/polkit/50-zapretgui.rules" /usr/share/polkit-1/rules.d/50-zapretgui.rules
 install -d /usr/share/applications && install -m 0644 "$HERE/packaging/linux/zapretgui.desktop" /usr/share/applications/zapretgui.desktop
-install -d /usr/share/mime/packages && install -m 0644 "$HERE/packaging/linux/zapretgui-preset.xml" /usr/share/mime/packages/zapretgui-preset.xml
 [ -f "$TARGET/system/ico/Zapret2.png" ] && install -D -m 0644 "$TARGET/system/ico/Zapret2.png" /usr/share/icons/hicolor/256x256/apps/zapretgui.png
 command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
-command -v update-mime-database >/dev/null && update-mime-database /usr/share/mime || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 
 systemctl daemon-reload

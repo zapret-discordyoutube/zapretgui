@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <mime-type type="application/x-zapret-preset">
-    <comment>Zapret preset</comment>
-    <comment xml:lang="ru">Пресет Zapret</comment>
-    <glob pattern="*.zapretpreset"/>
-  </mime-type>
-</mime-info>

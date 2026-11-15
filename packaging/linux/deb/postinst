@@ -12,7 +12,6 @@ if [ "$1" = configure ]; then
     echo "zapretgui: add each person who uses it to the group:  sudo usermod -aG zapretgui NAME"
   fi
   command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
-  command -v update-mime-database >/dev/null && update-mime-database /usr/share/mime || true
   command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true

@@ -59,16 +59,9 @@ def test_the_desktop_entry_is_valid_and_points_at_the_installed_program() -> Non
     assert main["Type"] == "Application" and main["Terminal"] == "false"
     assert main["Exec"].split()[0] == "/opt/zapretgui/bin/zapretgui"
     assert main["Icon"] == "zapretgui" and "Network" in main["Categories"]
-    assert main["MimeType"].rstrip(";") == "application/x-zapret-preset"
+    # presets are plain .txt/.zip files and no file type is claimed: a MIME type here would hijack text files
+    assert "MimeType" not in main and "%U" not in main["Exec"]
     assert "Name[ru]" not in main and "Comment[ru]" in main
-
-
-def test_the_mime_type_of_the_desktop_entry_is_defined_by_the_package() -> None:
-    import xml.etree.ElementTree as ET
-
-    root = ET.parse(PACKAGING / "zapretgui-preset.xml").getroot()
-    types = [element.get("type") for element in root]
-    assert types == ["application/x-zapret-preset"]
 
 
 def test_install_and_uninstall_put_and_remove_the_same_system_files() -> None:
@@ -78,7 +71,6 @@ def test_install_and_uninstall_put_and_remove_the_same_system_files() -> None:
         "/usr/lib/systemd/system/zapretgui-helper.service",
         "/usr/share/polkit-1/rules.d/50-zapretgui.rules",
         "/usr/share/applications/zapretgui.desktop",
-        "/usr/share/mime/packages/zapretgui-preset.xml",
         "/usr/share/icons/hicolor/256x256/apps/zapretgui.png",
     ):
         assert path in install, path
@@ -118,7 +110,7 @@ def test_the_start_wrappers_run_the_bundled_program_in_utf8_mode() -> None:
     window = PACKAGING / "bin" / "zapretgui"
     helper = PACKAGING / "bin" / "zapretgui-helper"
     desktop = (PACKAGING / "zapretgui.desktop").read_text(encoding="utf-8")
-    assert f"Exec={'/opt/zapretgui/bin/' + window.name} " in desktop
+    assert f"Exec={'/opt/zapretgui/bin/' + window.name}\n" in desktop
     for path in (window, helper):
         assert os.access(path, os.X_OK), path.name
         text = path.read_text(encoding="utf-8")

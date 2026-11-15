@@ -3,7 +3,6 @@ set -e
 if [ "$1" = remove ] || [ "$1" = purge ]; then
   [ -d /run/systemd/system ] && systemctl daemon-reload || true
   command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
-  command -v update-mime-database >/dev/null && update-mime-database /usr/share/mime || true
 fi
 if [ "$1" = purge ]; then
   rm -rf /run/zapretgui

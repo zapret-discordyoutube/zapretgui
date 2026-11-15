@@ -10,12 +10,11 @@ nft delete table inet zapretgui 2>/dev/null || true
 pkill -x nfqws2 2>/dev/null || true
 
 rm -f /usr/lib/systemd/system/zapretgui-helper.service /usr/share/polkit-1/rules.d/50-zapretgui.rules \
-      /usr/share/applications/zapretgui.desktop /usr/share/mime/packages/zapretgui-preset.xml \
+      /usr/share/applications/zapretgui.desktop \
       /usr/share/icons/hicolor/256x256/apps/zapretgui.png
 rm -rf /opt/zapretgui /run/zapretgui
 systemctl daemon-reload
 command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
-command -v update-mime-database >/dev/null && update-mime-database /usr/share/mime || true
 
 getent group zapretgui >/dev/null && groupdel zapretgui 2>/dev/null || true
 

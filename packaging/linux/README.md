@@ -5,7 +5,7 @@ Files the Linux package installs (see the multi-platform task file, phases 3 and
 | File | Goes to | What it does |
 |---|---|---|
 | `systemd/zapretgui-helper.service` | `/usr/lib/systemd/system/` | the root helper (firewall table `inet zapretgui` + `nfqws2`) |
-| `zapretgui.desktop`, `zapretgui-preset.xml` | `/usr/share/applications/`, `/usr/share/mime/packages/` | menu entry and the preset file type |
+| `zapretgui.desktop` | `/usr/share/applications/` | menu entry |
 | `install.sh`, `uninstall.sh` | package root | install into `/opt/zapretgui` + system files, enable the helper; remove all of it (user data only with `--purge-user-data NAME`) |
 | `polkit/50-zapretgui.rules` | `/usr/share/polkit-1/rules.d/` | group `zapretgui` may start/stop the helper unit without a password |
 
