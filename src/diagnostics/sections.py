@@ -625,9 +625,15 @@ def _matrix_cell(run: Run) -> Callable[[str, str], selectivity.Cell]:
             tls = selectivity.ANSWERED
         elif hello.kind in (block_cause.HELLO_RESET, block_cause.HELLO_TIMEOUT):
             tls = selectivity.CUT
+        elif hello.kind == block_cause.HELLO_CONNECT:
+            tls = selectivity.NO_CONNECT
         else:
             tls = selectivity.UNKNOWN
-        quic = selectivity.ANSWERED if quic_ms is not None else selectivity.CUT
+        if quic_ms is not None:
+            quic = selectivity.ANSWERED
+        else:
+            # Снятая «Стопом» или сроком проба ничего не говорит об адресе: это не обрыв.
+            quic = selectivity.UNKNOWN if run.probe_cancel.cancelled else selectivity.CUT
         return selectivity.Cell(tls, quic, hello.ms, quic_ms)
 
     return cell

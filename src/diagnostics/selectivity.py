@@ -14,6 +14,13 @@
 Имя другими буквами (``googlevideo.COM``) сервер принимает как то же самое: если оно
 проходит, а обычное нет, их различает фильтр, который ищет имя буква в букву.
 
+Одна проба ничего не доказывает: узлы отвечают «через раз», и одиночная потеря
+пакета выглядела в таблице как обрыв по имени (отчёт с МТС 15.11.2026: QUIC с
+посторонним именем пропал на том же адресе, где «резали» имя сайта). Поэтому каждое
+сочетание без ответа проверяется ещё раз: ответило со второго раза — «через раз»,
+и в выводы такая ячейка не идёт. Адрес считается живым, только если на нём отвечает
+постороннее имя: если пропадает и оно, винить имя сайта нечем.
+
 Сбор (``collect``) отделён от вывода (``judge``): вывод — чистая функция над таблицей.
 Пробы отправляются только по сигналу беды (``needs_matrix``): браузер их не шлёт.
 """
@@ -26,15 +33,21 @@ from dataclasses import dataclass, field
 from diagnostics.block_cause import case_variant
 
 __all__ = [
+    "ANSWERED",
     "CONTROL_NAME",
+    "CUT",
+    "FLAKY",
     "MAX_ADDRESSES",
     "MAX_NAMES",
+    "NO_CONNECT",
     "SCOPE_ADDRESS",
+    "SCOPE_FLAKY",
     "SCOPE_NAME",
     "SCOPE_NODE",
     "SCOPE_NONE",
     "QUIC_TIMEOUT_S",
     "TLS_TIMEOUT_S",
+    "UNKNOWN",
     "Cell",
     "Finding",
     "MatrixFacts",
@@ -55,7 +68,13 @@ QUIC_TIMEOUT_S = 1.0
 
 ANSWERED = "answered"
 CUT = "cut"
+# Без ответа в первый раз, с ответом на повторе: потеря случайная, имя тут не доказано.
+FLAKY = "flaky"
+# Соединение TCP не открылось вовсе: до приветствия с именем дело не дошло.
+NO_CONNECT = "no_connect"
 UNKNOWN = "unknown"
+# Состояния, которые стоит проверить ещё раз: одиночная потеря бывает и без фильтра.
+_RECHECKED = (CUT, NO_CONNECT)
 
 PROTOCOL_TLS = "tls"
 PROTOCOL_QUIC = "quic"
@@ -64,6 +83,7 @@ PROTOCOL_TITLES = {PROTOCOL_TLS: "TLS поверх TCP 443", PROTOCOL_QUIC: "QUI
 SCOPE_NAME = "name"
 SCOPE_ADDRESS = "address"
 SCOPE_NODE = "node"
+SCOPE_FLAKY = "flaky"
 SCOPE_NONE = "none"
 
 
@@ -78,6 +98,17 @@ class Cell:
 
     def state(self, protocol: str) -> str:
         return self.tls if protocol == PROTOCOL_TLS else self.quic
+
+    def needs_recheck(self) -> bool:
+        return self.tls in _RECHECKED or self.quic in _RECHECKED
+
+    def merged(self, again: "Cell") -> "Cell":
+        """Итог двух проб одного сочетания: ответ хотя бы на повторе — «через раз», иначе первая проба."""
+        tls, tls_ms = (FLAKY, again.tls_ms) if self.tls in _RECHECKED and again.tls == ANSWERED else (self.tls, self.tls_ms)
+        quic, quic_ms = (
+            (FLAKY, again.quic_ms) if self.quic in _RECHECKED and again.quic == ANSWERED else (self.quic, self.quic_ms)
+        )
+        return Cell(tls, quic, tls_ms, quic_ms)
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +190,13 @@ def collect(
             return MatrixFacts(names, addresses, {}, cancelled=True, recased=recased)
         futures[(name, ip)] = submit(probe, name, ip)
     cells = {key: future.result() for key, future in futures.items()}
+    # Второй заход — только по сочетаниям без ответа: одна потеря пакета ещё не блокировка.
+    again = {}
+    for key, cell in cells.items():
+        if cell.needs_recheck() and not should_stop():
+            again[key] = submit(probe, *key)
+    for key, future in again.items():
+        cells[key] = cells[key].merged(future.result())
     return MatrixFacts(names, addresses, cells, cancelled=should_stop(), recased=recased)
 
 
@@ -175,9 +213,49 @@ def _names_word(names: Sequence[str]) -> str:
     return ", ".join(names)
 
 
+def _row_title(facts: MatrixFacts, name: str) -> str:
+    if not name:
+        return "без имени"
+    if name == facts.recased:
+        return f"{name} (другими буквами)"
+    return name
+
+
+def _alive(facts: MatrixFacts, rows: dict[str, dict[str, str]], ip: str) -> bool:
+    """Адрес жив сам по себе: отвечает постороннее имя (а если его исход неизвестен — любой другой контроль).
+
+    Если постороннее имя на этом адресе тоже пропадает, теряется всё подряд, и винить имя сайта нечем.
+    """
+    neutral = rows[CONTROL_NAME].get(ip)
+    if neutral == ANSWERED:
+        return True
+    if neutral != UNKNOWN:
+        return False
+    return any(rows[name].get(ip) == ANSWERED for name in facts.controls)
+
+
+def _flaky_finding(facts: MatrixFacts, rows: dict[str, dict[str, str]], protocol: str) -> Finding | None:
+    title = PROTOCOL_TITLES[protocol]
+    spots = [
+        f"{_row_title(facts, name)} — на {', '.join(_label(facts, ip) for ip in ips)}"
+        for name, row in rows.items()
+        if (ips := [ip for _host, ip in facts.addresses if row.get(ip) == FLAKY])
+    ]
+    if not spots:
+        return None
+    shown = "; ".join(spots[:6]) + (f" и ещё {len(spots) - 6}" if len(spots) > 6 else "")
+    text = (
+        f"{title}: часть сочетаний ответила только со второй попытки — {shown}. Пакеты здесь теряются через раз, "
+        "поэтому эти ячейки в выводы не идут: одиночная потеря — ещё не блокировка по имени."
+    )
+    return Finding(protocol, SCOPE_FLAKY, "info", f"{title}: ответ через раз", text)
+
+
 def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
     title = PROTOCOL_TITLES[protocol]
     rows = {name: _row(facts, name, protocol) for name in (*facts.names, *facts.controls)}
+    flaky = _flaky_finding(facts, rows, protocol)
+    tail = [flaky] if flaky is not None else []
     if not any(state == ANSWERED for row in rows.values() for state in row.values()):
         # Не ответило ничего: протокол к этим серверам не работает совсем (или не поддержан) — имя тут ни при чём.
         if all(state == CUT for row in rows.values() for state in row.values()):
@@ -187,10 +265,10 @@ def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
                 "серверы его не поддерживают или режут весь протокол). Избирательность не определить."
             )
             return [Finding(protocol, SCOPE_ADDRESS, "info", f"{title}: не отвечает совсем", text)]
-        return []
+        return tail
     findings: list[Finding] = []
     by_name: dict[str, list[str]] = {}
-    control_ok_ips = {ip for _host, ip in facts.addresses if any(rows[name].get(ip) == ANSWERED for name in facts.controls)}
+    control_ok_ips = {ip for _host, ip in facts.addresses if _alive(facts, rows, ip)}
     for name in facts.names:
         for _host, ip in facts.addresses:
             if rows[name].get(ip) == CUT and ip in control_ok_ips:
@@ -216,7 +294,11 @@ def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
         findings.append(Finding(protocol, SCOPE_NAME, "warn", f"{title}: режут по имени", text, blocked, passing))
     if facts.recased and facts.names:
         first = facts.names[0]
-        letters = [ip for _host, ip in facts.addresses if rows[first].get(ip) == CUT and rows[facts.recased].get(ip) == ANSWERED]
+        letters = [
+            ip
+            for _host, ip in facts.addresses
+            if rows[first].get(ip) == CUT and rows[facts.recased].get(ip) == ANSWERED and ip in control_ok_ips
+        ]
         if letters:
             text = (
                 f"{title}: с именем {first} соединение обрывается, а то же имя другими буквами ({facts.recased}) "
@@ -260,7 +342,7 @@ def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
             "Избирательной блокировки по имени, адресу или узлу на этом протоколе не видно."
         )
         findings.append(Finding(protocol, SCOPE_NONE, "ok", f"{title}: избирательности нет", text))
-    return findings
+    return findings + tail
 
 
 def judge(facts: MatrixFacts) -> MatrixVerdict | None:

@@ -6,7 +6,8 @@ import unittest
 from concurrent.futures import Future
 
 from diagnostics import selectivity as sel
-from diagnostics.selectivity import ANSWERED, CUT, Cell
+from diagnostics.selectivity import ANSWERED, CUT, FLAKY, NO_CONNECT, UNKNOWN, Cell
+from utils.socket_cancel import SocketCancel
 
 WWW = ("www.youtube.com", "10.0.0.1")
 IMG = ("i.ytimg.com", "10.0.0.2")
@@ -167,7 +168,7 @@ class AnnotateTests(unittest.TestCase):
     def _run(self):
         from types import SimpleNamespace
 
-        return SimpleNamespace(submit=_submit, dns_cancelled=lambda: False, probe_cancel=None)
+        return SimpleNamespace(submit=_submit, dns_cancelled=lambda: False, probe_cancel=SocketCancel())
 
     def test_trouble_service_gets_the_table_and_a_quiet_one_does_not(self) -> None:
         from unittest.mock import patch
@@ -216,7 +217,7 @@ class MixedAddressesTests(unittest.TestCase):
             unstable="",
             tried=(("10.0.0.1", "reset"), ("10.0.0.3", "ok")),
         )
-        run = SimpleNamespace(submit=_submit, dns_cancelled=lambda: False, probe_cancel=None)
+        run = SimpleNamespace(submit=_submit, dns_cancelled=lambda: False, probe_cancel=SocketCancel())
         report = [{"key": "youtube"}]
 
         def hello(ip, name, **_kw):
@@ -231,6 +232,155 @@ class MixedAddressesTests(unittest.TestCase):
         self.assertEqual({item["ip"] for item in data["addresses"]}, {"10.0.0.1", "10.0.0.3"})
         scopes = {(item["protocol"], item["scope"]) for item in data["findings"]}
         self.assertIn(("tls", "node"), scopes)
+
+
+class RecheckTests(unittest.TestCase):
+    """Одна потеря пакета — не блокировка: сочетание без ответа проверяется ещё раз."""
+
+    def test_cell_that_answers_on_the_second_try_is_flaky_and_not_blamed_on_the_name(self) -> None:
+        # Как в отчёте с МТС: i.ytimg.com на одном адресе Google в первый раз «оборвался», а на всех остальных прошёл.
+        seen: dict[tuple[str, str], int] = {}
+
+        def rule(name: str, ip: str) -> Cell:
+            seen[(name, ip)] = seen.get((name, ip), 0) + 1
+            if (name, ip) == ("i.ytimg.com", "10.0.0.1") and seen[(name, ip)] == 1:
+                return Cell(CUT, ANSWERED)
+            return Cell(ANSWERED, ANSWERED)
+
+        facts = _facts(rule)
+        verdict = sel.judge(facts)
+        tls = _by_scope(verdict, sel.PROTOCOL_TLS)
+
+        self.assertEqual(facts.cells[("i.ytimg.com", "10.0.0.1")].tls, FLAKY)
+        self.assertEqual(facts.cells[("i.ytimg.com", "10.0.0.1")].quic, ANSWERED)
+        self.assertEqual(set(tls), {sel.SCOPE_NONE, sel.SCOPE_FLAKY})
+        self.assertIn("i.ytimg.com — на www.youtube.com (10.0.0.1)", tls[sel.SCOPE_FLAKY].text)
+        self.assertEqual(tls[sel.SCOPE_FLAKY].level, "info")
+
+    def test_only_cells_without_an_answer_are_probed_again(self) -> None:
+        asked: list[tuple[str, str]] = []
+
+        def rule(name: str, ip: str) -> Cell:
+            asked.append((name, ip))
+            if name == "www.youtube.com":
+                return Cell(ANSWERED, CUT)
+            if name == "i.ytimg.com" and ip == "10.0.0.2":
+                return Cell(NO_CONNECT, ANSWERED)
+            return Cell(ANSWERED, ANSWERED)
+
+        _facts(rule)
+
+        # 18 сочетаний в первый заход, затем ещё раз — 3 обрыва QUIC и одно «нет соединения».
+        self.assertEqual(len(asked), 18 + 4)
+        self.assertEqual(asked[18:].count(("www.youtube.com", "10.0.0.1")), 1)
+        self.assertIn(("i.ytimg.com", "10.0.0.2"), asked[18:])
+
+    def test_cut_twice_is_still_a_cut_by_name(self) -> None:
+        facts = _facts(lambda name, ip: Cell(ANSWERED, CUT if name.lower() == "www.youtube.com" else ANSWERED))
+        quic = _by_scope(sel.judge(facts), sel.PROTOCOL_QUIC)
+
+        self.assertEqual(facts.cells[("www.youtube.com", "10.0.0.1")].quic, CUT)
+        self.assertEqual(set(quic), {sel.SCOPE_NAME})
+
+    def test_no_recheck_after_stop(self) -> None:
+        asked: list[tuple[str, str]] = []
+        stops = iter([False] * 18 + [True] * 100)
+
+        def rule(name: str, ip: str) -> Cell:
+            asked.append((name, ip))
+            return Cell(CUT, CUT)
+
+        facts = sel.collect(
+            ["www.youtube.com", "i.ytimg.com", "rr1.googlevideo.com"],
+            [WWW, IMG, NODE],
+            rule,
+            submit=_submit,
+            should_stop=lambda: next(stops),
+        )
+
+        self.assertEqual(len(asked), 18)
+        self.assertTrue(facts.cancelled)
+
+
+class LossyAddressTests(unittest.TestCase):
+    """Если на адресе пропадает и постороннее имя, имя сайта в этом не виновато."""
+
+    def test_names_lost_where_the_neutral_name_is_lost_too_prove_nothing(self) -> None:
+        # Отчёт с МТС (проверка домена): на 142.251.156.4 QUIC пропал у имён сервиса и у example.com,
+        # а без имени и другими буквами ответил. Раньше это давало «режут по имени» и «буква в букву».
+        def rule(name: str, ip: str) -> Cell:
+            if ip == "10.0.0.1" and name in ("www.youtube.com", "i.ytimg.com", sel.CONTROL_NAME):
+                return Cell(ANSWERED, CUT)
+            return Cell(ANSWERED, ANSWERED)
+
+        quic = [item for item in sel.judge(_facts(rule)).findings if item.protocol == sel.PROTOCOL_QUIC]
+
+        self.assertNotIn(sel.SCOPE_NAME, {item.scope for item in quic})
+        self.assertFalse([item for item in quic if "буква в букву" in item.title])
+        self.assertNotIn(sel.SCOPE_NODE, {item.scope for item in quic})
+
+    def test_neutral_name_answering_keeps_the_address_alive(self) -> None:
+        def rule(name: str, ip: str) -> Cell:
+            if ip == "10.0.0.1" and name in ("www.youtube.com", ""):
+                return Cell(ANSWERED, CUT)
+            return Cell(ANSWERED, ANSWERED)
+
+        quic = _by_scope(sel.judge(_facts(rule)), sel.PROTOCOL_QUIC)
+
+        self.assertIn(sel.SCOPE_NAME, quic)
+        self.assertEqual(quic[sel.SCOPE_NAME].blocked, ("www.youtube.com",))
+
+    def test_unknown_neutral_name_falls_back_to_the_other_controls(self) -> None:
+        def rule(name: str, ip: str) -> Cell:
+            if ip == "10.0.0.1" and name == sel.CONTROL_NAME:
+                return Cell(ANSWERED, UNKNOWN)
+            if ip == "10.0.0.1" and name == "www.youtube.com":
+                return Cell(ANSWERED, CUT)
+            return Cell(ANSWERED, ANSWERED)
+
+        quic = _by_scope(sel.judge(_facts(rule)), sel.PROTOCOL_QUIC)
+
+        self.assertIn(sel.SCOPE_NAME, quic)
+
+
+class CellProbeTests(unittest.TestCase):
+    """Ячейка таблицы: снятая проба QUIC — не обрыв, неоткрывшееся соединение TCP — отдельный исход."""
+
+    def _cell(self, hello_kind: str, quic_ms, *, cancelled: bool):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from diagnostics import block_cause, quic_probe, sections
+
+        cancel = SocketCancel()
+        if cancelled:
+            cancel.cancel()
+        run = SimpleNamespace(submit=_submit, probe_cancel=cancel)
+        hello = lambda ip, name, **_kw: block_cause.HelloResult(hello_kind)
+        with patch.object(block_cause, "tls_hello", hello), patch.object(quic_probe, "quic_hello", lambda *a, **k: quic_ms):
+            return sections._matrix_cell(run)("www.youtube.com", "10.0.0.1")
+
+    def test_cancelled_quic_is_unknown_not_cut(self) -> None:
+        self.assertEqual(self._cell("cancelled", None, cancelled=True).quic, UNKNOWN)
+
+    def test_silent_quic_without_cancel_is_cut(self) -> None:
+        self.assertEqual(self._cell("timeout", None, cancelled=False).quic, CUT)
+
+    def test_tcp_that_never_opened_is_no_connect(self) -> None:
+        cell = self._cell("connect", 30.0, cancelled=False)
+
+        self.assertEqual(cell.tls, NO_CONNECT)
+        self.assertEqual(cell.quic, ANSWERED)
+
+    def test_table_words_for_flaky_and_no_connect(self) -> None:
+        from diagnostics import service_view
+
+        matrix = {
+            "addresses": [{"host": "www.youtube.com", "ip": "10.0.0.1"}],
+            "table": [{"name": "www.youtube.com", "cells": [{"ip": "10.0.0.1", "tls": "no_connect", "quic": "flaky"}]}],
+        }
+
+        self.assertIn("TLS нет соединения, QUIC через раз", service_view._matrix_text(matrix))
 
 
 if __name__ == "__main__":
