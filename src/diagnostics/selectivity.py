@@ -330,6 +330,19 @@ def _judge_protocol(facts: MatrixFacts, protocol: str) -> list[Finding]:
         and all(rows[name].get(ip) == CUT for name in (*facts.names, *facts.controls))
         and any(state == ANSWERED for row in rows.values() for state in row.values())
     ]
+    if protocol == PROTOCOL_QUIC:
+        # Молчит только QUIC, а TLS на том же адресе хоть с каким-то именем отвечает: адрес жив. Так ведёт себя
+        # кэш провайдера, который QUIC не поддерживает (отчёт с МТС, 15.11.2026), — «закрытым» его называть нельзя.
+        tls_rows = [_row(facts, name, PROTOCOL_TLS) for name in (*facts.names, *facts.controls)]
+        no_quic = [ip for ip in dead if any(row.get(ip) == ANSWERED for row in tls_rows)]
+        dead = [ip for ip in dead if ip not in no_quic]
+        if no_quic:
+            text = (
+                f"{title}: адрес {', '.join(_label(facts, ip) for ip in no_quic)} не отвечает на QUIC ни с каким именем, "
+                "хотя по TLS отвечает. Так бывает у кэша провайдера, который QUIC не поддерживает, или когда UDP 443 к нему "
+                "закрыт; имя сайта тут ни при чём, и браузер берёт с него данные обычным соединением."
+            )
+            findings.append(Finding(protocol, SCOPE_ADDRESS, "info", f"{title}: узел без QUIC", text, tuple(no_quic)))
     if dead:
         text = (
             f"{title}: адрес {', '.join(_label(facts, ip) for ip in dead)} не отвечает ни с каким именем, а другие адреса "

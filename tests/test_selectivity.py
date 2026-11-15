@@ -302,6 +302,36 @@ class RecheckTests(unittest.TestCase):
         self.assertTrue(facts.cancelled)
 
 
+class CacheWithoutQuicTests(unittest.TestCase):
+    """Кэш провайдера отвечает по TLS только на своё имя и QUIC не поддерживает: это не «закрытый адрес»."""
+
+    def test_quic_silent_node_that_answers_tls_is_info_not_closed(self) -> None:
+        # Отчёт с МТС (270): rr4 (212.188.37.143) — TLS отвечает только своему имени, QUIC молчит на всё.
+        def rule(name: str, ip: str) -> Cell:
+            if ip == "10.0.0.3":
+                return Cell(ANSWERED if name == "rr1.googlevideo.com" else CUT, CUT)
+            return Cell(ANSWERED, ANSWERED)
+
+        quic = [item for item in sel.judge(_facts(rule)).findings if item.protocol == sel.PROTOCOL_QUIC]
+
+        self.assertEqual([(item.scope, item.level) for item in quic], [(sel.SCOPE_ADDRESS, "info")])
+        self.assertIn("узел без QUIC", quic[0].title)
+        self.assertIn("rr1.googlevideo.com (10.0.0.3)", quic[0].text)
+        self.assertNotIn("Закрыт сам адрес", quic[0].text)
+
+    def test_node_silent_on_both_protocols_is_still_closed(self) -> None:
+        # Как 172.217.114.4 в том же отчёте: не отвечает ни TLS, ни QUIC — это закрытый адрес.
+        def rule(name: str, ip: str) -> Cell:
+            return Cell(CUT, CUT) if ip == "10.0.0.2" else Cell(ANSWERED, ANSWERED)
+
+        verdict = sel.judge(_facts(rule))
+        for protocol in (sel.PROTOCOL_TLS, sel.PROTOCOL_QUIC):
+            with self.subTest(protocol=protocol):
+                closed = _by_scope(verdict, protocol)[sel.SCOPE_ADDRESS]
+                self.assertEqual(closed.level, "warn")
+                self.assertIn("закрыт адрес", closed.title)
+
+
 class LossyAddressTests(unittest.TestCase):
     """Если на адресе пропадает и постороннее имя, имя сайта в этом не виновато."""
 
