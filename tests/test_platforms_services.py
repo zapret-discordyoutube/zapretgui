@@ -152,7 +152,7 @@ def test_system_state_bfe_is_unknown_not_stopped_without_the_capability():
     from diagnostics import system_state
 
     other = Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
-                     services=MagicMock())
+                     services=MagicMock(), launch=MagicMock())
     with patch("platforms.current", return_value=other):
         with pytest.raises(LookupError):
             system_state._read_bfe()
@@ -164,7 +164,7 @@ def test_startup_checks_skip_bfe_when_the_platform_has_no_such_service():
 
     # Windows-style startup checks are on, but this system has no BFE service.
     no_bfe = Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
-                      services=MagicMock(), capabilities=frozenset({Cap.WINDOWS_STARTUP_CHECKS}))
+                      services=MagicMock(), launch=MagicMock(), capabilities=frozenset({Cap.WINDOWS_STARTUP_CHECKS}))
     with (
         patch("platforms.current", return_value=no_bfe),
         patch("startup.bfe_util.ensure_bfe_running") as ensure,
@@ -185,7 +185,7 @@ def test_startup_checks_run_bfe_when_the_platform_has_it():
     from main import post_startup_check_workers as workers
 
     with_bfe = Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
-                        services=MagicMock(), capabilities=frozenset({Cap.BFE, Cap.WINDOWS_STARTUP_CHECKS}))
+                        services=MagicMock(), launch=MagicMock(), capabilities=frozenset({Cap.BFE, Cap.WINDOWS_STARTUP_CHECKS}))
     with (
         patch("platforms.current", return_value=with_bfe),
         patch("startup.bfe_util.ensure_bfe_running", return_value=(True, None)) as ensure,
@@ -215,7 +215,7 @@ def test_only_windows_has_self_update():
 
 def _platform(*caps):
     return Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
-                    services=MagicMock(), capabilities=frozenset(caps))
+                    services=MagicMock(), launch=MagicMock(), capabilities=frozenset(caps))
 
 
 def test_update_check_is_not_installed_without_self_update():

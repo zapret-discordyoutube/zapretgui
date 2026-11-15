@@ -8,7 +8,7 @@ import winreg
 from app_notifications import advisory_notification, notification_action
 from config.runtime_layout import APPLICATION_PATHS
 
-from startup.windows_version_guard import current_windows_support
+from platforms import current as current_platform
 from utils.windows_process_probe import iter_process_records_winapi
 
 
@@ -241,7 +241,7 @@ def check_windows_version() -> tuple[bool, str]:
     except ImportError:
         log = lambda msg, **kw: print(msg)
 
-    result = current_windows_support()
+    result = current_platform().launch.system_support()
     if not result.supported:
         log(f"ERROR: Неподдерживаемая версия Windows: {result.os_name}", level="❌ ERROR")
         return True, result.message

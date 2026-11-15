@@ -253,10 +253,9 @@ def require_packaged_application() -> None:
         return
     if DEV_ROOT_ERROR:
         raise SourceApplicationLaunchForbidden(DEV_ROOT_ERROR)
-    raise SourceApplicationLaunchForbidden(
-        "Запуск приложения из исходников запрещён. "
-        f"Используйте установленный {RUNTIME_DIR_NAME}\\{RUNTIME_EXE_NAME}."
-    )
+    from platforms import current as current_platform
+
+    raise SourceApplicationLaunchForbidden(current_platform().launch.source_launch_message())
 
 
 def resolve_application_root(

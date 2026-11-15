@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from platforms.base import Platform
+from platforms.linux.launch import LinuxLaunch
 from platforms.linux.messages import LinuxMessageBox
 from platforms.linux.privileges import LinuxPrivileges
 from platforms.linux.services import LinuxServices
@@ -14,4 +15,5 @@ PLATFORM = Platform(
     privileges=LinuxPrivileges(),
     single_instance=LinuxSingleInstance(),
     services=LinuxServices(),
+    launch=LinuxLaunch(),
 )

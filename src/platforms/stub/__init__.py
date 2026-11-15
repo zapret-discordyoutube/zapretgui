@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from typing import Callable, Sequence
 
-from platforms.base import InstanceLock, MessageKind, Platform, print_to_stderr
+from platforms.base import InstanceLock, MessageKind, Platform, SystemSupport, print_to_stderr
 
 
 class _StderrMessageBox:
@@ -47,10 +47,22 @@ class _NoServices:
         return False
 
 
+class _NoLaunch:
+    def process_creation_unix_seconds(self) -> float | None:
+        return None
+
+    def system_support(self) -> SystemSupport:
+        return SystemSupport(supported=True)
+
+    def source_launch_message(self) -> str:
+        return "Запуск приложения из исходников запрещён."
+
+
 PLATFORM = Platform(
     name="stub",
     messages=_StderrMessageBox(),
     privileges=_NoPrivileges(),
     single_instance=_NoSingleInstance(),
     services=_NoServices(),
+    launch=_NoLaunch(),
 )

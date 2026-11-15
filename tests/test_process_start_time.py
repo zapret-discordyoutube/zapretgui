@@ -13,13 +13,13 @@ if str(PROJECT_SRC) not in sys.path:
 
 class FiletimeConversionTests(unittest.TestCase):
     def test_unix_epoch_converts_to_zero(self) -> None:
-        from main.process_start_time import filetime_to_unix_seconds
+        from platforms.windows.launch import filetime_to_unix_seconds
 
         unix_epoch_ticks = 11_644_473_600 * 10_000_000
         self.assertEqual(filetime_to_unix_seconds(unix_epoch_ticks), 0.0)
 
     def test_one_second_after_unix_epoch(self) -> None:
-        from main.process_start_time import filetime_to_unix_seconds
+        from platforms.windows.launch import filetime_to_unix_seconds
 
         ticks = (11_644_473_600 + 1) * 10_000_000
         self.assertEqual(filetime_to_unix_seconds(ticks), 1.0)

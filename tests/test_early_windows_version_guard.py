@@ -4,7 +4,7 @@ import types
 import unittest
 from pathlib import Path
 
-from startup.windows_version_guard import (
+from platforms.windows.system_support import (
     MIN_WINDOWS_10_1809_BUILD,
     evaluate_windows_support,
 )
@@ -70,7 +70,7 @@ class EarlyWindowsVersionGuardTests(unittest.TestCase):
         self.assertEqual(result.message, "")
 
     def test_guard_module_has_no_qt_dependency(self) -> None:
-        source = (ROOT / "src" / "startup" / "windows_version_guard.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "platforms" / "windows" / "system_support.py").read_text(encoding="utf-8")
 
         self.assertNotIn("PyQt6", source)
         self.assertNotIn("qfluentwidgets", source)

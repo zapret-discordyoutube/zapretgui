@@ -72,7 +72,8 @@ def test_shell_does_not_ask_for_elevation_when_the_platform_does_not_need_it():
     privileges.is_elevated.return_value = False
     single = MagicMock()
     single.acquire.return_value = InstanceLock(already_running=False)
-    platform = Platform(name="fake", messages=MagicMock(), privileges=privileges, single_instance=single)
+    platform = Platform(name="fake", messages=MagicMock(), privileges=privileges, single_instance=single,
+                        services=MagicMock(), launch=MagicMock())
     with (
         patch.object(shell, "current_platform", return_value=platform),
         patch.object(shell, "register_exit_step"),
@@ -90,7 +91,8 @@ def test_shell_exits_with_a_message_when_the_elevation_request_is_refused():
     privileges = MagicMock(gui_needs_elevation=True)
     privileges.is_elevated.return_value = False
     privileges.relaunch_elevated.return_value = False
-    platform = Platform(name="fake", messages=messages, privileges=privileges, single_instance=MagicMock())
+    platform = Platform(name="fake", messages=messages, privileges=privileges, single_instance=MagicMock(),
+                        services=MagicMock(), launch=MagicMock())
     with (
         patch.object(shell, "current_platform", return_value=platform),
         patch.object(shell, "_update_is_being_installed", return_value=False),

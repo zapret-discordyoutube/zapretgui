@@ -12,23 +12,25 @@ from config.runtime_layout import (
     SourceApplicationLaunchForbidden,
 )
 from main import launch_gate
-from startup.windows_version_guard import WINDOWS_VERSION_ERROR_TITLE, WindowsSupportResult
+from platforms import current as current_platform
+from platforms.base import SystemSupport
+from platforms.windows.system_support import WINDOWS_VERSION_ERROR_TITLE
 
 
 def _pass_gate(
     *,
     packaged_error: Exception | None = None,
     layout_error: Exception | None = None,
-    windows: WindowsSupportResult | None = None,
+    windows: SystemSupport | None = None,
     chdir_error: Exception | None = None,
 ):
     with (
         patch.object(launch_gate, "require_packaged_application", side_effect=packaged_error),
         patch.object(launch_gate, "require_valid_install_layout", side_effect=layout_error),
         patch.object(
-            launch_gate,
-            "current_windows_support",
-            return_value=windows or WindowsSupportResult(supported=True),
+            current_platform().launch,
+            "system_support",
+            return_value=windows or SystemSupport(supported=True),
         ),
         patch.object(launch_gate.os, "chdir", side_effect=chdir_error) as chdir,
         patch.object(launch_gate, "show_launch_error") as show_error,
@@ -62,7 +64,7 @@ def test_valid_launch_enters_install_root_without_window() -> None:
             "_internal",
         ),
         (
-            {"windows": WindowsSupportResult(supported=False, os_name="Windows 7", message="Нужна Windows 10 1809")},
+            {"windows": SystemSupport(supported=False, os_name="Windows 7", title=WINDOWS_VERSION_ERROR_TITLE, message="Нужна Windows 10 1809")},
             WINDOWS_VERSION_ERROR_TITLE,
             "Windows 10 1809",
         ),

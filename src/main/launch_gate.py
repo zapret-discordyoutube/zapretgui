@@ -30,7 +30,6 @@ from config.runtime_layout import (
     require_valid_install_layout,
 )
 from platforms import MessageKind, current as current_platform
-from startup.windows_version_guard import WINDOWS_VERSION_ERROR_TITLE, current_windows_support
 
 
 SOURCE_LAUNCH_TITLE = "Zapret — запуск запрещён"
@@ -71,9 +70,9 @@ def _check_launch() -> None:
             "Если ярлык не помогает, переустановите Zapret.",
         ) from exc
 
-    windows = current_windows_support()
-    if not windows.supported:
-        raise LaunchBlocked(WINDOWS_VERSION_ERROR_TITLE, windows.message)
+    support = current_platform().launch.system_support()
+    if not support.supported:
+        raise LaunchBlocked(support.title, support.message)
 
     app_dir = APPLICATION_PATHS.root
     try:

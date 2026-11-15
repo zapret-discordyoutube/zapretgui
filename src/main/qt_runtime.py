@@ -80,7 +80,7 @@ def skip_frameless_wmi_version_probe() -> None:
     platform.platform(). На Windows эта функция спрашивает WMI: ~75 мс на
     быстром компьютере и заметно больше на медленном, и всё это до появления
     окна. Ниже Windows 10 1809 программа не запускается вовсе
-    (startup.windows_version_guard), поэтому ответ известен заранее.
+    (platforms.windows.system_support), поэтому ответ известен заранее.
     """
     try:
         from qframelesswindow.utils import win32_utils

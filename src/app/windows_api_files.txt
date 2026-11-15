@@ -14,7 +14,6 @@ src/dns/local_proxy_windows.py 5
 src/dns/winapi.py 2
 src/hosts/commands.py 1
 src/hosts/ipv6_detection.py 1
-src/main/process_start_time.py 10
 src/main/window_native_commands.py 2
 src/presets/native_dir_watcher.py 1
 src/settings/store.py 5

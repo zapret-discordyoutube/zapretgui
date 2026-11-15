@@ -63,6 +63,29 @@ class Services(Protocol):
         """Tries to start the service and waits up to ``timeout`` seconds. True when it runs afterwards."""
 
 
+@dataclass(frozen=True, slots=True)
+class SystemSupport:
+    """Whether the running system is new enough for the program."""
+
+    supported: bool
+    os_name: str = ""
+    title: str = ""  # title of the window that tells the person (empty when supported)
+    message: str = ""  # the text of that window, shown as is
+
+
+class Launch(Protocol):
+    """What the very first start needs to know about the system. Used before Qt and the logger exist."""
+
+    def process_creation_unix_seconds(self) -> float | None:
+        """When the operating system created this process (Unix seconds); None when unknown. Never raises."""
+
+    def system_support(self) -> SystemSupport:
+        """Whether this version of the system is supported. Never raises; an unknown version counts as supported."""
+
+    def source_launch_message(self) -> str:
+        """Why starting from source is refused and what to do instead, for the person who tried."""
+
+
 class Cap:
     """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.
 
@@ -138,6 +161,7 @@ class Platform:
     privileges: Privileges
     single_instance: SingleInstance
     services: Services
+    launch: Launch
     capabilities: frozenset[str] = frozenset()
 
     def has(self, capability: str) -> bool:

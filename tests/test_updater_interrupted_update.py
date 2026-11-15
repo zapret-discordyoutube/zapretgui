@@ -326,7 +326,8 @@ class StartupDuringInstallationTests(unittest.TestCase):
         single_instance = MagicMock()
         single_instance.acquire.return_value = InstanceLock(already_running=False)
         fake_platform = Platform(
-            name="fake", messages=MagicMock(), privileges=privileges, single_instance=single_instance
+            name="fake", messages=MagicMock(), privileges=privileges, single_instance=single_instance,
+            services=MagicMock(), launch=MagicMock(),
         )
 
         with (
