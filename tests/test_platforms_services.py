@@ -162,8 +162,9 @@ def test_system_state_bfe_is_unknown_not_stopped_without_the_capability():
 def test_startup_checks_skip_bfe_when_the_platform_has_no_such_service():
     from main import post_startup_check_workers as workers
 
+    # Windows-style startup checks are on, but this system has no BFE service.
     no_bfe = Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
-                      services=MagicMock())
+                      services=MagicMock(), capabilities=frozenset({Cap.WINDOWS_STARTUP_CHECKS}))
     with (
         patch("platforms.current", return_value=no_bfe),
         patch("startup.bfe_util.ensure_bfe_running") as ensure,
@@ -184,7 +185,7 @@ def test_startup_checks_run_bfe_when_the_platform_has_it():
     from main import post_startup_check_workers as workers
 
     with_bfe = Platform(name="x", messages=MagicMock(), privileges=MagicMock(), single_instance=MagicMock(),
-                        services=MagicMock(), capabilities=frozenset({Cap.BFE}))
+                        services=MagicMock(), capabilities=frozenset({Cap.BFE, Cap.WINDOWS_STARTUP_CHECKS}))
     with (
         patch("platforms.current", return_value=with_bfe),
         patch("startup.bfe_util.ensure_bfe_running", return_value=(True, None)) as ensure,
@@ -237,3 +238,30 @@ def test_update_check_is_installed_when_the_platform_can_update():
     ):
         assert post_startup.install_update_check("host", updater_feature="u") == "installed"
     real_install.assert_called_once_with("host", updater_feature="u")
+
+
+# --- Windows-only startup advisories --------------------------------------------
+
+def test_windows_startup_checks_are_a_windows_capability():
+    from platforms.linux import PLATFORM as LINUX
+    from platforms.windows import PLATFORM as WINDOWS
+
+    assert WINDOWS.has(Cap.WINDOWS_STARTUP_CHECKS) is True
+    assert LINUX.has(Cap.WINDOWS_STARTUP_CHECKS) is False
+    assert STUB.has(Cap.WINDOWS_STARTUP_CHECKS) is False
+
+
+def test_startup_checks_return_nothing_and_touch_no_windows_tools_without_the_capability():
+    from main import post_startup_check_workers as workers
+
+    with (
+        patch("platforms.current", return_value=_platform()),
+        patch("startup.check_start.collect_startup_notifications") as collect,
+        patch("startup.check_start.check_goodbyedpi") as goodbye,
+        patch("startup.check_start.check_mitmproxy") as mitm,
+    ):
+        payload = workers.collect_startup_checks_payload(verbose_logging_enabled=True)
+    assert payload == {"notifications": [], "duration_ms": 0}
+    collect.assert_not_called()
+    goodbye.assert_not_called()
+    mitm.assert_not_called()
