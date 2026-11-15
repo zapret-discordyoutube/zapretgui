@@ -340,7 +340,7 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
     if item.get("cause_text"):
         rows.append(ViewRow(FAIL, "Как блокируют", str(item["cause_text"])))
     rows.extend(video_node_rows(item.get("video_node")))
-    rows.extend(video_sweep_rows(item.get("video_sweep"), item.get("coverage")))
+    rows.extend(video_sweep_rows(item.get("video_sweep"), item.get("video_strategy") or item.get("coverage")))
     rows.extend(video_fix_rows(item.get("video_fixes")))
     if "registry" in item:
         rows.append(ViewRow(INFO, "Реестр РКН", _registry_text(item)))

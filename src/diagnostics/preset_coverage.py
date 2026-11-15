@@ -587,7 +587,9 @@ def annotate(probes: Sequence, zapret_running: bool | None) -> None:
     if not zapret_running:
         return
     broken = [probe for probe in probes if probe.reach_state in (ReachState.DPI, ReachState.FREEZE, ReachState.IP_BLOCK)]
-    if not broken:
+    # Видеосерверы — и открытые тоже: строке «Потолок скорости с wssize» нужно знать стратегию их профиля.
+    video = [probe for probe in probes if getattr(getattr(probe, "target", None), "discover_googlevideo", False) and probe.video_sweep]
+    if not broken and not video:
         return
     try:
         running = running_preset()
@@ -597,3 +599,5 @@ def annotate(probes: Sequence, zapret_running: bool | None) -> None:
         return
     for probe in broken:
         probe.coverage = running.covering(probe.host, probe.reach.ip if probe.reach is not None else "")
+    for probe in video:
+        probe.video_coverage = probe.coverage or running.covering(probe.host, probe.reach.ip if probe.reach is not None else "")

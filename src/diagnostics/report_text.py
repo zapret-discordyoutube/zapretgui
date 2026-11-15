@@ -115,6 +115,13 @@ def target_report(probe: Probe) -> dict:
             "orchestra": probe.coverage.orchestra,
             "locked_strategy": probe.coverage.locked_strategy,
         },
+        # Стратегия профиля, которым идёт видеосервер (и открытый тоже): для строки «Потолок скорости с wssize».
+        "video_strategy": None
+        if probe.video_coverage is None
+        else {
+            "strategy_name": probe.video_coverage.strategy_name,
+            "strategy_text": probe.video_coverage.strategy_text,
+        },
         # Что ответил сервер за рубежом: "up" — сайт жив, "down" — лежит и там. Пусто — не спрашивали.
         "outside": probe.outside,
         # Сайт открылся, но через раз или не по каждому адресу: что именно шатается. Пусто — стабилен.

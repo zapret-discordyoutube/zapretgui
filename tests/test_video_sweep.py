@@ -174,6 +174,51 @@ class ViewTests(unittest.TestCase):
         titles = [row.title for row in view.target_rows(item)]
         self.assertIn("Видеосерверы YouTube", titles)
 
+    def test_open_video_server_through_wssize_shows_the_speed_cap(self) -> None:
+        """Видеосервер открылся (wssize для того и нужен), а скорость душит: потолок виден и у открытого."""
+        item = {
+            "host": "rr1---sn-a.googlevideo.com", "purpose": "видео", "main": True, "ok": True, "state": "ok", "text": "открывается",
+            "coverage": None,
+            "video_strategy": {"strategy_name": "MultiDisorder Complex + WSSize Ramp · из googlevideo.com", "strategy_text": ""},
+            "video_sweep": [{**_node("ok"), "rtt_ms": 20}, {**_node("ok", host="rr4---sn-b.googlevideo.com"), "rtt_ms": 30}],
+        }
+        self.assertIn("Потолок скорости с wssize", [row.title for row in view.target_rows(item)])
+
+    def test_report_carries_the_video_strategy_to_the_rows(self) -> None:
+        from diagnostics import engine, report_text
+
+        probe = engine._Probe(target=engine.Target("rr1---sn-a.googlevideo.com", "видео"), service="youtube", host="rr1---sn-a.googlevideo.com")
+        self.assertIsNone(report_text.target_report(probe)["video_strategy"])
+        probe.video_coverage = SimpleNamespace(strategy_name="MultiDisorder Complex + WSSize Ramp · из googlevideo.com", strategy_text="--x")
+        self.assertEqual(
+            report_text.target_report(probe)["video_strategy"],
+            {"strategy_name": "MultiDisorder Complex + WSSize Ramp · из googlevideo.com", "strategy_text": "--x"},
+        )
+
+    def test_annotate_records_the_profile_of_an_open_video_server(self) -> None:
+        from diagnostics import preset_coverage
+        from diagnostics.verdict import ReachState
+
+        cover = SimpleNamespace(strategy_name="MultiDisorder Complex + WSSize Ramp · из googlevideo.com", strategy_text="")
+        running = SimpleNamespace(covering=lambda host, ip: cover)
+        video = SimpleNamespace(
+            host="rr1---sn-a.googlevideo.com", reach=SimpleNamespace(ip="203.0.113.5"), reach_state=ReachState.OK,
+            target=SimpleNamespace(discover_googlevideo=True), video_sweep=(_facts(block_cause.HELLO_OK),),
+            coverage=None, video_coverage=None,
+        )
+        site = SimpleNamespace(host="www.youtube.com", reach=None, reach_state=ReachState.OK,
+                               target=SimpleNamespace(discover_googlevideo=False), video_sweep=(), coverage=None, video_coverage=None)
+        with mock.patch.object(preset_coverage, "running_preset", return_value=running):
+            preset_coverage.annotate([video, site], True)
+        self.assertIs(video.video_coverage, cover)
+        # «Профиль пресета» по-прежнему только для закрытых адресов.
+        self.assertIsNone(video.coverage)
+        self.assertIsNone(site.video_coverage)
+        video.video_coverage = None
+        with mock.patch.object(preset_coverage, "running_preset", return_value=running):
+            preset_coverage.annotate([video], False)
+        self.assertIsNone(video.video_coverage)  # Zapret не запущен — профиля нет
+
 
 if __name__ == "__main__":
     unittest.main()
