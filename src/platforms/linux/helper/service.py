@@ -166,6 +166,9 @@ class HelperService:
             if op in system_ops.OPERATIONS:
                 return self._ops.handle(op, request)
         except Exception as exc:  # the service must never die from one bad request
+            import traceback
+
+            traceback.print_exc()  # to the journal: the answer to the window carries only one line
             return answer_error(f"internal error: {type(exc).__name__}: {exc}")
         return answer_error(f"unknown operation {op!r}")
 

@@ -1,4 +1,6 @@
 #!/bin/sh
 # Started by systemd (zapretgui-helper.service): the same program in its helper role. It refuses to run unless root.
 export PYTHONUTF8=1
+# The compiled program ignores PYTHONUTF8; its file-name and text encoding follow the C library's character type.
+export LC_CTYPE=C.UTF-8
 exec /opt/zapretgui/_internal/zapretgui --zapret-helper "$@"

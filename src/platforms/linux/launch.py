@@ -19,7 +19,7 @@ def utf8_mode_needed(environ=None) -> bool:
 
 def restart_in_utf8_mode() -> None:
     """Replace this process with itself in UTF-8 mode. Returns only when the restart is impossible."""
-    environment = dict(os.environ, PYTHONUTF8="1", **{UTF8_RESTART_ENV: "1"})
+    environment = dict(os.environ, PYTHONUTF8="1", LC_CTYPE="C.UTF-8", **{UTF8_RESTART_ENV: "1"})
     try:
         os.execve("/proc/self/exe", [sys.argv[0], *sys.argv[1:]], environment)
     except OSError:

@@ -139,6 +139,7 @@ def test_linux_restarts_once_when_file_names_are_not_utf8(monkeypatch) -> None:
     assert path == "/proc/self/exe"
     assert argv == ["/opt/zapretgui/_internal/zapretgui", "--tray"]
     assert env["PYTHONUTF8"] == "1"
+    assert env["LC_CTYPE"] == "C.UTF-8"
     assert env[linux_launch.UTF8_RESTART_ENV] == "1"
 
 

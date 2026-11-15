@@ -114,7 +114,7 @@ def test_the_start_wrappers_run_the_bundled_program_in_utf8_mode() -> None:
     for path in (window, helper):
         assert os.access(path, os.X_OK), path.name
         text = path.read_text(encoding="utf-8")
-        assert "PYTHONUTF8=1" in text and "exec /opt/zapretgui/_internal/zapretgui" in text
+        assert "PYTHONUTF8=1" in text and "LC_CTYPE=C.UTF-8" in text and "exec /opt/zapretgui/_internal/zapretgui" in text
         assert subprocess.run(["sh", "-n", str(path)], capture_output=True, text=True).returncode == 0
     assert "--zapret-helper" in helper.read_text(encoding="utf-8")
     assert "--zapret-helper" not in window.read_text(encoding="utf-8")

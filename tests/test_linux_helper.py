@@ -242,6 +242,16 @@ def test_garbage_arguments_are_answered_not_raised(world) -> None:
     assert not world.service.handle({"op": "start"}, world.user)["ok"]
 
 
+def test_an_unexpected_error_is_answered_and_its_traceback_goes_to_the_journal(world, monkeypatch, capsys) -> None:
+    def broken(*_args, **_kwargs):
+        raise UnicodeEncodeError("ascii", "·", 0, 1, "ordinal not in range(128)")
+
+    monkeypatch.setattr(world.service, "start", broken)
+    answer = world.service.handle({"op": "start", "args": ["--wf-tcp-out=443"]}, world.user)
+    assert answer["ok"] is False and "UnicodeEncodeError" in answer["error"]
+    assert "Traceback" in capsys.readouterr().err
+
+
 def test_an_engine_that_dies_at_once_leaves_no_rules_and_restores_the_sysctls(world) -> None:
     world.recorder.process.exit_code = 3
     answer = world.service.start(GOOD_ARGS, world.user)
