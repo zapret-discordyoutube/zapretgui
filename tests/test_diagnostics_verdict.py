@@ -373,6 +373,9 @@ class _Net:
             patch.object(sections, "check_system", side_effect=lambda _run, _services, _zapret=None, **_kwargs: self.system_items),
             # Подсети — десятки настоящих соединений: в сценариях движка их нет.
             patch.object(sections, "check_subnets", side_effect=self._subnets),
+            # Таблица «имя × адрес» шлёт настоящие TLS- и QUIC-приветствия на каждый адрес; без сети (песочница,
+            # самолёт) они ждут таймаут и тест не заканчивается. Сама таблица проверяется в test_selectivity.py.
+            patch.object(sections, "annotate_selectivity", side_effect=lambda *_a, **_k: None),
             # «Жив ли сайт снаружи» — запрос к серверу проекта: в сценариях его нет.
             patch.object(sections.outside_check, "ask", side_effect=self._outside),
             patch.object(net_access, "hosts_file_ipv4", side_effect=lambda _host: self.hosts),
