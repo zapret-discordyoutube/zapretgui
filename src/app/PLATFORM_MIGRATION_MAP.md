@@ -162,3 +162,16 @@ Run: the app past its launch gate, under Xvfb (a virtual screen) on CT 201, with
 4. The source tree has no `presets/` folder (they live in the private repository / build), so the log warns "Пресеты не найдены". A Linux dev run needs them copied in or pointed to.
 
 Probe script (not in the repository): `/tmp/zg-baseline/tools/probe_launch.py`.
+
+## Second probe, after `launch` / `privileges` / `single_instance` (2026-11-15)
+
+Run: skip the two source-start checks, start with Qt `offscreen`, grab the main window after 9 s, no fake `windll`. Probe script (not in the repository): `/tmp/zg-baseline/tools/probe_shot.py`. Screenshot of the result: `/root/.agent-todo/zapretgui/2026-11-15-linux-gui-first-screenshot.png`.
+
+- The app now starts on Linux with nothing faked: `shell_bootstrap` passes through the platform (no elevation asked, Linux lock file taken, the "show window" socket created and its watcher thread running).
+- The real main window (`LupiDPIApp`, 1280x720) is built: sidebar, pages, version badge "Zapret2 v21.1.7.231 FREE".
+- Under a virtual X screen (Xvfb, `xcb` platform) the process still ends with a segmentation fault inside Qt's event loop; under `offscreen` it stays alive. Not analysed yet (needs a native backtrace, or a real desktop); the fault is not caused by the old fake `windll`.
+- The window shows these error toasts. Each is a concrete Phase 2 task and belongs to a group above:
+  1. "Пресеты не найдены" (x4): the source tree has no `presets/winws2` folder. The built layout provides it. A Linux layout needs its own place for resources (`paths` interface).
+  2. `module 'ctypes' has no attribute 'windll'` from `updater/install/watchdog.py:199` ("не удалось запросить права для наблюдателя"): the update watcher asks Windows for rights. Group `updater_install`.
+  3. "Обновление не установлено: Не удалось запустить установщик": the update flow (`updater/download/flow.py:251`, `updater/install/repair.py:195`) assumes a Windows installer. Group `updater_install`.
+  4. `No module named 'win32service'` from `startup/bfe_util.py:5`: unconditional `import win32service` (pywin32 does not exist on Linux). Group `integrations`.
