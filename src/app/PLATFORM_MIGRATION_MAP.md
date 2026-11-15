@@ -163,6 +163,8 @@ Run: the app past its launch gate, under Xvfb (a virtual screen) on CT 201, with
 
 Probe script (not in the repository): `/tmp/zg-baseline/tools/probe_launch.py`.
 
+- 2026-11-15 `services` and capabilities: `platforms.current().services` (`is_running`, `start`; Windows: pywin32 loaded lazily; Linux: systemd) and `Platform.has(Cap.X)`. Capabilities so far: `BFE`, `SELF_UPDATE`, `WINDOWS_STARTUP_CHECKS` (all Windows only). `startup/bfe_util.py` has no Windows calls left. The startup update check and the Windows startup advisories are not installed on systems without the capability.
+
 ## Second probe, after `launch` / `privileges` / `single_instance` (2026-11-15)
 
 Run: skip the two source-start checks, start with Qt `offscreen`, grab the main window after 9 s, no fake `windll`. Probe script (not in the repository): `/tmp/zg-baseline/tools/probe_shot.py`. Screenshot of the result: `/root/.agent-todo/zapretgui/2026-11-15-linux-gui-first-screenshot.png`.
@@ -175,3 +177,7 @@ Run: skip the two source-start checks, start with Qt `offscreen`, grab the main 
   2. `module 'ctypes' has no attribute 'windll'` from `updater/install/watchdog.py:199` ("не удалось запросить права для наблюдателя"): the update watcher asks Windows for rights. Group `updater_install`.
   3. "Обновление не установлено: Не удалось запустить установщик": the update flow (`updater/download/flow.py:251`, `updater/install/repair.py:195`) assumes a Windows installer. Group `updater_install`.
   4. `No module named 'win32service'` from `startup/bfe_util.py:5`: unconditional `import win32service` (pywin32 does not exist on Linux). Group `integrations`.
+
+## Third probe, after `services` and the capability gates (2026-11-15)
+
+Only the four "Пресеты не найдены" toasts are left (same cause: the dev tree has no `presets/winws2*` folders; they come from the build layout). The main page also still offers Windows-only things on Linux, for example the quick action "Сбросить сеть Windows"; hiding them is capability work for Phase 2. Diagnostics still shows a BFE row ("не удалось определить") on Linux; it should be hidden, not unknown.
