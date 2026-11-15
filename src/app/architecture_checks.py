@@ -1739,10 +1739,108 @@ def check_preset_source_changes_have_single_runtime_owner(files: list[Path]) -> 
     return problems
 
 
+# --- Windows API fence (multi-platform project, phase 0) --------------------
+#
+# Windows-only calls (ctypes.windll, the registry, powershell, sc.exe ...) must
+# live in ``src/platforms/windows/``. Files that still have them are listed in
+# ``windows_api_files.txt`` next to this module, each with the number of lines
+# that use such calls. The list is a ratchet: it can only get shorter.
+#   - a file that is not in the list and gets such a call -> error;
+#   - a file whose number grew -> error;
+#   - a file whose number shrank or reached 0 -> error until the list is
+#     refreshed (``python -m app.architecture_checks --refresh-windows-api-list``),
+#     so progress is written down and cannot be undone silently.
+
+WINDOWS_API_PATTERN = re.compile(
+    r"\bwindll\b"
+    r"|^\s*(?:import|from)\s+winreg\b|\bwinreg\."
+    r"|\bpowershell(?:\.exe)?\b|\bsc\.exe\b|\btaskkill\b|\bschtasks\b"
+    r"|\bwin32(?:api|gui|con|process|service|file|event|pipe|security|clipboard|com|ui|net)\b"
+    r"|\bpywintypes\b|\bwintypes\b",
+    re.IGNORECASE,
+)
+WINDOWS_API_HOME = "src/platforms/windows/"
+WINDOWS_API_LIST = Path(__file__).resolve().with_name("windows_api_files.txt")
+
+
+def _windows_api_counts(files: list[Path]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for path in files:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if rel.startswith(WINDOWS_API_HOME):
+            continue
+        hits = sum(1 for line in _lines(path) if WINDOWS_API_PATTERN.search(line))
+        if hits:
+            counts[rel] = hits
+    return counts
+
+
+def _read_windows_api_list() -> dict[str, int]:
+    allowed: dict[str, int] = {}
+    if not WINDOWS_API_LIST.exists():
+        return allowed
+    for raw in WINDOWS_API_LIST.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, _, number = line.rpartition(" ")
+        allowed[name.strip()] = int(number)
+    return allowed
+
+
+def check_windows_api_stays_in_platform_modules(files: list[Path]) -> list[Problem]:
+    actual = _windows_api_counts(files)
+    allowed = _read_windows_api_list()
+    refresh = "python -m app.architecture_checks --refresh-windows-api-list"
+    problems: list[Problem] = []
+    for rel, hits in sorted(actual.items()):
+        path = REPO_ROOT / rel
+        limit = allowed.get(rel)
+        if limit is None:
+            problems.append(Problem(
+                path, 1,
+                f"{hits} Windows-only call line(s) outside {WINDOWS_API_HOME}: "
+                "put them behind an interface in src/platforms/ (do not add the file to the list)",
+            ))
+        elif hits > limit:
+            problems.append(Problem(
+                path, 1,
+                f"Windows-only call lines grew from {limit} to {hits}: "
+                "new ones belong in src/platforms/",
+            ))
+        elif hits < limit:
+            problems.append(Problem(
+                path, 1,
+                f"Windows-only call lines shrank from {limit} to {hits}: "
+                f"record the progress with `{refresh}`",
+            ))
+    for rel in sorted(set(allowed) - set(actual)):
+        problems.append(Problem(
+            WINDOWS_API_LIST, 1,
+            f"{rel} no longer has Windows-only calls (or is gone): "
+            f"remove it from the list with `{refresh}`",
+        ))
+    return problems
+
+
+def refresh_windows_api_list() -> int:
+    actual = _windows_api_counts(_python_files())
+    header = (
+        "# Files that still use Windows-only calls, with the number of such lines.\n"
+        "# Only shrinks. New code goes to src/platforms/windows/ behind an interface.\n"
+        "# Regenerate: python -m app.architecture_checks --refresh-windows-api-list\n"
+    )
+    body = "".join(f"{rel} {hits}\n" for rel, hits in sorted(actual.items()))
+    WINDOWS_API_LIST.write_text(header + body, encoding="utf-8")
+    print(f"Windows API list written: {len(actual)} files, {sum(actual.values())} lines.")
+    return 0
+
+
 def run_checks() -> list[Problem]:
     files = _python_files()
     problems: list[Problem] = []
     problems.extend(check_removed_legacy_files())
+    problems.extend(check_windows_api_stays_in_platform_modules(files))
     problems.extend(
         check_process_exit_has_single_owners(
             [(path, path.read_text(encoding="utf-8", errors="replace")) for path in files]
@@ -1818,6 +1916,8 @@ def run_checks() -> list[Problem]:
 
 
 def main() -> int:
+    if "--refresh-windows-api-list" in sys.argv[1:]:
+        return refresh_windows_api_list()
     problems = run_checks()
     if problems:
         print("Architecture boundary check failed:")
