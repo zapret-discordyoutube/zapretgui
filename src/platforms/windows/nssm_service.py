@@ -90,7 +90,7 @@ def _decode_nssm_output(raw_text: str) -> str:
 def _wait_service_removed(service_name: str, timeout_seconds: float = 12.0) -> bool:
     """Ожидает, пока служба реально исчезнет из SCM."""
     try:
-        from autostart.service_api import service_exists, get_service_state
+        from platforms.windows.service_api import service_exists, get_service_state
     except Exception:
         return True
 
@@ -177,7 +177,7 @@ def create_service_with_nssm(
         
         # 1. Удаляем старую службу если есть
         try:
-            from autostart.service_api import service_exists, delete_service
+            from platforms.windows.service_api import service_exists, delete_service
             service_exists_fn = service_exists
             delete_service_fn = delete_service
         except Exception:
@@ -290,7 +290,7 @@ def create_service_with_nssm(
                 
                 # Проверяем существующую службу
                 try:
-                    from autostart.service_api import get_service_state
+                    from platforms.windows.service_api import get_service_state
                     state = get_service_state(service_name)
                     if state is not None:
                         log(f"  ⚠️ Служба '{service_name}' еще существует (state: {state})", "WARNING")

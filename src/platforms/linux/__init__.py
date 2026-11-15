@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from platforms.base import NoWorkingSet, Platform
+from platforms.linux.autostart import LinuxGuiAutostart
 from platforms.linux.launch import LinuxLaunch
 from platforms.linux.messages import LinuxMessageBox
+from platforms.linux.netprobe import LinuxNetProbe
 from platforms.linux.privileges import LinuxPrivileges
 from platforms.linux.processes import LinuxProcesses
 from platforms.linux.services import LinuxServices
@@ -18,5 +20,7 @@ PLATFORM = Platform(
     services=LinuxServices(),
     launch=LinuxLaunch(),
     processes=LinuxProcesses(),
+    netprobe=LinuxNetProbe(),
+    autostart=LinuxGuiAutostart(),
     working_set=NoWorkingSet(),
 )

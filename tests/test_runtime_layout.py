@@ -85,7 +85,7 @@ class RuntimeLayoutTests(unittest.TestCase):
 
         critical_sources = (
             SRC_ROOT / "main" / "launch_gate.py",
-            SRC_ROOT / "autostart" / "nssm_service.py",
+            SRC_ROOT / "platforms" / "windows" / "nssm_service.py",
             SRC_ROOT / "app" / "navigation_icon_resources.py",
         )
         for path in critical_sources:

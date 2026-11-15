@@ -15,7 +15,10 @@ from __future__ import annotations
 import enum
 import threading
 from dataclasses import dataclass
-from typing import Callable, Protocol, Sequence
+from typing import TYPE_CHECKING, Callable, Protocol, Sequence
+
+if TYPE_CHECKING:
+    from platforms.netprobe_types import DnsAnswer, PingResult, TraceHopResult
 
 
 class MessageKind(enum.Enum):
@@ -191,6 +194,71 @@ class NoWorkingSet:
         return None
 
 
+class NetProbe(Protocol):
+    """Measurements of the network the way the system sees it. Results use ``platforms.netprobe_types``."""
+
+    def ping_ipv4_host(
+        self,
+        host: str,
+        *,
+        count: int,
+        timeout_ms: int,
+        resolved_ip: str | None = None,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> "PingResult":
+        """ICMP echo to an IPv4 host without starting a ``ping`` program. ``cancelled`` is polled before each packet."""
+
+    def ping_ipv6(
+        self, ip: str, *, count: int, timeout_ms: int, cancelled: Callable[[], bool] | None = None
+    ) -> "PingResult":
+        """The same for an IPv6 address."""
+
+    def trace_hop_ipv4(self, ip: str, ttl: int, *, timeout_ms: int) -> "TraceHopResult":
+        """One echo packet that expires after ``ttl`` hops: who answered (router, target, nobody, unsupported)."""
+
+    def query_ipv4(
+        self, name: str, *, timeout: float, cancelled: Callable[[], bool] | None = None
+    ) -> "DnsAnswer":
+        """A records from the system's DNS servers, bypassing the resolver cache and the hosts file."""
+
+    def system_dns_servers(self) -> tuple[str, ...]:
+        """IPv4 addresses of the DNS servers the system uses now."""
+
+    def tcp_server_window(self, ip: str, *, port: int = 443, timeout: float = 4.0) -> int | None:
+        """The server's receive window right after connecting, in bytes; None when unknown."""
+
+    def hosts_file_path(self) -> str:
+        """Where the system keeps its hosts file."""
+
+
+@dataclass(frozen=True, slots=True)
+class GuiAutostartResult:
+    success: bool
+    removed_count: int = 0
+    restart_requested: bool = False
+    message: str = ""
+
+
+class GuiAutostart(Protocol):
+    """Starting the program's window (in the tray) when the person logs in.
+
+    Windows: a scheduler task (an elevated program cannot start from the Startup folder).
+    Linux: an XDG autostart entry in the user's own ``~/.config/autostart``.
+    """
+
+    def enable(self, executable: str, *, status_cb: Callable[[str], None] | None = None) -> GuiAutostartResult:
+        """Registers ``executable`` to start at login, replacing older registrations. Never raises."""
+
+    def disable(self) -> GuiAutostartResult:
+        """Removes every registration. ``success`` is False when something is still registered afterwards."""
+
+    def ensure_current(self, executable: str) -> bool:
+        """Repairs a registration that points elsewhere (moved program) or was made the old way.
+
+        Call it only when the person wants autostart. True when something was changed.
+        """
+
+
 class Cap:
     """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.
 
@@ -269,6 +337,8 @@ class Platform:
     services: Services
     launch: Launch
     processes: Processes
+    netprobe: NetProbe
+    autostart: GuiAutostart
     working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()
 

@@ -325,12 +325,14 @@ def _cell(result: DnsQueryResult) -> Cell:
 
 
 def _ping(address: str, should_stop: ShouldStop) -> Cell:
-    from utils.windows_icmp import ping_ipv4_host_winapi, ping_ipv6_winapi
+    from platforms import current as current_platform
+
+    netprobe = current_platform().netprobe
 
     if ":" in address:
-        result = ping_ipv6_winapi(address, count=PING_COUNT, timeout_ms=PING_TIMEOUT_MS, cancelled=should_stop)
+        result = netprobe.ping_ipv6(address, count=PING_COUNT, timeout_ms=PING_TIMEOUT_MS, cancelled=should_stop)
     else:
-        result = ping_ipv4_host_winapi(
+        result = netprobe.ping_ipv4_host(
             address, count=PING_COUNT, timeout_ms=PING_TIMEOUT_MS, resolved_ip=address, cancelled=should_stop
         )
     if result.ok:

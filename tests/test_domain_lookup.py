@@ -26,7 +26,8 @@ from utils.dns_wire import (
 )
 from diagnostics.path_trace import FilterFacts, Hop, RouteTrace
 from diagnostics.quic_probe import QUIC_BLOCKED_BY_NAME, QUIC_OK, QuicVerdict
-from utils.windows_icmp import HOP_ROUTER, HOP_SILENT, HOP_TARGET, WindowsPingResult
+from platforms import current as current_platform
+from platforms.netprobe_types import HOP_ROUTER, HOP_SILENT, HOP_TARGET, PingResult
 
 GOOD = engine.DnsServer("Хороший", "9.9.9.9")
 STUB = engine.DnsServer("Провайдер", "10.0.0.53", engine.SERVER_SYSTEM)
@@ -91,7 +92,7 @@ class _Network:
             self.http_calls.append(url)
             return http(method, url, **kwargs)
 
-        ping = WindowsPingResult(ok=True, average_ms=20.0, sent=4, received=3, min_ms=10.0, max_ms=30.0, ttl=57)
+        ping = PingResult(ok=True, average_ms=20.0, sent=4, received=3, min_ms=10.0, max_ms=30.0, ttl=57)
         patches = [
             patch.object(engine, "query_server", _fake_query),
             patch.object(engine, "query_doh", _fake_query),
@@ -106,8 +107,8 @@ class _Network:
             patch.object(engine, "_hosts_road", lambda domain, offered, cancel: None),
             patch.object(engine, "fetch_cert_names", lambda ip, server_name=None: CertNames("ok", ("cert.example",), "cn.example")),
             patch.object(engine, "_tcp_connect", lambda ip, port=443: engine.TcpReport(ip, port, "ok", 5.0)),
-            patch("utils.windows_icmp.ping_ipv4_host_winapi", lambda *a, **k: ping),
-            patch("utils.windows_icmp.ping_ipv6_winapi", lambda *a, **k: ping),
+            patch.object(current_platform().netprobe, "ping_ipv4_host", lambda *a, **k: ping, create=True),
+            patch.object(current_platform().netprobe, "ping_ipv6", lambda *a, **k: ping, create=True),
             patch("utils.net_resolve.resolve_addrinfo", lambda host, **k: [(socket.AF_INET, 0, 0, "", ("93.184.216.34", 0))]),
         ]
         for item in patches:
@@ -1127,7 +1128,7 @@ class ProgramRoadTests(unittest.TestCase):
         import os
         import tempfile
 
-        from utils.windows_dns_query import hosts_file_addresses, hosts_file_ipv4
+        from utils.hosts_lookup import hosts_file_addresses, hosts_file_ipv4
 
         handle, path = tempfile.mkstemp(text=True)
         self.addCleanup(os.unlink, path)
@@ -1148,7 +1149,7 @@ class WiringTests(unittest.TestCase):
         self.assertIn(("Мой", "10.9.8.7", engine.SERVER_CUSTOM), [(s.label, s.address, s.kind) for s in servers])
         self.assertEqual(len(engine._unique_servers(servers)), len(unique))
         # Сервер системы подписан именем владельца, а не своим же адресом.
-        with patch("utils.windows_dns_query.system_dns_servers", return_value=("8.8.8.8", "10.11.12.13")):
+        with patch.object(current_platform().netprobe, "system_dns_servers", return_value=("8.8.8.8", "10.11.12.13"), create=True):
             system = [s for s in dns_commands.build_domain_lookup_servers() if s.kind == engine.SERVER_SYSTEM]
         self.assertEqual([(s.label, s.address) for s in system], [("Google DNS", "8.8.8.8"), ("", "10.11.12.13")])
         # Серверы списка спрашиваются обычным DNS, а Wikimedia и DNS-AI его не принимают.

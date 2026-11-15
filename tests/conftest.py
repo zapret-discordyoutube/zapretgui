@@ -36,6 +36,37 @@ def _qt_slot_excepthook(exc_type, exc, tb) -> None:
 sys.excepthook = _qt_slot_excepthook
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "real_network: do not replace the platform network probes with the safe stub")
+
+
+@pytest.fixture(autouse=True)
+def _tests_do_not_measure_the_real_network(monkeypatch, request):
+    """Вне Windows тест не шлёт настоящие ICMP/DNS-пробы платформы: их ответы зависят от сети машины.
+
+    До появления Linux-проб такие вызовы здесь сразу отвечали «не поддерживается»; фикстура возвращает
+    ровно это. Тесты самих проб создают свой экземпляр (``LinuxNetProbe()``) и подмену не видят;
+    метка ``real_network`` отключает подмену.
+    """
+    if sys.platform == "win32" or request.node.get_closest_marker("real_network"):
+        yield
+        return
+    from platforms import current
+    from platforms.stub import PLATFORM as stub
+
+    probe = current().netprobe
+    for name in (
+        "ping_ipv4_host",
+        "ping_ipv6",
+        "trace_hop_ipv4",
+        "query_ipv4",
+        "system_dns_servers",
+        "tcp_server_window",
+    ):
+        monkeypatch.setattr(probe, name, getattr(stub.netprobe, name), raising=False)
+    yield
+
+
 _SESSION_EXIT_STATUS = {"status": 0}
 
 

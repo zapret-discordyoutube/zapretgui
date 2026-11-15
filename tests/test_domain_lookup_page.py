@@ -295,7 +295,7 @@ class DomainLookupPageTests(unittest.TestCase):
         from diagnostics.path_trace import FilterFacts, Hop, RouteTrace
         from diagnostics.quic_probe import QUIC_BLOCKED_BY_NAME, QuicVerdict
         from dns import domain_lookup_plans as lookup_plans
-        from utils.windows_icmp import HOP_ROUTER, HOP_TARGET
+        from platforms.netprobe_types import HOP_ROUTER, HOP_TARGET
 
         hops = tuple(Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", 1.0) for ttl in range(1, 4)) + (Hop(4, HOP_TARGET, "93.184.216.34", 40.0),)
         page._show_final_report(

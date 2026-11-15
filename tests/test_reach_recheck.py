@@ -13,7 +13,7 @@ from diagnostics import block_kind as bk
 from diagnostics import engine, net_access, reach, report_text, service_view, video_nodes
 from diagnostics.tls_probe import KIND_CONNECT, KIND_OK, KIND_TIMEOUT, ProbeResult
 from diagnostics.verdict import ReachState, judge_reach
-from utils.windows_dns_query import DnsAnswer
+from platforms.netprobe_types import DnsAnswer
 
 HOSTS_IP = "151.101.130.146"
 REAL = ("104.244.42.1", "104.244.42.65", "104.244.42.129")

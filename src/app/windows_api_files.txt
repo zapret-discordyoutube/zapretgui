@@ -1,9 +1,6 @@
 # Files that still use Windows-only calls, with the number of such lines.
 # Only shrinks. New code goes to src/platforms/windows/ behind an interface.
 # Regenerate: python -m app.architecture_checks --refresh-windows-api-list
-src/autostart/nssm_service.py 7
-src/autostart/scheduled_task_api.py 6
-src/autostart/service_api.py 37
 src/blockcheck/browser_switch.py 16
 src/blockcheck/default_browser.py 3
 src/config/telegram_links.py 2
@@ -42,11 +39,7 @@ src/updater/install/watchdog.py 9
 src/updater/install/watchdog_script.py 3
 src/updater/ui/restart_splash_spec.py 1
 src/utils/subproc.py 2
-src/utils/tcp_info.py 1
 src/utils/winapi_service_types.py 8
-src/utils/windows_dns_query.py 1
-src/utils/windows_http.py 38
-src/utils/windows_icmp.py 28
 src/windows_features/defender_manager.py 3
 src/windows_features/internet_cleanup_winapi.py 4
 src/windows_features/max_blocker.py 21

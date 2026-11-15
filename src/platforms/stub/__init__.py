@@ -5,7 +5,9 @@ from __future__ import annotations
 import threading
 from typing import Callable, Sequence
 
+from platforms.netprobe_types import HOP_UNSUPPORTED, DnsAnswer, PingResult, TraceHopResult
 from platforms.base import (
+    GuiAutostartResult,
     InstanceLock,
     MessageKind,
     NoWorkingSet,
@@ -78,6 +80,40 @@ class _NoProcesses:
         return False
 
 
+class _NoNetProbe:
+    def ping_ipv4_host(self, host, *, count, timeout_ms, resolved_ip=None, cancelled=None) -> PingResult:
+        return PingResult(ok=False, sent=max(0, int(count)), error_code="UNSUPPORTED", detail="no network probes here")
+
+    def ping_ipv6(self, ip, *, count, timeout_ms, cancelled=None) -> PingResult:
+        return PingResult(ok=False, sent=max(0, int(count)), error_code="UNSUPPORTED", detail="no network probes here")
+
+    def trace_hop_ipv4(self, ip, ttl, *, timeout_ms) -> TraceHopResult:
+        return TraceHopResult(HOP_UNSUPPORTED)
+
+    def query_ipv4(self, name, *, timeout, cancelled=None) -> DnsAnswer:
+        return DnsAnswer(status=-1, detail="no DNS probe on this system")
+
+    def system_dns_servers(self) -> tuple[str, ...]:
+        return ()
+
+    def tcp_server_window(self, ip, *, port=443, timeout=4.0) -> int | None:
+        return None
+
+    def hosts_file_path(self) -> str:
+        return ""
+
+
+class _NoAutostart:
+    def enable(self, executable: str, *, status_cb=None) -> GuiAutostartResult:
+        return GuiAutostartResult(success=False, message="autostart is not available on this system")
+
+    def disable(self) -> GuiAutostartResult:
+        return GuiAutostartResult(success=True)
+
+    def ensure_current(self, executable: str) -> bool:
+        return False
+
+
 class _NoLaunch:
     def process_creation_unix_seconds(self) -> float | None:
         return None
@@ -97,5 +133,7 @@ PLATFORM = Platform(
     services=_NoServices(),
     launch=_NoLaunch(),
     processes=_NoProcesses(),
+    netprobe=_NoNetProbe(),
+    autostart=_NoAutostart(),
     working_set=NoWorkingSet(),
 )

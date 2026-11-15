@@ -3,28 +3,21 @@ from __future__ import annotations
 import ctypes
 import socket
 import struct
-from dataclasses import dataclass
 from ctypes import wintypes
 
+from platforms.netprobe_types import (  # noqa: F401
+    HOP_ROUTER,
+    HOP_SILENT,
+    HOP_TARGET,
+    HOP_UNSUPPORTED,
+    PingResult,
+    TraceHopResult,
+)
 from utils.net_resolve import resolve_ipv4
 
 
 IP_SUCCESS = 0
 IP_REQ_TIMED_OUT = 11010
-
-
-@dataclass(frozen=True, slots=True)
-class WindowsPingResult:
-    ok: bool
-    average_ms: float | None = None
-    sent: int = 0
-    received: int = 0
-    resolved_ip: str | None = None
-    error_code: str | None = None
-    detail: str = ""
-    min_ms: float | None = None
-    max_ms: float | None = None
-    ttl: int | None = None
 
 
 class IP_OPTION_INFORMATION(ctypes.Structure):
@@ -193,11 +186,11 @@ def _ipv4_to_dword(ip: str) -> int:
 
 def _summarize(
     rtts: list[float], sent: int, ip: str, last_status: int | None, ttl: int | None = None
-) -> WindowsPingResult:
+) -> PingResult:
     received = len(rtts)
     if received > 0:
         average_ms = sum(rtts) / received
-        return WindowsPingResult(
+        return PingResult(
             ok=True,
             average_ms=average_ms,
             sent=sent,
@@ -209,8 +202,8 @@ def _summarize(
             ttl=ttl,
         )
     if last_status == IP_REQ_TIMED_OUT:
-        return WindowsPingResult(ok=False, sent=sent, received=0, resolved_ip=ip, error_code="TIMEOUT", detail="Timeout")
-    return WindowsPingResult(
+        return PingResult(ok=False, sent=sent, received=0, resolved_ip=ip, error_code="TIMEOUT", detail="Timeout")
+    return PingResult(
         ok=False,
         sent=sent,
         received=0,
@@ -220,21 +213,21 @@ def _summarize(
     )
 
 
-def ping_ipv6_winapi(ip: str, *, count: int, timeout_ms: int, cancelled=None) -> WindowsPingResult:
+def ping_ipv6_winapi(ip: str, *, count: int, timeout_ms: int, cancelled=None) -> PingResult:
     """Пингует IPv6-адрес через Windows ICMP API (Icmp6SendEcho2) без ping.exe."""
     sent = max(0, int(count))
     if _Icmp6CreateFile is None or _Icmp6SendEcho2 is None or _IcmpCloseHandle is None or _GetLastError is None:
-        return WindowsPingResult(
+        return PingResult(
             ok=False, sent=sent, received=0, error_code="UNSUPPORTED", detail="Windows ICMPv6 API unavailable"
         )
     try:
         packed = socket.inet_pton(socket.AF_INET6, ip.split("%", 1)[0])
     except OSError:
-        return WindowsPingResult(ok=False, sent=sent, received=0, error_code="RESOLVE_ERR", detail="Bad IPv6 address")
+        return PingResult(ok=False, sent=sent, received=0, error_code="RESOLVE_ERR", detail="Bad IPv6 address")
 
     handle = _Icmp6CreateFile()
     if not handle or handle == ctypes.c_void_p(-1).value:
-        return WindowsPingResult(
+        return PingResult(
             ok=False, sent=sent, received=0, resolved_ip=ip, error_code="ICMP_OPEN_FAILED", detail="Icmp6CreateFile failed"
         )
 
@@ -288,7 +281,7 @@ def ping_ipv4_host_winapi(
     timeout_ms: int,
     resolved_ip: str | None = None,
     cancelled=None,
-) -> WindowsPingResult:
+) -> PingResult:
     """Пингует IPv4-хост через Windows ICMP API без вызова ping.exe.
 
     ``resolved_ip`` позволяет вызывающему передать уже известный адрес и не
@@ -298,7 +291,7 @@ def ping_ipv4_host_winapi(
     sent = max(0, int(count))
 
     if not _is_windows_icmp_available():
-        return WindowsPingResult(
+        return PingResult(
             ok=False,
             sent=sent,
             received=0,
@@ -313,7 +306,7 @@ def ping_ipv4_host_winapi(
             host, timeout=max(1.0, float(timeout_ms) / 1000.0),
         )
     if not resolved_ip:
-        return WindowsPingResult(
+        return PingResult(
             ok=False,
             sent=sent,
             received=0,
@@ -324,7 +317,7 @@ def ping_ipv4_host_winapi(
     handle = _IcmpCreateFile()
     invalid_handle = ctypes.c_void_p(-1).value
     if not handle or handle == invalid_handle:
-        return WindowsPingResult(
+        return PingResult(
             ok=False,
             sent=sent,
             received=0,
@@ -376,19 +369,6 @@ def ping_ipv4_host_winapi(
 # ---------------------------------------------------------------------------
 
 IP_TTL_EXPIRED_TRANSIT = 11013
-
-HOP_ROUTER = "router"  # ответил промежуточный узел: срок жизни пакета истёк на нём
-HOP_TARGET = "target"  # ответил сам адрес назначения
-HOP_SILENT = "silent"  # никто не ответил за отведённое время
-HOP_UNSUPPORTED = "unsupported"
-
-
-@dataclass(frozen=True, slots=True)
-class TraceHopResult:
-    kind: str
-    address: str = ""
-    rtt_ms: float | None = None
-
 
 def trace_hop_ipv4(ip: str, ttl: int, *, timeout_ms: int) -> TraceHopResult:
     """Один пакет пинга со сроком жизни ``ttl`` узлов.

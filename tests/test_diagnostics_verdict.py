@@ -43,7 +43,7 @@ from utils.dns_wire import (
     DnsRecord,
 )
 from utils.socket_cancel import SocketCancel
-from utils.windows_dns_query import DNS_STATUS_NAME_ERROR, DnsAnswer
+from platforms.netprobe_types import DNS_STATUS_NAME_ERROR, DnsAnswer
 
 DISCORD_REAL = ("162.159.137.232", "162.159.138.232")
 # Адрес прокси разблокирующего DNS (Comss/Xbox DNS и т. п.).
@@ -1254,7 +1254,7 @@ class FullCheckTests(unittest.TestCase):
 
     def test_filter_place_is_searched_for_site_with_quic_blocked_by_name(self) -> None:
         from diagnostics import path_trace
-        from utils.windows_icmp import HOP_ROUTER
+        from platforms.netprobe_types import HOP_ROUTER
 
         trace = path_trace.RouteTrace(
             DISCORD_REAL[0], tuple(path_trace.Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", 1.0) for ttl in range(1, 8)), reached=True
@@ -1278,7 +1278,7 @@ class FullCheckTests(unittest.TestCase):
 
     def test_without_blocks_by_name_the_road_is_still_shown(self) -> None:
         from diagnostics import path_trace
-        from utils.windows_icmp import HOP_ROUTER
+        from platforms.netprobe_types import HOP_ROUTER
 
         trace = path_trace.RouteTrace("1.1.1.1", tuple(path_trace.Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", 1.0) for ttl in range(1, 4)))
         result, lines, calls = self._run(trace=trace)
@@ -2363,7 +2363,7 @@ class IcmpAddressTests(unittest.TestCase):
         import socket
         import struct
 
-        from utils.windows_icmp import _ipv4_to_dword
+        from platforms.windows.icmp import _ipv4_to_dword
 
         for ip in ("142.251.150.4", "162.159.137.232"):
             with self.subTest(ip=ip):

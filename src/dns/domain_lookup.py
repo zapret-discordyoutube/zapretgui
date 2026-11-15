@@ -431,12 +431,14 @@ def _ask_windows(domain: str) -> ResolverAnswer:
 
 
 def _ping(ip: str, should_stop: Callable[[], bool]) -> PingReport:
-    from utils.windows_icmp import ping_ipv4_host_winapi, ping_ipv6_winapi
+    from platforms import current as current_platform
+
+    netprobe = current_platform().netprobe
 
     if ip_address(ip).version == 6:
-        result = ping_ipv6_winapi(ip, count=PING_COUNT, timeout_ms=PING_TIMEOUT_MS, cancelled=should_stop)
+        result = netprobe.ping_ipv6(ip, count=PING_COUNT, timeout_ms=PING_TIMEOUT_MS, cancelled=should_stop)
     else:
-        result = ping_ipv4_host_winapi(
+        result = netprobe.ping_ipv4_host(
             ip,
             count=PING_COUNT,
             timeout_ms=PING_TIMEOUT_MS,
@@ -530,7 +532,7 @@ def _hosts_facts(domain: str) -> tuple[str, tuple[str, ...], tuple[str, ...], tu
     from hosts.catalog_repository import HOSTS_PROFILE_ID
     from hosts.hosts import _iter_managed_hosts_block_rows, safe_read_hosts_file
     from hosts.proxy_domains import direct_service_with_ipv4, get_service_domain_ip_rows
-    from utils.windows_dns_query import hosts_file_addresses
+    from utils.hosts_lookup import hosts_file_addresses
 
     wanted = domain.casefold()
     service = direct_service_with_ipv4(domain)

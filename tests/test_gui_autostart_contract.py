@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
@@ -32,8 +33,19 @@ class _FakeToggle:
 
 
 class GuiAutostartContractTests(unittest.TestCase):
+    def setUp(self) -> None:
+        """The Windows rules are checked through the public functions with the Windows backend plugged in."""
+        from autostart import public
+        from platforms.windows.autostart import WindowsGuiAutostart
+
+        fake = unittest.mock.MagicMock()
+        fake.autostart = WindowsGuiAutostart()
+        patcher = patch.object(public, "current_platform", return_value=fake)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_registers_elevated_logon_task_in_scheduler(self) -> None:
-        from autostart import scheduled_task_api
+        from platforms.windows import scheduled_task as scheduled_task_api
 
         exe_path = r"C:\Program Files\Zapret\_internal\Zapret.exe"
         captured_xml = b""
@@ -73,7 +85,7 @@ class GuiAutostartContractTests(unittest.TestCase):
         self.assertEqual(values["WorkingDirectory"], r"C:\Program Files\Zapret")
 
     def test_reads_task_action_from_utf16_schtasks_xml(self) -> None:
-        from autostart import scheduled_task_api
+        from platforms.windows import scheduled_task as scheduled_task_api
 
         payload = scheduled_task_api._build_autostart_task_xml(
             r"C:\Zapret\_internal\Zapret.exe",
@@ -89,7 +101,7 @@ class GuiAutostartContractTests(unittest.TestCase):
         )
 
     def test_task_xml_preserves_windows_paths_with_xml_characters(self) -> None:
-        from autostart import scheduled_task_api
+        from platforms.windows import scheduled_task as scheduled_task_api
 
         exe_path = r"C:\Zapret & Tools\_internal\Zapret.exe"
         payload = scheduled_task_api._build_autostart_task_xml(
@@ -109,7 +121,7 @@ class GuiAutostartContractTests(unittest.TestCase):
         )
 
     def test_autostart_runtime_does_not_import_com(self) -> None:
-        from autostart import scheduled_task_api
+        from platforms.windows import scheduled_task as scheduled_task_api
 
         source = Path(scheduled_task_api.__file__).read_text(encoding="utf-8")
         self.assertNotIn("pythoncom", source)
@@ -118,7 +130,7 @@ class GuiAutostartContractTests(unittest.TestCase):
         self.assertIn("schtasks.exe", source)
 
     def test_rejects_flat_or_source_autostart_target(self) -> None:
-        from autostart import scheduled_task_api
+        from platforms.windows import scheduled_task as scheduled_task_api
 
         with patch.object(scheduled_task_api, "_run_schtasks") as run_schtasks:
             result = scheduled_task_api.create_or_update_autostart_task(
@@ -133,8 +145,8 @@ class GuiAutostartContractTests(unittest.TestCase):
         from config.runtime_layout import APPLICATION_PATHS
 
         with (
-            patch("autostart.startup_shortcut_api.delete_startup_shortcut", return_value=True) as delete_shortcut,
-            patch("autostart.scheduled_task_api.create_or_update_autostart_task", return_value=True) as create_task,
+            patch("platforms.windows.startup_shortcut.delete_startup_shortcut", return_value=True) as delete_shortcut,
+            patch("platforms.windows.scheduled_task.create_or_update_autostart_task", return_value=True) as create_task,
         ):
             result = enable_gui_autostart()
 
@@ -146,8 +158,8 @@ class GuiAutostartContractTests(unittest.TestCase):
         from autostart.public import enable_gui_autostart
 
         with (
-            patch("autostart.startup_shortcut_api.delete_startup_shortcut", return_value=False),
-            patch("autostart.scheduled_task_api.create_or_update_autostart_task", return_value=False),
+            patch("platforms.windows.startup_shortcut.delete_startup_shortcut", return_value=False),
+            patch("platforms.windows.scheduled_task.create_or_update_autostart_task", return_value=False),
         ):
             result = enable_gui_autostart()
 
@@ -159,10 +171,10 @@ class GuiAutostartContractTests(unittest.TestCase):
         from autostart.public import disable_gui_autostart
 
         with (
-            patch("autostart.scheduled_task_api.delete_autostart_task", return_value=True),
-            patch("autostart.startup_shortcut_api.delete_startup_shortcut", return_value=True),
-            patch("autostart.scheduled_task_api.autostart_task_exists", return_value=False),
-            patch("autostart.startup_shortcut_api.get_startup_shortcut_path", return_value=_MISSING_PATH),
+            patch("platforms.windows.scheduled_task.delete_autostart_task", return_value=True),
+            patch("platforms.windows.startup_shortcut.delete_startup_shortcut", return_value=True),
+            patch("platforms.windows.scheduled_task.autostart_task_exists", return_value=False),
+            patch("platforms.windows.startup_shortcut.get_startup_shortcut_path", return_value=_MISSING_PATH),
         ):
             result = disable_gui_autostart()
 
@@ -173,10 +185,10 @@ class GuiAutostartContractTests(unittest.TestCase):
         from autostart.public import disable_gui_autostart
 
         with (
-            patch("autostart.scheduled_task_api.delete_autostart_task", return_value=False),
-            patch("autostart.startup_shortcut_api.delete_startup_shortcut", return_value=False),
-            patch("autostart.scheduled_task_api.autostart_task_exists", return_value=True),
-            patch("autostart.startup_shortcut_api.get_startup_shortcut_path", return_value=_MISSING_PATH),
+            patch("platforms.windows.scheduled_task.delete_autostart_task", return_value=False),
+            patch("platforms.windows.startup_shortcut.delete_startup_shortcut", return_value=False),
+            patch("platforms.windows.scheduled_task.autostart_task_exists", return_value=True),
+            patch("platforms.windows.startup_shortcut.get_startup_shortcut_path", return_value=_MISSING_PATH),
         ):
             result = disable_gui_autostart()
 
@@ -188,7 +200,7 @@ class GuiAutostartContractTests(unittest.TestCase):
 
         with (
             patch("settings.store.get_gui_autostart_enabled", return_value=False),
-            patch("autostart.scheduled_task_api.create_or_update_autostart_task") as create_task,
+            patch("platforms.windows.scheduled_task.create_or_update_autostart_task") as create_task,
         ):
             migrated = ensure_gui_autostart_migrated()
 
@@ -204,14 +216,14 @@ class GuiAutostartContractTests(unittest.TestCase):
         with (
             patch("settings.store.get_gui_autostart_enabled", return_value=True),
             patch(
-                "autostart.scheduled_task_api.get_autostart_task_action",
+                "platforms.windows.scheduled_task.get_autostart_task_action",
                 return_value=(task_path, "--tray"),
             ),
             patch(
-                "autostart.startup_shortcut_api.get_startup_shortcut_path",
+                "platforms.windows.startup_shortcut.get_startup_shortcut_path",
                 return_value=shortcut_path,
             ),
-            patch("autostart.scheduled_task_api.create_or_update_autostart_task") as create_task,
+            patch("platforms.windows.scheduled_task.create_or_update_autostart_task") as create_task,
         ):
             migrated = ensure_gui_autostart_migrated()
 
@@ -228,13 +240,13 @@ class GuiAutostartContractTests(unittest.TestCase):
 
             with (
                 patch("settings.store.get_gui_autostart_enabled", return_value=True),
-                patch("autostart.scheduled_task_api.get_autostart_task_action", return_value=None),
+                patch("platforms.windows.scheduled_task.get_autostart_task_action", return_value=None),
                 patch(
-                    "autostart.startup_shortcut_api.get_startup_shortcut_path",
+                    "platforms.windows.startup_shortcut.get_startup_shortcut_path",
                     return_value=legacy_shortcut,
                 ),
                 patch(
-                    "autostart.scheduled_task_api.create_or_update_autostart_task",
+                    "platforms.windows.scheduled_task.create_or_update_autostart_task",
                     return_value=True,
                 ) as create_task,
             ):
@@ -252,18 +264,18 @@ class GuiAutostartContractTests(unittest.TestCase):
         with (
             patch("settings.store.get_gui_autostart_enabled", return_value=True),
             patch(
-                "autostart.scheduled_task_api.get_autostart_task_action",
+                "platforms.windows.scheduled_task.get_autostart_task_action",
                 return_value=(str(APPLICATION_PATHS.executable), ""),
             ),
             patch(
-                "autostart.startup_shortcut_api.get_startup_shortcut_path",
+                "platforms.windows.startup_shortcut.get_startup_shortcut_path",
                 return_value=shortcut_path,
             ),
             patch(
-                "autostart.scheduled_task_api.create_or_update_autostart_task",
+                "platforms.windows.scheduled_task.create_or_update_autostart_task",
                 return_value=True,
             ) as create_task,
-            patch("autostart.startup_shortcut_api.delete_startup_shortcut"),
+            patch("platforms.windows.startup_shortcut.delete_startup_shortcut"),
         ):
             migrated = ensure_gui_autostart_migrated()
 

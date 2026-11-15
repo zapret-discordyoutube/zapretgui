@@ -4,7 +4,7 @@
 -----------
 У пакета есть срок жизни — число узлов, которые он может пройти. Отправляя
 пинг со сроком 1, 2, 3…, получаем по порядку адреса узлов, на которых он
-истекал (``utils.windows_icmp.trace_hop_ipv4``). Видно, сколько узлов до
+истекал (``platforms.current().netprobe.trace_hop_ipv4``). Видно, сколько узлов до
 сервера и где ответы прекращаются.
 
 Где стоит фильтр
@@ -63,7 +63,8 @@ from dataclasses import dataclass
 
 from utils.quic_initial import build_initial, is_reply_to
 from utils.socket_cancel import SocketCancel, close_quietly
-from utils.windows_icmp import HOP_ROUTER, HOP_SILENT, HOP_TARGET, HOP_UNSUPPORTED, TraceHopResult, trace_hop_ipv4
+from platforms import current as current_platform
+from platforms.netprobe_types import HOP_ROUTER, HOP_SILENT, HOP_TARGET, HOP_UNSUPPORTED, TraceHopResult
 
 __all__ = [
     "FILTER_FOUND",
@@ -141,6 +142,11 @@ class RouteTrace:
             if item.ttl == ttl:
                 return item
         return None
+
+
+def trace_hop_ipv4(ip: str, ttl: int, *, timeout_ms: int) -> TraceHopResult:
+    """Один узел пути: измерение делает платформа."""
+    return current_platform().netprobe.trace_hop_ipv4(ip, ttl, timeout_ms=timeout_ms)
 
 
 def trace_route(

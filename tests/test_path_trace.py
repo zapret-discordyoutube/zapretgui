@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from diagnostics import path_trace as pt
 from utils.socket_cancel import SocketCancel
-from utils.windows_icmp import HOP_ROUTER, HOP_SILENT, HOP_TARGET, HOP_UNSUPPORTED, TraceHopResult
+from platforms.netprobe_types import HOP_ROUTER, HOP_SILENT, HOP_TARGET, HOP_UNSUPPORTED, TraceHopResult
 
 TARGET = "203.0.113.50"
 

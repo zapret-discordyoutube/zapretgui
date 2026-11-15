@@ -24,7 +24,8 @@ from utils.dns_wire import (
     DnsRecord,
 )
 from utils.ip_owner import IpOwner
-from utils.windows_icmp import WindowsPingResult
+from platforms import current as current_platform
+from platforms.netprobe_types import PingResult
 
 GOOGLE = sc.CheckTarget("Google DNS", "8.8.8.8", dot_host="dns.google", doh_host="dns.google")
 QUAD9 = sc.CheckTarget("Quad9", "9.9.9.9", dot_host="dns.quad9.net", doh_host="dns.quad9.net")
@@ -161,7 +162,7 @@ class _Net:
         self.tcp = overrides.get("tcp", lambda address, name: _answer("5.5.5.5"))
         self.dot = overrides.get("dot", lambda address, name, host: _answer("5.5.5.5"))
         self.doh = overrides.get("doh", lambda address, name, host: _answer("5.5.5.5"))
-        self.ping = overrides.get("ping", WindowsPingResult(ok=True, average_ms=7.0, sent=2, received=2))
+        self.ping = overrides.get("ping", PingResult(ok=True, average_ms=7.0, sent=2, received=2))
         self.canary = overrides.get("canary", False)
 
     def _note(self, *call) -> None:
@@ -188,8 +189,8 @@ class _Net:
         for name, fake in (("query_udp", udp), ("query_tcp", tcp), ("query_dot", dot), ("query_doh", doh)):
             stack.enter_context(patch.object(sc, name, fake))
         stack.enter_context(patch.object(sc, "canary_answered", lambda *_a, **_k: self.canary))
-        stack.enter_context(patch("utils.windows_icmp.ping_ipv4_host_winapi", lambda *_a, **_k: self.ping))
-        stack.enter_context(patch("utils.windows_icmp.ping_ipv6_winapi", lambda *_a, **_k: self.ping))
+        stack.enter_context(patch.object(current_platform().netprobe, "ping_ipv4_host", lambda *_a, **_k: self.ping, create=True))
+        stack.enter_context(patch.object(current_platform().netprobe, "ping_ipv6", lambda *_a, **_k: self.ping, create=True))
 
     def probe(self, target=GOOGLE) -> sc.Observation:
         from utils.socket_cancel import SocketCancel
@@ -349,7 +350,7 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual((row.secure_via, row.domains), ("", ()))
 
     def test_ping_unavailable_in_system_is_skip_not_failure(self) -> None:
-        row = _Net(ping=WindowsPingResult(ok=False, sent=2, received=0, error_code="UNSUPPORTED")).probe(PLAIN)
+        row = _Net(ping=PingResult(ok=False, sent=2, received=0, error_code="UNSUPPORTED")).probe(PLAIN)
 
         self.assertEqual(row.cell(sc.TRANSPORT_ICMP).state, sc.STATE_SKIP)
 

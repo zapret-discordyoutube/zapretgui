@@ -24,13 +24,22 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from platforms.netprobe_types import (  # noqa: F401  (the vocabulary is shared; the system calls are here)
+    DNS_STATUS_NAME_ERROR,
+    DNS_STATUS_NO_RECORDS,
+    DNS_STATUS_REFUSED,
+    DNS_STATUS_SERVER_FAILURE,
+    ERROR_CANCELLED,
+    ERROR_SUCCESS,
+    ERROR_TIMEOUT,
+    DnsAnswer,
+    status_text,
+)
 
 __all__ = [
     "DNS_STATUS_NAME_ERROR",
     "DNS_STATUS_NO_RECORDS",
     "DnsAnswer",
-    "hosts_file_addresses",
-    "hosts_file_ipv4",
     "query_ipv4",
     "system_dns_servers",
 ]
@@ -48,42 +57,7 @@ DNS_FREE_RECORD_LIST = 1
 DNS_SECTION_ANSWER = 1
 DNS_CONFIG_DNS_SERVER_LIST = 6
 
-ERROR_SUCCESS = 0
 ERROR_MORE_DATA = 234
-ERROR_CANCELLED = 1223
-ERROR_TIMEOUT = 1460
-DNS_STATUS_SERVER_FAILURE = 9002
-DNS_STATUS_NAME_ERROR = 9003
-DNS_STATUS_REFUSED = 9005
-DNS_STATUS_NO_RECORDS = 9501
-
-_STATUS_TEXT = {
-    ERROR_CANCELLED: "запрос отменён",
-    ERROR_TIMEOUT: "DNS-сервер не ответил вовремя",
-    DNS_STATUS_SERVER_FAILURE: "DNS-сервер вернул ошибку (SERVFAIL)",
-    DNS_STATUS_NAME_ERROR: "DNS-сервер ответил, что такого домена нет",
-    DNS_STATUS_REFUSED: "DNS-сервер отказался отвечать",
-    DNS_STATUS_NO_RECORDS: "у домена нет IPv4-адресов",
-}
-
-
-@dataclass(frozen=True, slots=True)
-class DnsAnswer:
-    """Ответ DNS: адреса IPv4 из секции ответа и код результата Windows."""
-
-    ips: tuple[str, ...] = ()
-    cnames: tuple[str, ...] = ()
-    status: int = 0
-    detail: str = ""
-    elapsed_ms: float = 0.0
-
-    @property
-    def ok(self) -> bool:
-        return bool(self.ips)
-
-
-def status_text(status: int) -> str:
-    return _STATUS_TEXT.get(int(status), f"ошибка DNS {int(status)}")
 
 
 # ---------------------------------------------------------------------------
@@ -384,41 +358,3 @@ def system_dns_servers() -> tuple[str, ...]:
                 servers.append(ip)
         return tuple(servers)
     return ()
-
-
-def _hosts_path() -> str:
-    root = os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows"
-    return os.path.join(root, "System32", "drivers", "etc", "hosts")
-
-
-def hosts_file_addresses(name: str, *, path: str | None = None) -> tuple[str, ...]:
-    """Все адреса (IPv4 и IPv6), которые файл hosts задаёт для имени, в порядке строк файла."""
-    host = str(name or "").strip().rstrip(".").lower()
-    if not host:
-        return ()
-    try:
-        with open(path or _hosts_path(), "r", encoding="utf-8", errors="ignore") as handle:
-            lines = handle.readlines()
-    except OSError:
-        return ()
-
-    found: list[str] = []
-    for line in lines:
-        content = line.split("#", 1)[0].split()
-        if len(content) < 2:
-            continue
-        address, names = content[0], content[1:]
-        try:
-            socket.inet_pton(socket.AF_INET6 if ":" in address else socket.AF_INET, address)
-        except OSError:
-            continue
-        if ":" not in address and address.count(".") != 3:
-            continue
-        if host in (item.rstrip(".").lower() for item in names) and address not in found:
-            found.append(address)
-    return tuple(found)
-
-
-def hosts_file_ipv4(name: str, *, path: str | None = None) -> tuple[str, ...]:
-    """IPv4-адреса, которые файл hosts задаёт для имени (без учёта регистра)."""
-    return tuple(address for address in hosts_file_addresses(name, path=path) if ":" not in address)

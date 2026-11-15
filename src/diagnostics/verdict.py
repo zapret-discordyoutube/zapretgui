@@ -48,7 +48,7 @@ from diagnostics.tls_probe import (
 )
 from diagnostics import cut_window
 from utils.address_kinds import AddressKind, address_kind, is_stub_address
-from utils.windows_dns_query import DNS_STATUS_NAME_ERROR, DNS_STATUS_NO_RECORDS
+from platforms.netprobe_types import DNS_STATUS_NAME_ERROR, DNS_STATUS_NO_RECORDS
 
 __all__ = [
     "ADVICE_HOSTS_STALE",

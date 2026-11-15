@@ -9,7 +9,7 @@ from blockcheck.ui.result_cards_model import FILTER_MARK, build_cards
 from diagnostics import block_view
 from diagnostics import filter_place as fp
 from diagnostics import path_trace as pt
-from utils.windows_icmp import HOP_ROUTER, HOP_SILENT, HOP_TARGET
+from platforms.netprobe_types import HOP_ROUTER, HOP_SILENT, HOP_TARGET
 
 OWN_ASN = "8359"
 OWNERS = {"212.188.1.1": (OWN_ASN, "MTS"), "195.34.50.1": (OWN_ASN, "MTS"), "62.115.1.1": ("1299", "Arelion")}

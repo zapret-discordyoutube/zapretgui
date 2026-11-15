@@ -15,6 +15,8 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "diagnostics"
 
 # Функции, которые открывают соединение или спрашивают DNS.
 NETWORK_CALLS = {"chrome_get", "query_doh", "query_ipv4", "hosts_file_ipv4", "system_dns_servers"}
+# Измерения платформы (DNS системы, ping, трассировка) тоже идут только через шлюз net_access.
+PLATFORM_NETPROBE = "netprobe"
 UPPER_LAYERS = ("engine.py", "sections.py", "problems.py", "report_text.py", "registry.py", "filter_place.py", "filter_habits.py")
 
 
@@ -49,7 +51,7 @@ NETWORK_MODULES = {
     "urllib.request",
     "http.client",
     "requests",
-    "utils.windows_icmp",
+    "platforms.windows.icmp",
     "utils.http2_post",
     "utils.chrome_https",
     "curl_cffi",
@@ -66,7 +68,7 @@ def imported_modules(source: str) -> set[str]:
             modules.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             modules.add(node.module)
-            # «from utils import windows_icmp» — тоже сетевой модуль.
+            # «from platforms.windows import icmp» — тоже сетевой модуль.
             modules.update(f"{node.module}.{alias.name}" for alias in node.names)
     return modules
 
@@ -94,12 +96,24 @@ class NetworkGatewayTests(unittest.TestCase):
                 self.assertEqual(imported_names(source) & (NETWORK_CALLS | DNS_WIRE_CALLS), set())
 
     def test_the_module_check_sees_nested_and_package_imports(self) -> None:
-        source = "def f():\n    from utils import windows_icmp\n    import socket\n"
-        self.assertEqual(imported_modules(source) & NETWORK_MODULES, {"utils.windows_icmp", "socket"})
+        source = "def f():\n    from platforms.windows import icmp\n    import socket\n"
+        self.assertEqual(imported_modules(source) & NETWORK_MODULES, {"platforms.windows.icmp", "socket"})
 
     def test_gateway_is_the_module_that_owns_the_network_calls(self) -> None:
         source = (SRC / "net_access.py").read_text(encoding="utf-8")
-        self.assertEqual(imported_names(source) & NETWORK_CALLS, NETWORK_CALLS)
+        defined = {node.name for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)}
+        self.assertEqual((imported_names(source) | defined) & NETWORK_CALLS, NETWORK_CALLS)
+
+    def test_upper_layers_do_not_ask_the_platform_for_measurements_themselves(self) -> None:
+        for name in (*UPPER_LAYERS, *ORCHESTRATION):
+            with self.subTest(module=name):
+                source = (SRC / name).read_text(encoding="utf-8")
+                self.assertNotIn(PLATFORM_NETPROBE, source.replace("netprobe_types", ""))
+
+    def test_gateway_asks_the_platform_for_measurements(self) -> None:
+        source = (SRC / "net_access.py").read_text(encoding="utf-8")
+        for call in ("query_ipv4", "system_dns_servers", "trace_hop_ipv4", "ping_ipv4_host", "ping_ipv6"):
+            self.assertIn(f"netprobe.{call}(", source)
 
     def test_the_check_notices_a_direct_import(self) -> None:
         self.assertEqual(imported_names("from utils.chrome_https import chrome_get\n") & NETWORK_CALLS, {"chrome_get"})

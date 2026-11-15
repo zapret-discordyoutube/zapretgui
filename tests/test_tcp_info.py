@@ -1,4 +1,4 @@
-"""Окно приёма сервера (``utils.tcp_info``): на Windows — из SIO_TCP_INFO, иначе честное «не известно»."""
+"""Окно приёма сервера (``platforms.current().netprobe.tcp_server_window``): Windows — SIO_TCP_INFO, Linux — TCP_INFO (ядро 6.2+), иначе честное «не известно»."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import socket
 import sys
 import unittest
 
-from utils import tcp_info
+from platforms import current as current_platform
 
 
 class ServerWindowTests(unittest.TestCase):
@@ -17,17 +17,18 @@ class ServerWindowTests(unittest.TestCase):
         self.addCleanup(listener.close)
         port = listener.getsockname()[1]
 
-        window = tcp_info.server_window("127.0.0.1", port=port, timeout=1.0)
+        window = current_platform().netprobe.tcp_server_window("127.0.0.1", port=port, timeout=1.0)
 
-        if sys.platform != "win32":
-            self.assertIsNone(window)
-        else:
+        if sys.platform == "win32":
             self.assertGreater(window or 0, 0)
+        else:
+            # Linux: the peer window appears in TCP_INFO from kernel 6.2; older kernels answer "unknown".
+            self.assertTrue(window is None or window > 0)
         closed = socket.socket()
         closed.bind(("127.0.0.1", 0))
         free_port = closed.getsockname()[1]
         closed.close()
-        self.assertIsNone(tcp_info.server_window("127.0.0.1", port=free_port, timeout=1.0))
+        self.assertIsNone(current_platform().netprobe.tcp_server_window("127.0.0.1", port=free_port, timeout=1.0))
 
 
 if __name__ == "__main__":

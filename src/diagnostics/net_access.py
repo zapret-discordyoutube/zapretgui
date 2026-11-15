@@ -24,13 +24,19 @@ from diagnostics.tls_probe import ProbeResult
 from utils.chrome_https import chrome_get
 from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
 from utils.dns_wire import TYPE_A, DnsQueryResult, query_doh
-from utils.windows_dns_query import (
-    DnsAnswer,
-    hosts_file_ipv4,
-    query_ipv4,
-    system_dns_servers,
-)
-from utils.windows_icmp import HOP_SILENT, HOP_UNSUPPORTED, trace_hop_ipv4
+from platforms import current as current_platform
+from platforms.netprobe_types import HOP_SILENT, HOP_UNSUPPORTED, DnsAnswer
+from utils.hosts_lookup import hosts_file_ipv4
+
+def query_ipv4(name: str, *, timeout: float, cancelled=None) -> DnsAnswer:
+    """A-записи у DNS-серверов системы, минуя кэш и hosts: измерение делает платформа."""
+    return current_platform().netprobe.query_ipv4(name, timeout=timeout, cancelled=cancelled)
+
+
+def system_dns_servers() -> tuple[str, ...]:
+    """IPv4-адреса DNS-серверов, которыми пользуется система."""
+    return current_platform().netprobe.system_dns_servers()
+
 
 # Скачивание служебных списков (реестр): общий срок и предел размера.
 FILE_TIMEOUT_S = 40.0
@@ -170,7 +176,7 @@ def ping_hop(ip: str, ttl: int, *, timeout_ms: int = 1000) -> tuple[str, float |
 
     ``NotImplementedError`` — пинг в этой системе недоступен (не Windows).
     """
-    result = trace_hop_ipv4(ip, ttl, timeout_ms=timeout_ms)
+    result = current_platform().netprobe.trace_hop_ipv4(ip, ttl, timeout_ms=timeout_ms)
     if result.kind == HOP_UNSUPPORTED:
         raise NotImplementedError
     if result.kind == HOP_SILENT:
@@ -180,12 +186,12 @@ def ping_hop(ip: str, ttl: int, *, timeout_ms: int = 1000) -> tuple[str, float |
 
 def ping_ok(ip: str) -> bool | None:
     """Отвечает ли адрес на пинг. None — пинг в этой системе недоступен."""
-    from utils.windows_icmp import ping_ipv4_host_winapi, ping_ipv6_winapi
+    netprobe = current_platform().netprobe
 
     if ":" in ip:
-        result = ping_ipv6_winapi(ip, count=2, timeout_ms=1500)
+        result = netprobe.ping_ipv6(ip, count=2, timeout_ms=1500)
     else:
-        result = ping_ipv4_host_winapi(ip, count=2, timeout_ms=1500, resolved_ip=ip)
+        result = netprobe.ping_ipv4_host(ip, count=2, timeout_ms=1500, resolved_ip=ip)
     if result.error_code == "UNSUPPORTED":
         return None
     return bool(result.ok)

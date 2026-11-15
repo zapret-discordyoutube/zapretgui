@@ -28,7 +28,7 @@ from diagnostics.verdict import DnsJudgement, ReachState
 from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
 from utils.dns_wire import FAILURE_CANCELLED, DnsQueryResult, failure_text
 from utils.socket_cancel import SocketCancel
-from utils.windows_dns_query import DnsAnswer
+from platforms.netprobe_types import DnsAnswer
 
 ShouldStop = Callable[[], bool]
 

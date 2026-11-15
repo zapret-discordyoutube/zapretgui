@@ -277,11 +277,11 @@ def build_domain_lookup_servers():
 
     servers: list = []
     try:
-        from utils.windows_dns_query import system_dns_servers
+        from platforms import current as current_platform
 
         from dns.dns_providers import find_provider_by_address
 
-        for address in system_dns_servers():
+        for address in current_platform().netprobe.system_dns_servers():
             # Подпись — чей это сервер («Google»), если он есть в списке программы: адрес и так показан рядом.
             found = find_provider_by_address(address)
             servers.append(DnsServer(label=str(found[1]) if found else "", address=address, kind=SERVER_SYSTEM))

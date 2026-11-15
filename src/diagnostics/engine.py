@@ -129,7 +129,7 @@ from diagnostics.verdict import (
 from utils.bypass_tools import running_bypass_tools, tools_in_path
 from utils.dns_reference import REFERENCE_RESOLVERS
 from utils.dns_wire import TYPE_A
-from utils.windows_dns_query import (
+from platforms.netprobe_types import (
     DNS_STATUS_NAME_ERROR,
     DnsAnswer,
 )

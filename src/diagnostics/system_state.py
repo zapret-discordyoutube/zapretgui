@@ -269,7 +269,7 @@ def _read_hosts_readable() -> bool:
 
 
 def _read_hosts_overrides(hosts: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
-    from utils.windows_dns_query import hosts_file_ipv4
+    from utils.hosts_lookup import hosts_file_ipv4
 
     found: list[tuple[str, str]] = []
     for host in hosts:

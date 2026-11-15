@@ -25,7 +25,7 @@ from diagnostics.limits import (
 from diagnostics.run_context import Probe, Run
 from diagnostics.tls_probe import CONNECT_TIMEOUT, KIND_CANCELLED, KIND_CERT, KIND_CONNECT, ProbeResult
 from utils.dns_wire import TYPE_AAAA
-from utils.windows_dns_query import ERROR_CANCELLED
+from platforms.netprobe_types import ERROR_CANCELLED
 
 __all__ = ["check_reach", "same_network"]
 

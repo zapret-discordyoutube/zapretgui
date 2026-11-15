@@ -48,7 +48,7 @@ def _sc(*args: str, timeout: int = 20) -> tuple[int, str]:
 
 def service_state(name: str) -> str:
     """"" — службы нет, "running", "stopped" или "other" (запускается, останавливается)."""
-    from autostart import service_api
+    from platforms.windows import service_api
 
     if not service_api.service_exists(name):
         return ""
@@ -114,13 +114,13 @@ def grant_service_access(folder: Path) -> None:
 
 
 def stop_service(name: str) -> bool:
-    from autostart import service_api
+    from platforms.windows import service_api
 
     return bool(service_api.stop_service(name, wait_timeout_ms=10000))
 
 
 def delete_service(name: str) -> bool:
-    from autostart import service_api
+    from platforms.windows import service_api
 
     return bool(service_api.delete_service(name))
 
