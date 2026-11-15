@@ -67,6 +67,7 @@ class WindowNotificationCenter(QObject):
             open_url=self._request_external_open_url,
             request_disable_proxy=self._request_disable_proxy,
             request_browser_fix=self._request_browser_fix,
+            request_install_package_update=self._request_install_package_update,
             request_disable_kaspersky_warning=self._request_disable_kaspersky_warning,
             request_disable_telega_warning=self._request_disable_telega_warning,
             request_windivert_autofix=self._request_windivert_autofix,
@@ -280,6 +281,45 @@ class WindowNotificationCenter(QObject):
             return
         self._request_notification_action("browser_fix", lambda: run_fix(text), bar=bar, context={"value": text})
 
+    def _request_install_package_update(self, value: str, bar=None) -> None:
+        from updater import package_update
+
+        version = str(value or "").strip()
+        if not version:
+            return
+        self.notify(
+            advisory_notification(
+                level="info",
+                title="Обновление",
+                content="Скачиваем пакет. Это может занять несколько минут.",
+                source="update.package.progress",
+                presentation="infobar",
+                queue="immediate",
+                duration=6000,
+                dedupe_key=f"update.package.progress:{version}",
+            )
+        )
+        self._request_notification_action(
+            "install_package_update",
+            lambda: package_update.install_found_release(version),
+            bar=bar,
+            context={"value": version},
+        )
+
+    def _notify_install_package_update_result(self, result, *, bar=None) -> None:
+        done, text = (bool(result[0]), str(result[1])) if isinstance(result, tuple) and len(result) == 2 else (False, "Не удалось установить обновление.")
+        self.notify(
+            advisory_notification(
+                level="success" if done else "warning",
+                title="Обновление установлено" if done else "Обновление не установлено",
+                content=text,
+                source="update.package.result",
+                presentation="infobar",
+                queue="immediate",
+                duration=20000 if done else 30000,
+            )
+        )
+
     def _request_disable_kaspersky_warning(self, bar=None) -> None:
         self._request_notification_action(
             "disable_kaspersky_warning",
@@ -386,6 +426,8 @@ class WindowNotificationCenter(QObject):
             self._notify_disable_proxy_result(result, bar=bar)
         elif action == "browser_fix":
             self._notify_browser_fix_result(result, bar=bar)
+        elif action == "install_package_update":
+            self._notify_install_package_update_result(result, bar=bar)
         elif action == "disable_kaspersky_warning":
             self._notify_disable_warning_result(
                 bool(result),

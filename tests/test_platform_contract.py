@@ -123,7 +123,7 @@ def test_a_new_interface_must_come_with_all_three_backends() -> None:
     assert sorted(INTERFACE_FIELDS) == sorted(
         [
             "messages", "privileges", "single_instance", "services", "launch", "processes", "netprobe", "autostart",
-            "desktop", "tray", "system_settings", "dns", "hosts", "engine", "working_set",
+            "desktop", "tray", "system_settings", "dns", "hosts", "updates", "engine", "working_set",
         ]
     )
 

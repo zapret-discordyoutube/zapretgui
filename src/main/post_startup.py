@@ -167,9 +167,15 @@ def _launch_transition_probe(ui_state_store):
 def install_update_check(*args, **kwargs):
     from platforms import Cap, current as current_platform
 
+    if not current_platform().has(Cap.SELF_UPDATE) and current_platform().has(Cap.PACKAGE_UPDATE):
+        # No self-replacement here: a newer version is announced and installed through the package manager.
+        from main.post_startup_package_update import install_package_update_check
+
+        return install_package_update_check(*args, **kwargs)
+
     if not current_platform().has(Cap.SELF_UPDATE):
         # The update flow downloads and starts a Windows installer. On a system
-        # without self-update the program must not even look for one.
+        # without any update path the program must not even look for one.
         from log.log import log
 
         log("Самообновление недоступно на этой системе: автопроверка обновлений не запускается", "INFO")

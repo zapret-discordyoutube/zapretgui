@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from platforms.base import NoWorkingSet, Platform
+from platforms.base import Cap, NoWorkingSet, Platform
 from platforms.linux.autostart import LinuxGuiAutostart
 from platforms.linux.desktop import LinuxDesktop
 from platforms.linux.dns import LinuxDns
@@ -13,6 +13,7 @@ from platforms.linux.messages import LinuxMessageBox
 from platforms.linux.netprobe import LinuxNetProbe
 from platforms.linux.system_settings import LinuxSystemSettings
 from platforms.linux.tray_factory import LinuxTray
+from platforms.linux.updates import LinuxUpdates
 from platforms.linux.privileges import LinuxPrivileges
 from platforms.linux.processes import LinuxProcesses
 from platforms.linux.services import LinuxServices
@@ -33,6 +34,8 @@ PLATFORM = Platform(
     system_settings=LinuxSystemSettings(),
     dns=LinuxDns(),
     hosts=LinuxHostsFile(),
+    updates=LinuxUpdates(),
     engine=LinuxEngine(),
     working_set=NoWorkingSet(),
+    capabilities=frozenset({Cap.PACKAGE_UPDATE}),
 )

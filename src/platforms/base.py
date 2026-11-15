@@ -386,6 +386,22 @@ class HostsFile(Protocol):
         """Give the file its standard access rights back (a button on the hosts page): ``(success, text)``."""
 
 
+class Updates(Protocol):
+    """What a release of this program looks like on this system and how a downloaded one gets installed.
+
+    ``platform_key`` names the system in ``all_versions.json`` (the Windows entry is the channel entry itself, every
+    other system has its own sub-entry under that name). ``package_suffix`` picks the release file of this system out of
+    a release's files (``.exe`` installer, ``.deb`` package).
+    """
+
+    platform_key: str
+    package_suffix: str
+
+    def install_package(self, path: Path) -> tuple[bool, str]:
+        """Install a downloaded and verified package with the system's own tools; ``(success, text for the person)``.
+        Only where ``Cap.PACKAGE_UPDATE`` says so: Windows replaces the program itself (``Cap.SELF_UPDATE``)."""
+
+
 class Engine(Protocol):
     """The DPI engine: the object that starts, switches and stops the bypass process for a preset.
 
@@ -421,6 +437,7 @@ class Cap:
     MAX_BLOCKER = "max_blocker"  # blocking the MAX messenger through Explorer policies
     ANTIVIRUS_PROBE = "antivirus_probe"  # looking for antivirus programs that disturb the driver (Kaspersky ...)
     NETWORK_RESET = "windows_network_reset"  # "reset the Windows network stack" quick action
+    PACKAGE_UPDATE = "package_update"  # a newer version is announced and installed through the system's package manager
     LOCAL_DNS_PROXY = "local_dns_proxy"  # the built-in encrypted DNS (dnscrypt-proxy as a service) can be installed
     WORKING_SET = "working_set"  # the system pages out a hidden window's memory and the program can hold it
 
@@ -497,6 +514,7 @@ class Platform:
     system_settings: SystemSettings
     dns: DnsAdapters
     hosts: HostsFile
+    updates: Updates
     engine: Engine
     working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()

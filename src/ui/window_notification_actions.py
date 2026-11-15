@@ -36,6 +36,7 @@ class WindowNotificationActionHandler:
         request_windows_server_wlanapi_install: Callable[[object | None], None],
         request_launch_conflict_action: Callable[[int, bool, object | None], None],
         request_browser_fix: Callable[[str, object | None], None] | None = None,
+        request_install_package_update: Callable[[str, object | None], None] | None = None,
     ) -> None:
         self._notify = notify
         self._runtime_actions = runtime_actions
@@ -48,6 +49,7 @@ class WindowNotificationActionHandler:
         self._request_windows_server_wlanapi_install = request_windows_server_wlanapi_install
         self._request_launch_conflict_action = request_launch_conflict_action
         self._request_browser_fix = request_browser_fix
+        self._request_install_package_update = request_install_package_update
 
     def build_action_callback(self, action: dict, bar):
         kind = str(action.get("kind") or "").strip().lower()
@@ -104,6 +106,10 @@ class WindowNotificationActionHandler:
         if kind == "browser_fix" and self._request_browser_fix is not None:
             # Исправление, которое доказала проверка после «Применить» (``blockcheck.browser_fixes``).
             return lambda: self._request_browser_fix(str(action.get("value") or ""), bar)
+
+        if kind == "install_package_update" and self._request_install_package_update is not None:
+            # Системы без самообновления (Linux): скачать пакет выпуска, проверить и отдать менеджеру пакетов.
+            return lambda: self._request_install_package_update(str(action.get("value") or ""), bar)
 
         if kind == "dismiss":
             return lambda: self._close_bar(bar)

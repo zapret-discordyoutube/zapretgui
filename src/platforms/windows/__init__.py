@@ -13,6 +13,7 @@ from platforms.windows.messages import WindowsMessageBox
 from platforms.windows.netprobe import WindowsNetProbe
 from platforms.windows.system_settings import WindowsSystemSettings
 from platforms.windows.tray_factory import WindowsTray
+from platforms.windows.updates import WindowsUpdates
 from platforms.windows.privileges import WindowsPrivileges
 from platforms.windows.processes import WindowsProcesses, WindowsWorkingSet
 from platforms.windows.services import WindowsServices
@@ -33,6 +34,7 @@ PLATFORM = Platform(
     system_settings=WindowsSystemSettings(),
     dns=WindowsDns(),
     hosts=WindowsHostsFile(),
+    updates=WindowsUpdates(),
     engine=WindowsEngine(),
     working_set=WindowsWorkingSet(),
     capabilities=frozenset(

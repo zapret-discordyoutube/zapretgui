@@ -213,6 +213,14 @@ class _NoHostsFile:
         return False, "Nothing to restore on this system."
 
 
+class _NoUpdates:
+    platform_key = "windows"
+    package_suffix = ".exe"
+
+    def install_package(self, path) -> tuple[bool, str]:
+        return False, "Updates are not available on this system."
+
+
 class _NoLaunch:
     def process_creation_unix_seconds(self) -> float | None:
         return None
@@ -242,6 +250,7 @@ PLATFORM = Platform(
     system_settings=_NoSystemSettings(),
     dns=_NoDns(),
     hosts=_NoHostsFile(),
+    updates=_NoUpdates(),
     engine=FactoryEngine(),
     working_set=NoWorkingSet(),
 )

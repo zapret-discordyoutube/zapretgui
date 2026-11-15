@@ -104,14 +104,23 @@ def release_from_versions(
     if not isinstance(entry, dict) or not entry.get("version"):
         raise MirrorReleaseError(f"в ответе нет канала {selected}")
     version = normalize_version(str(entry.get("version") or ""))
-    file_name = str(entry.get("file_name") or "").strip()
+    from platforms import current as current_platform
+
+    platform_key = current_platform().updates.platform_key
+    package = entry
+    if platform_key != "windows":
+        # Выпуск тот же, номер тот же; файл этой системы лежит во вложенной записи с её именем.
+        package = entry.get(platform_key)
+        if not isinstance(package, dict) or not package.get("file_name"):
+            raise MirrorReleaseError(f"в ответе нет пакета для {platform_key}")
+    file_name = str(package.get("file_name") or "").strip()
     release = {
         "version": version,
         "tag_name": version,
         "update_url": f"{base_url}/download/{file_name}",
         "file_name": file_name,
-        "file_size": entry.get("file_size"),
-        "sha256": entry.get("sha256"),
+        "file_size": package.get("file_size"),
+        "sha256": package.get("sha256"),
         "release_notes": str(entry.get("release_notes") or ""),
         "prerelease": is_dev_update_channel(selected),
         "name": f"Zapret {version} ({selected})",
@@ -119,7 +128,7 @@ def release_from_versions(
         "source": source,
         "verify_ssl": bool(verify_ssl),
     }
-    if entry.get("manifest") is True:
+    if platform_key == "windows" and entry.get("manifest") is True:
         # Подписанный список выпуска лежит рядом с установщиком.
         release["manifest_url"] = f"{base_url}/download/{file_name}.{MANIFEST_NAME}"
         release["signature_url"] = f"{base_url}/download/{file_name}.{SIGNATURE_NAME}"

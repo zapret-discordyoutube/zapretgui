@@ -71,6 +71,22 @@ def _tests_do_not_measure_the_real_network(monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
+def _tests_see_the_windows_release_files(monkeypatch, request):
+    """The update tests describe the Windows installer (``.exe``, the signed list). Outside Windows the platform would pick
+    its own package file, so the release file kind of the platform object is pinned to Windows here. Tests of the package
+    update build their own platform (see tests/test_updater_package_update.py)."""
+    if sys.platform == "win32":
+        yield
+        return
+    from platforms import current
+
+    updates = current().updates
+    monkeypatch.setattr(updates, "platform_key", "windows", raising=False)
+    monkeypatch.setattr(updates, "package_suffix", ".exe", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _tests_assume_the_encrypted_dns_service_exists(monkeypatch, request):
     """The DNS tests describe the Windows behaviour of the built-in encrypted DNS; outside Windows the platform does not
     have it (``Cap.LOCAL_DNS_PROXY``), so the check says yes here. tests/test_dns_local_proxy_capability.py marks

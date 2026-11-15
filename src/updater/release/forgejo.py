@@ -183,8 +183,11 @@ def _candidate(release: object, channel: str) -> dict[str, Any] | None:
         return None
 
     assets = [asset for asset in release.get("assets") or () if isinstance(asset, dict)]
+    from platforms import current as current_platform
+
+    updates = current_platform().updates
     exe_asset = next(
-        (asset for asset in assets if str(asset.get("name") or "").lower().endswith(".exe")),
+        (asset for asset in assets if str(asset.get("name") or "").lower().endswith(updates.package_suffix)),
         None,
     )
     if exe_asset is None:
@@ -206,7 +209,8 @@ def _candidate(release: object, channel: str) -> dict[str, Any] | None:
         return None
     # Подписанный список выпуска: по нему программа проверяет установщик.
     signed_urls = {}
-    for key, name in (("manifest_url", MANIFEST_NAME), ("signature_url", SIGNATURE_NAME)):
+    # Подписанный список описывает установку Windows; пакет другой системы проверяется по SHA-256 из файла рядом.
+    for key, name in () if updates.platform_key != "windows" else (("manifest_url", MANIFEST_NAME), ("signature_url", SIGNATURE_NAME)):
         asset = next((item for item in assets if item.get("name") == name), None)
         url = str((asset or {}).get("browser_download_url") or "")
         if url and _trusted_release_asset_url(url, tag_name=tag_name, file_name=name):
