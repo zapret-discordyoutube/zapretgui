@@ -511,6 +511,10 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._apply_settings_that_came_before_the_block()
 
     def _build_windows_settings_block(self) -> None:
+        from platforms import Cap, current as current_platform
+
+        if not current_platform().has(Cap.DEFENDER):
+            return  # Defender, MAX и блокировки через hosts есть только в Windows: группы нет, виджеты остаются None
         from presets.ui.control.windows_features.build import build_windows_settings_group
         from ui.widgets.win11_controls import Win11ToggleRow
 

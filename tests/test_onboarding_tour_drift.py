@@ -100,7 +100,8 @@ class TourCoversEveryPageTests(unittest.TestCase):
             self.assertTrue(reason.strip(), page.name)
 
     def test_every_page_listed_for_the_tour_has_at_least_one_step(self) -> None:
-        from ui.onboarding.steps import COMMON_TOUR_PAGES, MODE_TOUR_PAGES, TOUR_STEPS
+        from ui.onboarding.steps import ALL_TOUR_STEPS as TOUR_STEPS
+        from ui.onboarding.steps import COMMON_TOUR_PAGES, MODE_TOUR_PAGES
 
         listed = set(COMMON_TOUR_PAGES)
         for mode_pages in MODE_TOUR_PAGES.values():

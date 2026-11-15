@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from platforms import Cap, current as current_platform
+
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
@@ -134,6 +136,10 @@ class TourStep:
     text_key: str = ""
     # Глава тура: её название стоит в счётчике шагов (ключ onboarding.chapter.<глава>).
     chapter: str = ""
+    # Возможность системы (platforms.Cap), без которой шага нет: на ней нет и того, о чём он рассказывает.
+    requires: str = ""
+    # Шаг только для систем БЕЗ этой возможности: вариант текста для них (см. quick_actions_basic).
+    excludes: str = ""
 
 
 def is_alive_widget(widget) -> bool:
@@ -287,9 +293,11 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
         TourStep("start", _page_target("start"), page="control"),
         TourStep("status", _page_target("status"), page="control"),
         TourStep("preset", _page_target("preset"), page="control"),
-        TourStep("quick_actions", _page_target("quick_actions"), page="control"),
+        # Две версии одного шага: плитка «Сбросить сеть Windows» есть не везде, и текст не должен о ней рассказывать.
+        TourStep("quick_actions", _page_target("quick_actions"), page="control", requires=Cap.NETWORK_RESET),
+        TourStep("quick_actions_basic", _page_target("quick_actions"), page="control", excludes=Cap.NETWORK_RESET),
         TourStep("program_settings", _page_target("program_settings"), page="control"),
-        TourStep("windows_settings", _page_target("windows_settings"), page="control"),
+        TourStep("windows_settings", _page_target("windows_settings"), page="control", requires=Cap.DEFENDER),
         TourStep("fine_tuning", _page_target("fine_tuning"), page="control"),
     ),
     *_chapter(
@@ -421,9 +429,29 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
 )
 
 # Ссылки на вики живут в config.urls вместе с остальными адресами.
-TOUR_STEPS: tuple[TourStep, ...] = tuple(
+# Все шаги, какие есть в программе на любой системе. Проверки текстов и ссылок идут по этому списку.
+ALL_TOUR_STEPS: tuple[TourStep, ...] = tuple(
     replace(step, wiki_url=ONBOARDING_WIKI_URLS.get(step.key, "")) for step in _TOUR_STEPS
 )
+
+
+def step_is_available(step: TourStep, platform=None) -> bool:
+    """Есть ли у этой системы то, о чём шаг рассказывает (``requires``) и нет ли того, от чего он избавляет (``excludes``)."""
+    system = platform if platform is not None else current_platform()
+    if step.requires and not system.has(step.requires):
+        return False
+    if step.excludes and system.has(step.excludes):
+        return False
+    return True
+
+
+def tour_steps_for(platform=None) -> tuple[TourStep, ...]:
+    """Тур для данной системы: без шагов о том, чего на ней нет."""
+    return tuple(step for step in ALL_TOUR_STEPS if step_is_available(step, platform))
+
+
+# Тур этой системы: страницы строят то же, поэтому тесты и сам тур берут этот список.
+TOUR_STEPS: tuple[TourStep, ...] = tour_steps_for()
 
 
 __all__ = [
@@ -431,7 +459,10 @@ __all__ = [
     "CONTROL_PAGE_NAMES",
     "MODE_TOUR_PAGES",
     "TOUR_PAGES_WITHOUT_STEPS",
+    "ALL_TOUR_STEPS",
     "TOUR_STEPS",
+    "step_is_available",
+    "tour_steps_for",
     "TOUR_SUBPAGE_PARENTS",
     "TourContext",
     "TourStep",

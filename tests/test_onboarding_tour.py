@@ -558,14 +558,65 @@ class MenuPreviewTests(unittest.TestCase):
             host.deleteLater()
 
 
+class TourStepCapabilityTests(unittest.TestCase):
+    """Steps about things a system does not have are left out of its tour; the other variant is used instead."""
+
+    @staticmethod
+    def _system(*capabilities):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(has=lambda name: name in capabilities)
+
+    def test_windows_tour_keeps_the_windows_steps_and_the_full_quick_actions_text(self) -> None:
+        from platforms import Cap
+        from ui.onboarding.steps import tour_steps_for
+
+        keys = [step.key for step in tour_steps_for(self._system(Cap.NETWORK_RESET, Cap.DEFENDER))]
+        self.assertIn("quick_actions", keys)
+        self.assertIn("windows_settings", keys)
+        self.assertNotIn("quick_actions_basic", keys)
+
+    def test_a_system_without_them_gets_the_short_quick_actions_step_and_no_windows_group(self) -> None:
+        from ui.onboarding.steps import tour_steps_for
+
+        keys = [step.key for step in tour_steps_for(self._system())]
+        self.assertIn("quick_actions_basic", keys)
+        self.assertNotIn("quick_actions", keys)
+        self.assertNotIn("windows_settings", keys)
+
+    def test_the_variants_stand_in_the_same_place_so_the_chapter_order_is_the_same(self) -> None:
+        from ui.onboarding.steps import ALL_TOUR_STEPS
+
+        keys = [step.key for step in ALL_TOUR_STEPS]
+        self.assertEqual(keys.index("quick_actions_basic"), keys.index("quick_actions") + 1)
+        self.assertEqual(
+            {step.chapter for step in ALL_TOUR_STEPS if step.key in {"quick_actions", "quick_actions_basic"}}, {"control"}
+        )
+
+    def test_the_short_text_does_not_mention_the_windows_network_reset(self) -> None:
+        from app.ui_texts import TEXTS
+
+        for language in ("ru", "en"):
+            text = TEXTS["onboarding.step.quick_actions_basic.body"][language]
+            self.assertNotIn("Windows", text)
+            self.assertNotIn("Winsock", text)
+        self.assertIn("Winsock", TEXTS["onboarding.step.quick_actions.body"]["ru"])
+
+    def test_the_running_tour_is_the_one_of_this_system(self) -> None:
+        from platforms import current
+        from ui.onboarding.steps import TOUR_STEPS, tour_steps_for
+
+        self.assertEqual([step.key for step in TOUR_STEPS], [step.key for step in tour_steps_for(current())])
+
+
 class TourStepCatalogTests(unittest.TestCase):
     def test_wiki_links_belong_to_real_steps(self) -> None:
         from config.urls import ONBOARDING_WIKI_URLS
-        from ui.onboarding.steps import TOUR_STEPS
+        from ui.onboarding.steps import ALL_TOUR_STEPS
 
-        step_keys = {step.key for step in TOUR_STEPS}
+        step_keys = {step.key for step in ALL_TOUR_STEPS}
         self.assertEqual(set(ONBOARDING_WIKI_URLS) - step_keys, set())
-        for step in TOUR_STEPS:
+        for step in ALL_TOUR_STEPS:
             self.assertEqual(step.wiki_url, ONBOARDING_WIKI_URLS.get(step.key, ""))
             if step.wiki_url:
                 self.assertTrue(step.wiki_url.startswith("https://wiki.zapret.moe/"), step.key)
@@ -648,11 +699,11 @@ class TourStepCatalogTests(unittest.TestCase):
 
     def test_every_step_has_title_and_body_in_both_languages(self) -> None:
         from app.ui_texts import TEXTS
-        from ui.onboarding.steps import TOUR_STEPS
+        from ui.onboarding.steps import ALL_TOUR_STEPS
 
         # Прямо по словарю: tr() подставил бы русский текст вместо пропавшего английского.
         missing = []
-        for step in TOUR_STEPS:
+        for step in ALL_TOUR_STEPS:
             for part in ("title", "body"):
                 key = f"onboarding.step.{step.key}.{part}"
                 for language in ("ru", "en"):

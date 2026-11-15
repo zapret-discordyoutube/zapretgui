@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from platforms import Cap, current as current_platform
+
 from dataclasses import dataclass
 
 from qfluentwidgets import BodyLabel
@@ -34,6 +36,8 @@ class QuickActionSpec:
     title: tuple[str, str]
     content: tuple[str, str]
     accessible_name: tuple[str, str]
+    # Возможность системы (platforms.Cap), без которой плитки нет: она не строится и не переводится.
+    requires: str = ""
 
 
 @dataclass(slots=True)
@@ -68,6 +72,7 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
                 "Сбросить TCP/IP, кэш DNS, прокси и Winsock. Понадобится перезагрузка",
             ),
             accessible_name=("page.control.internet_cleanup.accessible_name", "Сбросить сеть Windows"),
+            requires=Cap.NETWORK_RESET,
         ),
         QuickActionSpec(
             key="folder",
@@ -124,6 +129,8 @@ def build_quick_actions(
     conductor = icon_loop_conductor(parent if parent is not None else grid)
     tiles: dict[str, ActionTile] = {}
     for spec in quick_action_specs(text_prefix):
+        if spec.requires and not current_platform().has(spec.requires):
+            continue
         tile = ActionTile(
             grid,
             icon_name=spec.icon_name,
@@ -141,7 +148,7 @@ def build_quick_actions(
         title_label=title_label,
         grid=grid,
         tour_card=tiles["tour"],
-        internet_cleanup_card=tiles["internet_cleanup"],
+        internet_cleanup_card=tiles.get("internet_cleanup"),
         folder_card=tiles["folder"],
         docs_card=tiles["docs"],
         git_card=tiles["git"],
