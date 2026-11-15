@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import QEvent, QSize, Qt, QTimer
 from PyQt6.QtWidgets import QFrame, QWidget
 from qfluentwidgets import SingleDirectionScrollArea
 
@@ -26,6 +26,8 @@ class ScrollingStrip(SingleDirectionScrollArea):
         self.setWidgetResizable(False)
         self.enableTransparentBackground()
         self.setWidget(content)
+        # Подпись вкладки или шрифт сменились: размер содержимого пересчитывается сам.
+        content.installEventFilter(self)
         self.sync()
 
     def sync(self) -> None:
@@ -35,6 +37,11 @@ class ScrollingStrip(SingleDirectionScrollArea):
             self._content.resize(hint)
             self.setFixedHeight(hint.height())
             self.updateGeometry()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched is self._content and event.type() == QEvent.Type.LayoutRequest:
+            QTimer.singleShot(0, self.sync)
+        return super().eventFilter(watched, event)
 
     def sizeHint(self) -> QSize:  # noqa: N802
         hint = self._content.sizeHint()

@@ -946,6 +946,43 @@ class PageCardsTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
         return page
 
+    def test_tabs_scroll_sideways_instead_of_being_cut_on_a_narrow_page(self) -> None:
+        # Масштаб 150 % на экране 1280 px: страница уже ~530 px, а пять вкладок занимают ~626.
+        page = self._page()
+        page.resize(500, 700)
+        page.show()
+        QApplication.processEvents()
+        QApplication.processEvents()
+
+        strip = page._tabs_strip
+        self.assertGreater(strip.horizontalScrollBar().maximum(), 0)
+        self.assertGreaterEqual(page._tabs_pivot.width(), page._tabs_pivot.sizeHint().width())
+        # Выбранная вкладка в видимой части полосы.
+        page._tabs_pivot.setCurrentItem(page.TAB_DNS_SPOOFING)
+        QApplication.processEvents()
+        item = page._tabs_pivot.widget(page.TAB_DNS_SPOOFING)
+        right = item.mapTo(strip.viewport(), item.rect().topRight()).x()
+        self.assertLessEqual(right, strip.viewport().width() + 1)
+
+    def test_start_buttons_and_scope_list_wrap_when_the_page_is_narrow(self) -> None:
+        from PyQt6.QtCore import QPoint
+
+        page = self._page()
+        page.resize(1500, 700)
+        page.show()
+        QApplication.processEvents()
+        QApplication.processEvents()
+        start, scope = page._start_btn, page._scope_combo
+        self.assertEqual(start.mapTo(page, QPoint(0, 0)).y(), scope.mapTo(page, QPoint(0, 0)).y())
+
+        page.resize(700, 700)
+        QApplication.processEvents()
+        QApplication.processEvents()
+        start_top = start.mapTo(page, QPoint(0, 0)).y()
+        scope_top = scope.mapTo(page, QPoint(0, 0)).y()
+        # Список набора ушёл строкой ниже и не налез на кнопки.
+        self.assertGreaterEqual(scope_top, start_top + start.height())
+
     def test_sites_are_first_and_selected(self) -> None:
         page = self._page()
 

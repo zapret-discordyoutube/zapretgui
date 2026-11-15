@@ -69,6 +69,7 @@ from qfluentwidgets import (
 )
 
 from ui.widgets.flat_section import FlatSection
+from ui.widgets.scrolling_strip import ScrollingStrip
 from ui.widgets.title_help_link import add_title_help_link
 from config.urls import BLOCKCHECK_INFO_URL
 from ui.fluent_widgets import SettingsCard, InfoBarHelper, set_tooltip
@@ -227,6 +228,7 @@ class BlockcheckPage(BasePage):
         self._pending_tab_key: str | None = None
         self._cleanup_in_progress = False
         self._tabs_pivot = None
+        self._tabs_strip = None
         self._domains_caption = None
         # Поле своих доменов открыто по ссылке «+ Свой домен» и спрятано на время проверки.
         self._custom_domains_open = False
@@ -395,7 +397,12 @@ class BlockcheckPage(BasePage):
         self._tabs_pivot.setItemFontSize(13)
         self._update_tabs_accessibility(self.TAB_BLOCKCHECK)
         self._tabs_pivot.currentItemChanged.connect(self._update_tabs_accessibility)
-        self.add_widget(self._tabs_pivot)
+        # Пять вкладок шире страницы при масштабе 150 %: не режем их, а прокручиваем вбок.
+        self._tabs_strip = ScrollingStrip(self._tabs_pivot)
+        self._tabs_pivot.currentItemChanged.connect(
+            lambda key: self._tabs_strip.ensure_visible(self._tabs_pivot.widget(key))
+        )
+        self.add_widget(self._tabs_strip)
         self._log_ui_timing("blockcheck_ui.tabs.build", section_started_at)
 
         # ── Итог и управление — одна панель, как на вкладке «DNS-серверы»: главная фраза,
@@ -807,6 +814,12 @@ class BlockcheckPage(BasePage):
         self._pending_tab_key = None
         self._switch_tab(self.TAB_ORDER.index(normalized))
 
+    def _set_tabs_visible(self, visible: bool) -> None:
+        """Показывает или прячет вкладки вместе с полосой прокрутки, в которой они лежат."""
+        self._tabs_pivot.setVisible(visible)
+        if self._tabs_strip is not None:
+            self._tabs_strip.setVisible(visible)
+
     def _update_tabs_accessibility(self, current: object | None = None) -> None:
         update_blockcheck_tabs_accessibility(
             self._tabs_pivot,
@@ -854,7 +867,7 @@ class BlockcheckPage(BasePage):
         for view in (self._detail_view, self._server_detail_view, self._log_report_view, self._past_check_view, self._past_cards_view):
             if view is not None and not view.isHidden():
                 view.setVisible(False)
-                self._tabs_pivot.setVisible(True)
+                self._set_tabs_visible(True)
         self._set_page_header_visible(True)
 
         if self._tabs_pivot is not None:
@@ -1248,7 +1261,7 @@ class BlockcheckPage(BasePage):
         ):
             if page is not None and page is not view:
                 page.setVisible(False)
-        self._tabs_pivot.setVisible(False)
+        self._set_tabs_visible(False)
         self._set_page_header_visible(False)
         view.setVisible(True)
         self._scroll_to_top()

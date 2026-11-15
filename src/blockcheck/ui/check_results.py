@@ -63,6 +63,7 @@ from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, 
 from ui.widgets.columns_flow import ColumnsFlow
 from ui.widgets.hover_hint import HoverHint
 from ui.widgets.reveal import Reveal
+from ui.widgets.wrap_layout import WrapLayout
 from ui.widgets.stagger_float_in import float_in
 from ui.widgets.tone_group import MUTED_TEXT, ToneDot, ToneGroup, dot_on_first_line, mute
 
@@ -1014,9 +1015,10 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
         self.ticker.setVisible(False)
         titles.addWidget(self.ticker)
         # Кнопки страницы («Проверить», «Остановить») и выбор набора — сразу под главной фразой.
-        self.actions = QHBoxLayout()
+        # Ряд переносится на вторую строку, когда кнопки и выбор набора не помещаются
+        # (масштаб 125–150 %: страница уже ~700 px, а одного списка набора 320 px).
+        self.actions = WrapLayout(horizontal_spacing=10, vertical_spacing=8)
         self.actions.setContentsMargins(0, 6, 0, 0)
-        self.actions.setSpacing(10)
         titles.addLayout(self.actions)
         # Остальное управление страницы (свои домены) — здесь же, под кнопками: всё, чем
         # проверку настраивают и запускают, стоит в шапке, а не под результатами.

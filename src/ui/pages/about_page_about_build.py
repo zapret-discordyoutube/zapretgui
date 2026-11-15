@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from collections.abc import Callable
 
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
 from ui.accessibility import set_state_text
 from ui.pages.about_page_accessibility import apply_about_buttons_accessibility
@@ -22,6 +23,7 @@ from qfluentwidgets import (
 )
 from ui.theme import get_cached_qta_pixmap, get_themed_qta_icon
 from ui.widgets.motion_icon import MotionIcon
+from ui.widgets.responsive_row import ResponsiveRow
 from ui.widgets.shimmer_label import ShimmerLabel
 from ui.widgets.spinning_logo import SpinningLogo
 
@@ -98,7 +100,11 @@ def build_about_page_about_content(
     layout.addWidget(about_section_version_label)
 
     version_card = SettingsCard()
-    version_layout = QHBoxLayout()
+    # Слева логотип и название, справа две кнопки. На узкой странице (масштаб 150 %)
+    # кнопки встают строкой ниже, а не вылезают за карточку.
+    version_title = QWidget()
+    version_layout = QHBoxLayout(version_title)
+    version_layout.setContentsMargins(0, 0, 0, 0)
     version_layout.setSpacing(16)
 
     version_layout.addWidget(_build_about_logo(tokens))
@@ -139,10 +145,20 @@ def build_about_page_about_content(
     )
     whats_new_btn.clicked.connect(on_open_whats_new)
     apply_about_buttons_accessibility(tr_fn=tr_fn, update_btn=update_btn, whats_new_btn=whats_new_btn)
-    version_layout.addWidget(whats_new_btn)
-    version_layout.addWidget(update_btn)
-
-    version_card.add_layout(version_layout)
+    version_buttons = QWidget()
+    version_buttons_layout = QHBoxLayout(version_buttons)
+    version_buttons_layout.setContentsMargins(0, 0, 0, 0)
+    version_buttons_layout.setSpacing(16)
+    version_buttons_layout.addWidget(whats_new_btn)
+    version_buttons_layout.addWidget(update_btn)
+    version_row = ResponsiveRow(
+        version_title,
+        version_buttons,
+        spacing=16,
+        fill_lead=True,
+        narrow_trail_alignment=Qt.AlignmentFlag.AlignLeft,
+    )
+    version_card.add_widget(version_row)
     layout.addWidget(version_card)
     layout.addSpacing(16)
 
@@ -221,6 +237,9 @@ def build_about_page_about_content(
         description=help_description,
     )
     help_card.clicked.connect(on_open_help_tab)
+    # Описание переносится на вторую строку: иначе карточка требует ~660 px ширины и на
+    # узкой странице (масштаб 150 %) тянет за собой всю страницу «О программе».
+    help_card.contentLabel.setWordWrap(True)
     layout.addWidget(help_card)
 
     return AboutPageAboutWidgets(
