@@ -10,6 +10,9 @@ TWO_K_WINDOW_WIDTH = 1920
 TWO_K_WINDOW_HEIGHT = 1080
 MIN_WIDTH = 900
 MIN_HEIGHT = 580
+# Ниже этого окно не сжимаем, даже если экран ещё меньше: страницы перестанут читаться.
+FLOOR_WIDTH = 640
+FLOOR_HEIGHT = 440
 
 PROCESS_SYSTEM_DPI_AWARE = 1
 LOGPIXELSX = 88
@@ -115,6 +118,20 @@ def get_scaled_window_size():
     width = max(width, MIN_WIDTH)
     height = max(height, MIN_HEIGHT)
     return width, height
+
+
+def fit_size_to_screen(width: int, height: int, available_width: int, available_height: int) -> tuple[int, int]:
+    """Не даёт размеру окна быть больше рабочей области экрана.
+
+    Размеры здесь логические (после масштаба экрана): на ноутбуке 1280x800 при
+    масштабе 150 % рабочая область всего ~853x500, а минимум окна 900x580, и
+    окно не помещалось бы на экран. Меньше FLOOR_* не сжимаем.
+    """
+    if available_width <= 0 or available_height <= 0:
+        return width, height
+    fitted_width = max(min(width, available_width), min(width, FLOOR_WIDTH))
+    fitted_height = max(min(height, available_height), min(height, FLOOR_HEIGHT))
+    return fitted_width, fitted_height
 
 
 WIDTH, HEIGHT = get_scaled_window_size()

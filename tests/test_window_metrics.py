@@ -12,6 +12,30 @@ if str(PROJECT_SRC) not in sys.path:
 
 
 class WindowMetricsTests(unittest.TestCase):
+    def test_minimum_shrinks_to_a_small_scaled_screen(self) -> None:
+        import config.window_metrics as window_metrics
+
+        # 1280x800 при масштабе 150 %: рабочая область около 853x500.
+        self.assertEqual(window_metrics.fit_size_to_screen(900, 580, 853, 500), (853, 500))
+
+    def test_minimum_is_kept_when_the_screen_is_big_enough(self) -> None:
+        import config.window_metrics as window_metrics
+
+        self.assertEqual(window_metrics.fit_size_to_screen(900, 580, 1920, 1040), (900, 580))
+
+    def test_window_is_never_squeezed_below_the_floor(self) -> None:
+        import config.window_metrics as window_metrics
+
+        self.assertEqual(
+            window_metrics.fit_size_to_screen(900, 580, 400, 300),
+            (window_metrics.FLOOR_WIDTH, window_metrics.FLOOR_HEIGHT),
+        )
+
+    def test_unknown_screen_changes_nothing(self) -> None:
+        import config.window_metrics as window_metrics
+
+        self.assertEqual(window_metrics.fit_size_to_screen(900, 580, 0, 0), (900, 580))
+
     def test_minimum_window_width_keeps_fluent_layout_usable(self) -> None:
         import config.window_metrics as window_metrics
 

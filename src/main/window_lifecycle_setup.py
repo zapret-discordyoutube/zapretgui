@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time as _time
 
-from config.window_metrics import HEIGHT, MIN_HEIGHT, MIN_WIDTH, WIDTH
+from config.window_metrics import HEIGHT, MIN_HEIGHT, MIN_WIDTH, WIDTH, fit_size_to_screen
 from main.application_lifecycle import ApplicationLifecycle
 from main.application_lifecycle_port import build_application_lifecycle_window_port
 from main.runtime_state import log_startup_metric as emit_startup_metric
@@ -10,14 +10,30 @@ from ui.window_close_flow import WindowCloseFlow
 from ui.window_geometry_runtime import WindowGeometryRuntime
 
 
+def _available_screen_size() -> tuple[int, int]:
+    """Рабочая область основного экрана в логических точках; (0, 0), если экран неизвестен."""
+    from PyQt6.QtGui import QGuiApplication
+
+    screen = QGuiApplication.primaryScreen()
+    if screen is None:
+        return 0, 0
+    area = screen.availableGeometry()
+    return area.width(), area.height()
+
+
 def attach_window_lifecycle(window, features) -> None:
-    window.setMinimumSize(MIN_WIDTH, MIN_HEIGHT)
+    # При масштабе 125–150 % на малом экране логической ширины меньше 900: минимум
+    # и размер по умолчанию подгоняем под рабочую область, иначе окно не влезает.
+    available_width, available_height = _available_screen_size()
+    min_width, min_height = fit_size_to_screen(MIN_WIDTH, MIN_HEIGHT, available_width, available_height)
+    default_width, default_height = fit_size_to_screen(WIDTH, HEIGHT, available_width, available_height)
+    window.setMinimumSize(min_width, min_height)
     window.window_geometry_runtime = WindowGeometryRuntime(
         window,
-        min_width=MIN_WIDTH,
-        min_height=MIN_HEIGHT,
-        default_width=WIDTH,
-        default_height=HEIGHT,
+        min_width=min_width,
+        min_height=min_height,
+        default_width=default_width,
+        default_height=default_height,
         close_state=window.close_state,
         create_geometry_save_worker=features.window_geometry.create_geometry_save_worker,
     )

@@ -61,6 +61,8 @@ from ui.pages.base_page import BasePage
 from ui.popup_menu import exec_popup_menu
 from ui.presets_menu.common import fluent_icon, make_menu_action
 from ui.widgets.aligned_switch import AlignedSwitchButton
+from ui.widgets.responsive_row import ResponsiveRow
+from ui.widgets.scrolling_strip import ScrollingStrip
 
 
 AUTO_CHOICE = "__auto__"
@@ -297,22 +299,26 @@ class NetworkPage(BasePage):
         self.add_widget(self.now_panel)
         self.add_spacing(18)
 
-        self.filter_row = QWidget(self.content)
-        filter_layout = QHBoxLayout(self.filter_row)
-        filter_layout.setContentsMargins(0, 0, 0, 0)
-        filter_layout.setSpacing(16)
-        self.filter_bar = SegmentedWidget(self.filter_row)
-        filter_layout.addWidget(self.filter_bar, 0, Qt.AlignmentFlag.AlignVCenter)
-        filter_layout.addStretch(1)
-        self.latency_summary = CaptionLabel("", self.filter_row)
+        # Вкладки групп и справа переключатель DoH. При масштабе 125–150 % ширины
+        # не хватает на всё сразу: тогда переключатель встаёт строкой ниже.
+        # Части создаются без родителя: ряд сам берёт их в свою раскладку.
+        self.filter_bar = SegmentedWidget()
+        # Вкладки не переносятся на вторую строку: если не влезают, они прокручиваются вбок.
+        self.filter_strip = ScrollingStrip(self.filter_bar)
+        doh_group = QWidget()
+        doh_layout = QHBoxLayout(doh_group)
+        doh_layout.setContentsMargins(0, 0, 0, 0)
+        doh_layout.setSpacing(16)
+        self.latency_summary = CaptionLabel("", doh_group)
         self.latency_summary.hide()
-        filter_layout.addWidget(self.latency_summary, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.doh_label = CaptionLabel("", self.filter_row)
-        filter_layout.addWidget(self.doh_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.doh_toggle = AlignedSwitchButton(self.filter_row)
+        doh_layout.addWidget(self.latency_summary, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.doh_label = CaptionLabel("", doh_group)
+        doh_layout.addWidget(self.doh_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.doh_toggle = AlignedSwitchButton(doh_group)
         self.doh_toggle.setChecked(True)
         self.doh_toggle.checkedChanged.connect(self._on_doh_toggled)
-        filter_layout.addWidget(self.doh_toggle, 0, Qt.AlignmentFlag.AlignVCenter)
+        doh_layout.addWidget(self.doh_toggle, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.filter_row = ResponsiveRow(self.filter_strip, doh_group, spacing=16, fill_lead=True, parent=self.content)
         self.add_widget(self.filter_row)
         self.add_spacing(6)
 
@@ -345,6 +351,9 @@ class NetworkPage(BasePage):
             name=self._t("page.network.filter.name", "Группа DNS-серверов"),
             description=self._filter_title(self._filter),
         )
+        self.filter_strip.sync()
+        self.filter_row.refresh()
+        self.filter_strip.ensure_visible(self.filter_bar.widget(self._filter))
 
     def _retranslate(self) -> None:
         panel = self.now_panel
@@ -904,6 +913,7 @@ class NetworkPage(BasePage):
 
     def _set_filter(self, key: str) -> None:
         self._filter = key
+        self.filter_strip.ensure_visible(self.filter_bar.widget(key))
         set_control_accessibility(
             self.filter_bar,
             name=self._t("page.network.filter.name", "Группа DNS-серверов"),

@@ -1777,8 +1777,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertTrue(geometry.maximized)
         get_geometry.assert_called_once_with()
 
-    def test_window_lifecycle_uses_canonical_minimum_size_for_restore_guard(self) -> None:
-        from config.window_metrics import MIN_HEIGHT, MIN_WIDTH
+    def _attach_window_lifecycle_on_screen(self, screen_size):
         from main import window_lifecycle_setup
 
         window = SimpleNamespace(
@@ -1804,13 +1803,30 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(window_lifecycle_setup, "WindowCloseFlow"),
             patch.object(window_lifecycle_setup, "build_application_lifecycle_window_port", return_value=object()),
             patch.object(window_lifecycle_setup, "WindowGeometryRuntime") as geometry_runtime,
+            patch.object(window_lifecycle_setup, "_available_screen_size", return_value=screen_size),
         ):
             window_lifecycle_setup.attach_window_lifecycle(window, features)
+        return window, geometry_runtime
+
+    def test_window_lifecycle_uses_canonical_minimum_size_for_restore_guard(self) -> None:
+        from config.window_metrics import MIN_HEIGHT, MIN_WIDTH
+
+        window, geometry_runtime = self._attach_window_lifecycle_on_screen((1920, 1040))
 
         window.setMinimumSize.assert_called_once_with(MIN_WIDTH, MIN_HEIGHT)
         geometry_runtime.assert_called_once()
         self.assertEqual(geometry_runtime.call_args.kwargs["min_width"], MIN_WIDTH)
         self.assertEqual(geometry_runtime.call_args.kwargs["min_height"], MIN_HEIGHT)
+
+    def test_window_lifecycle_shrinks_minimum_to_a_small_scaled_screen(self) -> None:
+        # 1280x800 при масштабе 150 %: рабочая область ~853x500, минимум 900x580 не влезает.
+        window, geometry_runtime = self._attach_window_lifecycle_on_screen((853, 500))
+
+        window.setMinimumSize.assert_called_once_with(853, 500)
+        self.assertEqual(geometry_runtime.call_args.kwargs["min_width"], 853)
+        self.assertEqual(geometry_runtime.call_args.kwargs["min_height"], 500)
+        self.assertLessEqual(geometry_runtime.call_args.kwargs["default_width"], 853)
+        self.assertLessEqual(geometry_runtime.call_args.kwargs["default_height"], 500)
 
     def test_initial_ui_state_uses_single_settings_read_and_light_runtime_state_import(self) -> None:
         import inspect

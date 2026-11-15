@@ -39,6 +39,7 @@ from ui.animation_policy import are_live_animations_enabled
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip, style_semantic_caption_label
 from ui.theme import get_theme_tokens
+from ui.widgets.responsive_row import ResponsiveRow
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,15 +241,16 @@ class DnsNowPanel(SimpleCardWidget):
         root.addLayout(head)
 
         # ── адаптеры и действия ──
-        bottom = QHBoxLayout()
-        bottom.setContentsMargins(glow_pad, 0, 0, 0)
-        bottom.setSpacing(12)
-        adapters_box = QHBoxLayout()
+        # Значки адаптеров слева, кнопки справа. Если рядом не помещаются, кнопки
+        # встают строкой ниже (масштаб 125–150 %, окно уже ~1000 px).
+        adapters_widget = QWidget(self)
+        adapters_box = QHBoxLayout(adapters_widget)
+        adapters_box.setContentsMargins(0, 0, 0, 0)
         adapters_box.setSpacing(10)
-        self.adapters_caption = CaptionLabel("Применять к:", self)
+        self.adapters_caption = CaptionLabel("Применять к:", adapters_widget)
         adapters_box.addWidget(self.adapters_caption, 0, Qt.AlignmentFlag.AlignTop)
         self.adapters_caption.setFixedHeight(32)
-        self.adapters_host = QWidget(self)
+        self.adapters_host = QWidget(adapters_widget)
         self.adapters_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.adapters_flow = FlowLayout(self.adapters_host, needAni=False)
         self.adapters_flow.setContentsMargins(0, 0, 0, 0)
@@ -263,13 +265,28 @@ class DnsNowPanel(SimpleCardWidget):
         self._all_chip_tooltip = "Отметить все сетевые интерфейсы: выбранный DNS встанет на каждый из них."
         self._sync_all_chip()
         adapters_box.addWidget(self.adapters_host, 1)
-        bottom.addLayout(adapters_box, 1)
 
-        self.measure_button = PushButton(FluentIcon.SPEED_HIGH, "Замерить скорость", self)
-        self.flush_button = PushButton(FluentIcon.BROOM, "Сбросить кэш DNS", self)
+        buttons_widget = QWidget(self)
+        buttons_box = QHBoxLayout(buttons_widget)
+        buttons_box.setContentsMargins(0, 0, 0, 0)
+        buttons_box.setSpacing(12)
+        self.measure_button = PushButton(FluentIcon.SPEED_HIGH, "Замерить скорость", buttons_widget)
+        self.flush_button = PushButton(FluentIcon.BROOM, "Сбросить кэш DNS", buttons_widget)
         for button in (self.measure_button, self.flush_button):
-            bottom.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
-        root.addLayout(bottom)
+            buttons_box.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
+
+        self.bottom_row = ResponsiveRow(
+            adapters_widget,
+            buttons_widget,
+            spacing=12,
+            fill_lead=True,
+            wide_vertical=Qt.AlignmentFlag.AlignTop,
+            narrow_trail_alignment=Qt.AlignmentFlag.AlignLeft,
+            lead_width=self._adapters_comfortable_width,
+            parent=self,
+        )
+        self.bottom_row.setContentsMargins(glow_pad, 0, 0, 0)
+        root.addWidget(self.bottom_row)
 
         self.notice_label = CaptionLabel("", self)
         self.notice_label.setWordWrap(True)
@@ -281,6 +298,11 @@ class DnsNowPanel(SimpleCardWidget):
         self.measure_button.clicked.connect(self.measure_clicked)
         self.flush_button.clicked.connect(self.flush_clicked)
         self._describe_buttons()
+
+    def _adapters_comfortable_width(self) -> int:
+        """Ширина, при которой значки адаптеров стоят рядом с кнопками: подпись и самый широкий значок."""
+        widest = max((chip.sizeHint().width() for chip in self._chips.values()), default=0)
+        return self.adapters_caption.sizeHint().width() + 10 + widest
 
     def _describe_buttons(self) -> None:
         measure_text = "Отправляет каждому серверу DNS-запрос и показывает на плитках время ответа."
@@ -349,6 +371,7 @@ class DnsNowPanel(SimpleCardWidget):
             self._chips[item.key] = chip
         self.adapters_caption.setText(self._adapters_caption_text if chips else self._adapters_empty_text)
         self._sync_all_chip()
+        self.bottom_row.refresh()
 
     def update_adapter_tooltips(self, tooltips: dict[str, str]) -> None:
         for key, chip in self._chips.items():
