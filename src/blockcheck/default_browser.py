@@ -38,6 +38,17 @@ _PROG_IDS = (
     ("VivaldiHTM", BROWSER_OTHER_CHROMIUM, "Vivaldi"),
     # Сборки Chromium: ProgId «ChromiumHTM.<хеш>» (так на win10, 2026-11-02).
     ("ChromiumHTM", BROWSER_OTHER_CHROMIUM, "Chromium"),
+    # Linux: имя файла .desktop из ``xdg-settings get default-web-browser`` (Flatpak: org.mozilla.firefox.desktop).
+    ("org.mozilla.firefox", BROWSER_FIREFOX, "Firefox"),
+    ("firefox", BROWSER_FIREFOX, "Firefox"),
+    ("microsoft-edge", BROWSER_EDGE, "Edge"),
+    ("google-chrome", BROWSER_CHROME, "Chrome"),
+    ("chromium", BROWSER_OTHER_CHROMIUM, "Chromium"),
+    ("brave-browser", BROWSER_OTHER_CHROMIUM, "Brave"),
+    ("com.brave.browser", BROWSER_OTHER_CHROMIUM, "Brave"),
+    ("vivaldi", BROWSER_OTHER_CHROMIUM, "Vivaldi"),
+    ("opera", BROWSER_OTHER_CHROMIUM, "Opera"),
+    ("yandex-browser", BROWSER_OTHER_CHROMIUM, "Яндекс Браузер"),
 )
 
 

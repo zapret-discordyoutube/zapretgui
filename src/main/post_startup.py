@@ -52,6 +52,12 @@ def install_zapret_dns_server_watch(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_preset_argument_import(*args, **kwargs):
+    from main.post_startup_preset_argument import install_preset_argument_import as install
+
+    return install(*args, **kwargs)
+
+
 def install_hosts_applied_selection_refresh(*args, **kwargs):
     from main.post_startup_hosts_refresh import install_hosts_applied_selection_refresh as install
 
@@ -281,6 +287,7 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         hosts_feature=deps.hosts_feature,
         log_startup_metric=deps.log_startup_metric,
     )
+    install_preset_argument_import(startup_host, log_startup_metric=deps.log_startup_metric)
     install_hosts_applied_selection_refresh(
         startup_host,
         hosts_feature=deps.hosts_feature,
