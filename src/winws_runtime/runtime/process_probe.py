@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import ctypes
 import os
-from ctypes import wintypes
 from dataclasses import dataclass
+
+from platforms import current as current_platform
 
 from settings.mode import (
     ALL_WINWS_EXE_NAMES,
@@ -13,14 +13,10 @@ from settings.mode import (
     ZAPRET2_MODE,
     exe_path_for_launch_method,
 )
-from utils.windows_process_probe import iter_process_records_winapi
 from winws_runtime.engine.process_control import normalize_image_path as _normalize_path
 
 _WINWS_NAMES = ALL_WINWS_EXE_NAMES
 _WINWS_NAME_SET = frozenset(_WINWS_NAMES)
-
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-MAX_PROCESS_PATH = 32768
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,42 +24,6 @@ class WinwsProcessRecord:
     pid: int
     name: str
     exe_path: str
-
-
-if hasattr(ctypes, "WinDLL"):
-    # Приватный экземпляр WinDLL, а не глобальный ctypes.windll.kernel32:
-    # windll кэширует функции процессно-глобально, и argtypes, выставленные
-    # здесь, конфликтовали бы с argtypes других модулей на тех же функциях.
-    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-    _OpenProcess = _kernel32.OpenProcess
-    _OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    _OpenProcess.restype = wintypes.HANDLE
-
-    _QueryFullProcessImageNameW = _kernel32.QueryFullProcessImageNameW
-    _QueryFullProcessImageNameW.argtypes = [
-        wintypes.HANDLE,
-        wintypes.DWORD,
-        wintypes.LPWSTR,
-        ctypes.POINTER(wintypes.DWORD),
-    ]
-    _QueryFullProcessImageNameW.restype = wintypes.BOOL
-
-    _CloseHandle = _kernel32.CloseHandle
-    _CloseHandle.argtypes = [wintypes.HANDLE]
-    _CloseHandle.restype = wintypes.BOOL
-
-    _GetProcessTimes = _kernel32.GetProcessTimes
-    _GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
-    _GetProcessTimes.restype = wintypes.BOOL
-else:  # pragma: no cover - import safety for non-Windows environments
-    _OpenProcess = None
-    _QueryFullProcessImageNameW = None
-    _CloseHandle = None
-    _GetProcessTimes = None
-
-# FILETIME считает сотни наносекунд с 1601 года; до начала Unix-времени их столько.
-_FILETIME_UNIX_EPOCH = 116444736000000000
 
 
 def get_expected_winws_paths() -> dict[str, str]:
@@ -77,54 +37,18 @@ def get_expected_winws_paths() -> dict[str, str]:
 def _iter_winws_process_entries() -> list[tuple[int, str]]:
     return [
         (int(pid), name)
-        for pid, raw_name in iter_process_records_winapi()
+        for pid, raw_name in current_platform().processes.list_processes()
         if (name := str(raw_name or "").strip().lower()) in _WINWS_NAME_SET
     ]
 
 
 def _query_process_image_path(pid: int) -> str:
-    if _OpenProcess is None or _QueryFullProcessImageNameW is None or _CloseHandle is None:
-        return ""
-
-    handle = _OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
-    if not handle:
-        return ""
-
-    try:
-        buffer = ctypes.create_unicode_buffer(MAX_PROCESS_PATH)
-        size = wintypes.DWORD(len(buffer))
-        if not _QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
-            return ""
-        return _normalize_path(buffer.value[: size.value] or buffer.value)
-    finally:
-        _CloseHandle(handle)
-
-
-def filetime_to_unix_seconds(low: int, high: int) -> float:
-    ticks = (int(high) << 32) | int(low)
-    if ticks <= _FILETIME_UNIX_EPOCH:
-        return 0.0
-    return (ticks - _FILETIME_UNIX_EPOCH) / 10_000_000
+    return _normalize_path(current_platform().processes.exe_path(int(pid)))
 
 
 def query_process_start_time(pid: int) -> float:
-    """Когда Windows создала процесс (секунды Unix); 0.0 — узнать не удалось."""
-    if _OpenProcess is None or _GetProcessTimes is None or _CloseHandle is None:
-        return 0.0
-
-    handle = _OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
-    if not handle:
-        return 0.0
-
-    try:
-        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
-        if not _GetProcessTimes(
-            handle, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel), ctypes.byref(user)
-        ):
-            return 0.0
-        return filetime_to_unix_seconds(created.dwLowDateTime, created.dwHighDateTime)
-    finally:
-        _CloseHandle(handle)
+    """Когда система создала процесс (секунды Unix); 0.0 — узнать не удалось."""
+    return current_platform().processes.start_time(int(pid))
 
 
 def find_expected_winws_processes(expected_exe_path: str) -> list[WinwsProcessRecord]:

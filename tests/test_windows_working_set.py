@@ -1,4 +1,4 @@
-"""Снимок страниц памяти и подтягивание их пачкой (utils.windows_working_set)."""
+"""Снимок страниц памяти и подтягивание их пачкой (platforms.windows.working_set)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from utils import windows_working_set as ws  # noqa: E402
+from platforms.windows import working_set as ws  # noqa: E402
 
 
 class MergePagesTests(unittest.TestCase):

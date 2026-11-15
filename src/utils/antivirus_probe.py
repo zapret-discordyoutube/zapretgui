@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 
-from utils.windows_process_probe import iter_process_names_winapi, iter_uninstall_display_names
+from platforms.windows.process_probe import iter_process_names_winapi, iter_uninstall_display_names
 
 _KASPERSKY_PROCESS_NAMES = frozenset(
     {
@@ -51,7 +51,7 @@ def is_kaspersky_present_strict() -> bool:
     Kaspersky вызывала синий экран в tcpip.sys, поэтому при сомнении драйвер
     остаётся на месте (ошибку вызывающий код читает как «нельзя выгружать»).
     """
-    from utils.windows_process_probe import iter_process_records_winapi_strict
+    from platforms.windows.process_probe import iter_process_records_winapi_strict
 
     for _pid, process_name in iter_process_records_winapi_strict():
         if str(process_name or "").strip().casefold() in _KASPERSKY_PROCESS_NAMES:

@@ -31,7 +31,15 @@ from __future__ import annotations
 import ctypes
 import sys
 import time
-from dataclasses import dataclass
+
+from platforms.base import PrefetchResult, WorkingSetHold, WorkingSetSnapshot
+from platforms.hold_policy import (  # noqa: F401  (re-exported: the policy is shared, the system calls are here)
+    HOLD_MARGIN_BYTES,
+    HOLD_MAX_BYTES,
+    HOLD_MIN_BYTES,
+    HOLD_SPARE_BYTES,
+    hold_size_for,
+)
 
 PAGE_SIZE = 4096
 # Сколько кусков отдаём Windows за один вызов: система принимает массивом, но
@@ -41,50 +49,12 @@ _PREFETCH_CHUNK = 2048
 _INITIAL_PAGES = 1 << 18
 
 _MB = 1 << 20
-# Сколько удерживать: меньше — игра не стоит свеч, больше — занимаем чужую память.
-HOLD_MIN_BYTES = 24 * _MB
-HOLD_MAX_BYTES = 320 * _MB
-# Запас сверху к тому, что программа держала в момент ухода окна.
-HOLD_MARGIN_BYTES = 12 * _MB
-# Удержание ничего нового не занимает, оно лишь не даёт системе отобрать то, что программа
-# уже держит. Но системе должен остаться запас: если после удержания свободной памяти
-# окажется меньше этого, ничего не удерживаем (ПК и так тесно). Раньше стояла жёсткая
-# отметка «свободно меньше 1 ГБ — не удерживать»: на слабом ПК, где отбор страниц и бьёт
-# сильнее всего, защита не включалась вовсе.
-HOLD_SPARE_BYTES = 256 * _MB
-# Малый минимум, к которому возвращается рабочий набор, когда хватку отпускаем.
 RELEASED_MIN_BYTES = 1 * _MB
 
 _QUOTA_LIMITS_HARDWS_MIN_ENABLE = 0x1
 _QUOTA_LIMITS_HARDWS_MIN_DISABLE = 0x2
 _QUOTA_LIMITS_HARDWS_MAX_DISABLE = 0x8
 _ERROR_PRIVILEGE_NOT_HELD = 1314
-
-
-@dataclass(frozen=True, slots=True)
-class WorkingSetSnapshot:
-    """Куски адресов (начало, длина в байтах), лежавшие в памяти программы."""
-
-    ranges: tuple[tuple[int, int], ...]
-    total_bytes: int
-    taken_ms: float
-
-
-@dataclass(frozen=True, slots=True)
-class PrefetchResult:
-    ranges: int
-    total_bytes: int
-    elapsed_ms: float
-    ok: bool
-
-
-@dataclass(frozen=True, slots=True)
-class WorkingSetHold:
-    """Итог попытки удержать рабочий набор: сколько просили и чем кончилось."""
-
-    bytes: int
-    ok: bool
-    error: int
 
 
 class _ProcessMemoryCounters(ctypes.Structure):
@@ -195,16 +165,6 @@ def prefetch_working_set(snapshot: WorkingSetSnapshot | None) -> PrefetchResult 
         elapsed_ms=(time.perf_counter() - started) * 1000,
         ok=ok,
     )
-
-
-def hold_size_for(working_set_bytes: int | None, available_bytes: int | None) -> int | None:
-    """Сколько удерживать при таком рабочем наборе и такой свободной памяти, либо None — не надо."""
-    if not working_set_bytes or working_set_bytes < HOLD_MIN_BYTES:
-        return None
-    size = min(working_set_bytes + HOLD_MARGIN_BYTES, HOLD_MAX_BYTES)
-    if available_bytes is not None and available_bytes < size + HOLD_SPARE_BYTES:
-        return None
-    return size
 
 
 def process_page_faults() -> int | None:

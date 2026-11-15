@@ -9,7 +9,7 @@ from winws_runtime.runtime.system_ops import (
     _KNOWN_WINDIVERT_SERVICES,
     kill_process_by_pid_runtime,
 )
-from utils.windows_process_probe import (
+from platforms.windows.process_probe import (
     iter_process_module_paths_winapi,
     iter_process_records_winapi,
 )

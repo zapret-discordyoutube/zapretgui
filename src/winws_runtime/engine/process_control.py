@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from log.log import log
-from utils.windows_process_probe import (
+from platforms.windows.process_probe import (
     ProcessSnapshotError,
     iter_process_records_winapi_strict,
 )

@@ -13,7 +13,7 @@ import winws_runtime.state.launch_runtime_service as service_module
 from app.state_store import AppUiState, MainWindowStateStore
 from presets.ui.control.control_page_runtime_shared import apply_running_since
 from presets.ui.control.uptime_label import UptimeLabel, format_uptime
-from winws_runtime.runtime.process_probe import filetime_to_unix_seconds
+from platforms.windows.processes import filetime_to_unix_seconds
 from winws_runtime.state.launch_runtime_service import LaunchRuntimeService
 
 

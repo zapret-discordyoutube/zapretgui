@@ -9,7 +9,6 @@ from app_notifications import advisory_notification, notification_action
 from config.runtime_layout import APPLICATION_PATHS
 
 from platforms import current as current_platform
-from utils.windows_process_probe import iter_process_records_winapi
 
 
 def _application_root_path() -> str:
@@ -118,7 +117,7 @@ def check_mitmproxy() -> tuple[bool, str]:
 
     try:
         current_pid = os.getpid()
-        for pid, process_name in iter_process_records_winapi():
+        for pid, process_name in current_platform().processes.list_processes():
             if int(pid) == int(current_pid):
                 continue
 

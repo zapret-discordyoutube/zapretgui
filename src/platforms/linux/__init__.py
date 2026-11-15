@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from platforms.base import Platform
+from platforms.base import NoWorkingSet, Platform
 from platforms.linux.launch import LinuxLaunch
 from platforms.linux.messages import LinuxMessageBox
 from platforms.linux.privileges import LinuxPrivileges
+from platforms.linux.processes import LinuxProcesses
 from platforms.linux.services import LinuxServices
 from platforms.linux.single_instance import LinuxSingleInstance
 
@@ -16,4 +17,6 @@ PLATFORM = Platform(
     single_instance=LinuxSingleInstance(),
     services=LinuxServices(),
     launch=LinuxLaunch(),
+    processes=LinuxProcesses(),
+    working_set=NoWorkingSet(),
 )

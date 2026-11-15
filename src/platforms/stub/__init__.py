@@ -5,7 +5,15 @@ from __future__ import annotations
 import threading
 from typing import Callable, Sequence
 
-from platforms.base import InstanceLock, MessageKind, Platform, SystemSupport, print_to_stderr
+from platforms.base import (
+    InstanceLock,
+    MessageKind,
+    NoWorkingSet,
+    Platform,
+    ProcessSnapshotError,
+    SystemSupport,
+    print_to_stderr,
+)
 
 
 class _StderrMessageBox:
@@ -47,6 +55,29 @@ class _NoServices:
         return False
 
 
+class _NoProcesses:
+    def list_processes(self) -> list[tuple[int, str]]:
+        return []
+
+    def list_processes_strict(self) -> list[tuple[int, str]]:
+        raise ProcessSnapshotError("no process access on this system")
+
+    def command_line(self, pid: int) -> str:
+        return ""
+
+    def exe_path(self, pid: int) -> str:
+        return ""
+
+    def module_paths(self, pid: int, *, max_snapshot_attempts: int = 3) -> list[str]:
+        return []
+
+    def start_time(self, pid: int) -> float:
+        return 0.0
+
+    def kill(self, pid: int, wait_timeout_ms: int = 3000) -> bool:
+        return False
+
+
 class _NoLaunch:
     def process_creation_unix_seconds(self) -> float | None:
         return None
@@ -65,4 +96,6 @@ PLATFORM = Platform(
     single_instance=_NoSingleInstance(),
     services=_NoServices(),
     launch=_NoLaunch(),
+    processes=_NoProcesses(),
+    working_set=NoWorkingSet(),
 )

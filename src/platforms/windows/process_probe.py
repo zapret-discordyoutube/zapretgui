@@ -3,6 +3,8 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 
+from platforms.base import ProcessSnapshotError  # noqa: F401  (re-exported for the Windows modules)
+
 
 TH32CS_SNAPPROCESS = 0x00000002
 TH32CS_SNAPMODULE = 0x00000008
@@ -92,10 +94,6 @@ _UNINSTALL_KEY_PATHS = (
 def iter_process_names_winapi() -> list[str]:
     """Перечисляет имена процессов напрямую через Toolhelp Snapshot."""
     return [name for _, name in iter_process_records_winapi()]
-
-
-class ProcessSnapshotError(OSError):
-    """Windows не отдала список процессов: это отказ, а не «процессов нет»."""
 
 
 def iter_process_records_winapi_strict() -> list[tuple[int, str]]:

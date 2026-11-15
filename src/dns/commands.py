@@ -506,9 +506,9 @@ def _running_bypass() -> tuple[str, ...]:
 
     try:
         from settings.mode import ALL_WINWS_EXE_NAME_SET
-        from utils.windows_process_probe import iter_process_records_winapi
+        from platforms import current as current_platform
 
-        names = [str(name or "").lower() for _pid, name in iter_process_records_winapi()]
+        names = [str(name or "").lower() for _pid, name in current_platform().processes.list_processes()]
     except Exception:
         return ()
     zapret = ("Zapret",) if any(name in ALL_WINWS_EXE_NAME_SET for name in names) else ()

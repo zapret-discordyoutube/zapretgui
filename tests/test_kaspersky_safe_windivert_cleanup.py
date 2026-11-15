@@ -54,10 +54,10 @@ class KasperskyProbeTests(unittest.TestCase):
     def test_strict_probe_raises_when_the_process_snapshot_fails(self) -> None:
         # Для выгрузки драйвера отказ снимка — не «Kaspersky нет»: драйвер остаётся.
         from utils import antivirus_probe
-        from utils.windows_process_probe import ProcessSnapshotError
+        from platforms.windows.process_probe import ProcessSnapshotError
 
         with patch(
-            "utils.windows_process_probe.iter_process_records_winapi_strict",
+            "platforms.windows.process_probe.iter_process_records_winapi_strict",
             side_effect=ProcessSnapshotError("snapshot failed"),
         ):
             with self.assertRaises(ProcessSnapshotError):
@@ -67,12 +67,12 @@ class KasperskyProbeTests(unittest.TestCase):
         from utils import antivirus_probe
 
         with (
-            patch("utils.windows_process_probe.iter_process_records_winapi_strict", return_value=[(1, "explorer.exe"), (2, "AVP.exe")]),
+            patch("platforms.windows.process_probe.iter_process_records_winapi_strict", return_value=[(1, "explorer.exe"), (2, "AVP.exe")]),
             patch.object(antivirus_probe, "iter_uninstall_display_names", return_value=[]),
         ):
             self.assertTrue(antivirus_probe.is_kaspersky_present_strict())
         with (
-            patch("utils.windows_process_probe.iter_process_records_winapi_strict", return_value=[(1, "explorer.exe")]),
+            patch("platforms.windows.process_probe.iter_process_records_winapi_strict", return_value=[(1, "explorer.exe")]),
             patch.object(antivirus_probe, "iter_uninstall_display_names", return_value=["7-Zip"]),
         ):
             self.assertFalse(antivirus_probe.is_kaspersky_present_strict())

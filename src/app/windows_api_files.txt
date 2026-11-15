@@ -41,15 +41,12 @@ src/updater/install/splash_script.py 4
 src/updater/install/watchdog.py 9
 src/updater/install/watchdog_script.py 3
 src/updater/ui/restart_splash_spec.py 1
-src/utils/process_killer.py 11
 src/utils/subproc.py 2
 src/utils/tcp_info.py 1
 src/utils/winapi_service_types.py 8
 src/utils/windows_dns_query.py 1
 src/utils/windows_http.py 38
 src/utils/windows_icmp.py 28
-src/utils/windows_process_probe.py 48
-src/utils/windows_working_set.py 9
 src/windows_features/defender_manager.py 3
 src/windows_features/internet_cleanup_winapi.py 4
 src/windows_features/max_blocker.py 21
@@ -58,7 +55,6 @@ src/winws_runtime/health/launch_conflicts.py 3
 src/winws_runtime/health/windivert_auto_fix.py 1
 src/winws_runtime/health/windows_system_dependencies.py 8
 src/winws_runtime/health/winws_exit_diagnosis.py 5
-src/winws_runtime/runtime/process_probe.py 18
 src/winws_runtime/runtime/system_ops.py 2
 src/zapret_update/apply.py 1
 src/zapret_update/processes.py 40

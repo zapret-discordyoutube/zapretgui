@@ -86,6 +86,111 @@ class Launch(Protocol):
         """Why starting from source is refused and what to do instead, for the person who tried."""
 
 
+class ProcessSnapshotError(OSError):
+    """The system refused to list the processes. A refusal, not "there are no processes"."""
+
+
+class Processes(Protocol):
+    """Looking at, measuring and stopping other processes."""
+
+    def list_processes(self) -> list[tuple[int, str]]:
+        """``(pid, executable name)`` of every process. Lenient: an empty list when the system refuses."""
+
+    def list_processes_strict(self) -> list[tuple[int, str]]:
+        """Same list, but raises ``ProcessSnapshotError`` on a refusal.
+
+        For decisions like "nothing left to stop": an empty list caused by a failure must not be taken for
+        "no processes".
+        """
+
+    def command_line(self, pid: int) -> str:
+        """The command line of a process; empty when it cannot be read."""
+
+    def exe_path(self, pid: int) -> str:
+        """Full path of the executable of a process; empty when it cannot be read."""
+
+    def module_paths(self, pid: int, *, max_snapshot_attempts: int = 3) -> list[str]:
+        """Paths of the files a process has loaded (DLLs / shared objects); empty when unknown."""
+
+    def start_time(self, pid: int) -> float:
+        """When the process was created (Unix seconds); 0.0 when unknown."""
+
+    def kill(self, pid: int, wait_timeout_ms: int = 3000) -> bool:
+        """Ends a process and waits for its exit. True only when the exit is confirmed."""
+
+
+@dataclass(frozen=True, slots=True)
+class WorkingSetSnapshot:
+    """Address ranges (start, length in bytes) that were in the program's memory."""
+
+    ranges: tuple[tuple[int, int], ...]
+    total_bytes: int
+    taken_ms: float
+
+
+@dataclass(frozen=True, slots=True)
+class PrefetchResult:
+    ranges: int
+    total_bytes: int
+    elapsed_ms: float
+    ok: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WorkingSetHold:
+    """Result of trying to hold the working set: how much was asked and how it ended."""
+
+    bytes: int
+    ok: bool
+    error: int
+
+
+class WorkingSet(Protocol):
+    """Keeping the program's memory resident while its window is hidden (Windows pages memory out).
+
+    Only meaningful where ``Cap.WORKING_SET`` is present; elsewhere every call answers None / False.
+    """
+
+    def snapshot_working_set(self) -> WorkingSetSnapshot | None: ...
+
+    def prefetch_working_set(self, snapshot: WorkingSetSnapshot | None) -> PrefetchResult | None: ...
+
+    def hold_working_set(self, size_bytes: int) -> WorkingSetHold | None: ...
+
+    def release_working_set_hold(self) -> bool: ...
+
+    def process_page_faults(self) -> int | None: ...
+
+    def current_working_set_bytes(self) -> int | None: ...
+
+    def available_physical_bytes(self) -> int | None: ...
+
+
+class NoWorkingSet:
+    """For systems that manage the memory of a hidden window well enough on their own."""
+
+    def snapshot_working_set(self) -> WorkingSetSnapshot | None:
+        return None
+
+    def prefetch_working_set(self, snapshot: WorkingSetSnapshot | None) -> PrefetchResult | None:
+        return None
+
+    def hold_working_set(self, size_bytes: int) -> WorkingSetHold | None:
+        return None
+
+    def release_working_set_hold(self) -> bool:
+        return False
+
+    def process_page_faults(self) -> int | None:
+        return None
+
+    def current_working_set_bytes(self) -> int | None:
+        return None
+
+    def available_physical_bytes(self) -> int | None:
+        return None
+
+
 class Cap:
     """Names of optional features. ``Platform.has(Cap.X)`` tells whether this system has the feature.
 
@@ -96,6 +201,7 @@ class Cap:
     BFE = "windows_bfe"  # Base Filtering Engine: the Windows service WinDivert depends on
     SELF_UPDATE = "self_update"  # the program replaces itself from a downloaded installer
     WINDOWS_STARTUP_CHECKS = "windows_startup_checks"  # advisories about Windows software and settings at start
+    WORKING_SET = "working_set"  # the system pages out a hidden window's memory and the program can hold it
 
 
 WAIT_SIGNALLED = 0
@@ -162,6 +268,8 @@ class Platform:
     single_instance: SingleInstance
     services: Services
     launch: Launch
+    processes: Processes
+    working_set: WorkingSet
     capabilities: frozenset[str] = frozenset()
 
     def has(self, capability: str) -> bool:

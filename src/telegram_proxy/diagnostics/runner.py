@@ -12,7 +12,7 @@ from log.log import log
 from settings.mode import ENGINE_WINWS2
 import telegram_proxy.config.settings as telegram_proxy_settings
 from telegram_proxy.proxy.route_catalog import RELAY_INGRESS
-from utils.windows_process_probe import iter_process_records_winapi
+from platforms import current as current_platform
 from utils.net_resolve import connect_tcp
 
 DC_TARGETS = [
@@ -548,7 +548,7 @@ def _check_winws2_running() -> bool:
     try:
         from settings.mode import ALL_WINWS_EXE_NAME_SET
 
-        for _pid, process_name in iter_process_records_winapi():
+        for _pid, process_name in current_platform().processes.list_processes():
             if str(process_name or "").strip().lower() in ALL_WINWS_EXE_NAME_SET:
                 return True
         return False

@@ -211,9 +211,9 @@ def _read_goodbyedpi_services() -> tuple[str, ...]:
 
 def _read_bypass_tools() -> tuple[str, ...]:
     from utils.bypass_tools import bypass_tools_among
-    from utils.windows_process_probe import iter_process_records_winapi_strict
+    from platforms import current as current_platform
 
-    return bypass_tools_among(name for _pid, name in iter_process_records_winapi_strict())
+    return bypass_tools_among(name for _pid, name in current_platform().processes.list_processes_strict())
 
 
 def _read_antivirus() -> str:

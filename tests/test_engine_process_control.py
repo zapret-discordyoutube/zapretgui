@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from utils.windows_process_probe import ProcessSnapshotError
+from platforms.base import ProcessSnapshotError
 from winws_runtime.engine import process_control, startup, winapi
 
 OWN_EXE = r"C:\Zapret\Dev\exe\winws2.exe"

@@ -113,8 +113,8 @@ def bypass_tools_among(process_names: Iterable[str]) -> tuple[str, ...]:
 def running_bypass_tools() -> tuple[str, ...]:
     """Программы обхода и VPN, запущенные сейчас. Пусто, если узнать не удалось."""
     try:
-        from utils.windows_process_probe import iter_process_records_winapi
+        from platforms import current as current_platform
 
-        return bypass_tools_among(name for _pid, name in iter_process_records_winapi())
+        return bypass_tools_among(name for _pid, name in current_platform().processes.list_processes())
     except Exception:
         return ()

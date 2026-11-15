@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from platforms import current as current_platform
 from utils import bypass_tools
 
 
@@ -27,11 +28,11 @@ class BypassToolsTests(unittest.TestCase):
 
     def test_running_tools_come_from_process_list(self) -> None:
         records = [(4, "System"), (100, "warp-svc.exe"), (200, "notepad.exe")]
-        with patch("utils.windows_process_probe.iter_process_records_winapi", return_value=records):
+        with patch.object(current_platform().processes, "list_processes", return_value=records):
             self.assertEqual(bypass_tools.running_bypass_tools(), ("Cloudflare WARP",))
 
     def test_failed_process_list_means_nothing_known(self) -> None:
-        with patch("utils.windows_process_probe.iter_process_records_winapi", side_effect=OSError("нет доступа")):
+        with patch.object(current_platform().processes, "list_processes", side_effect=OSError("нет доступа")):
             self.assertEqual(bypass_tools.running_bypass_tools(), ())
 
 

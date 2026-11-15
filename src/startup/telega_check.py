@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from app_notifications import advisory_notification, notification_action
-from utils.windows_process_probe import iter_process_names_winapi, iter_uninstall_display_names
+from platforms.windows.process_probe import iter_process_names_winapi, iter_uninstall_display_names
 
 
 _TELEGA_PROCESS_NAMES = frozenset({"telega.exe"})

@@ -3,7 +3,7 @@
 
 from typing import Optional
 
-from utils.windows_process_probe import iter_process_names_winapi, iter_uninstall_display_names
+from platforms.windows.process_probe import iter_process_names_winapi, iter_uninstall_display_names
 
 _ANTIVIRUS_PRODUCT_MARKERS = (
     ("kaspersky", "Kaspersky"),

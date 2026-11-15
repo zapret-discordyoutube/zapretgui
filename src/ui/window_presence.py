@@ -58,19 +58,9 @@ from PyQt6.QtCore import QEvent, QObject, QTimer
 
 from log.log import log
 from ui.gui_thread_priority import set_gui_gil_priority
-from utils.windows_working_set import (
-    PrefetchResult,
-    WorkingSetHold,
-    WorkingSetSnapshot,
-    available_physical_bytes,
-    current_working_set_bytes,
-    hold_size_for,
-    hold_working_set,
-    prefetch_working_set,
-    process_page_faults,
-    release_working_set_hold,
-    snapshot_working_set,
-)
+from platforms import Cap, current as current_platform
+from platforms.base import PrefetchResult, WorkingSetHold, WorkingSetSnapshot
+from platforms.hold_policy import hold_size_for
 
 
 # Сколько окно должно пробыть в фоне, прежде чем запомнить страницы: короткое
@@ -97,8 +87,37 @@ HOLD_GROWTH_BYTES = 16 * 1024 * 1024
 _WATCHED_EVENTS = (QEvent.Type.Hide, QEvent.Type.Show, QEvent.Type.WindowStateChange)
 
 
-# Читается напрямую через WinAPI: раньше здесь подгружался psutil, и его первый
-# импорт читал диск ровно на пути возврата из фона.
+# Работа с памятью — дело платформы (Windows: WinAPI напрямую; раньше здесь подгружался
+# psutil, и его первый импорт читал диск ровно на пути возврата из фона).
+# Обёртки на уровне модуля нужны тестам: они подменяют эти имена.
+def snapshot_working_set() -> WorkingSetSnapshot | None:
+    return current_platform().working_set.snapshot_working_set()
+
+
+def prefetch_working_set(snapshot: WorkingSetSnapshot | None) -> PrefetchResult | None:
+    return current_platform().working_set.prefetch_working_set(snapshot)
+
+
+def hold_working_set(size_bytes: int) -> WorkingSetHold | None:
+    return current_platform().working_set.hold_working_set(size_bytes)
+
+
+def release_working_set_hold() -> bool:
+    return current_platform().working_set.release_working_set_hold()
+
+
+def process_page_faults() -> int | None:
+    return current_platform().working_set.process_page_faults()
+
+
+def current_working_set_bytes() -> int | None:
+    return current_platform().working_set.current_working_set_bytes()
+
+
+def available_physical_bytes() -> int | None:
+    return current_platform().working_set.available_physical_bytes()
+
+
 _page_faults = process_page_faults
 
 
@@ -388,7 +407,10 @@ class WindowPresence(QObject):
             pass
 
 
-def install_window_presence(window) -> WindowPresence:
+def install_window_presence(window) -> WindowPresence | None:
+    """None, если система сама хорошо держит память скрытого окна (нет возможности WORKING_SET)."""
+    if not current_platform().has(Cap.WORKING_SET):
+        return None
     return WindowPresence(window)
 
 

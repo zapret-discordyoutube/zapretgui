@@ -531,13 +531,13 @@ def running_preset(*, locks: Callable[[Iterable[str]], Mapping] = orchestra_lock
     """Пресет, с которым сейчас работает winws2 (или winws). ``None`` — не запущен или узнать не удалось."""
     try:
         from settings.mode import ALL_WINWS_EXE_NAME_SET
-        from utils.windows_process_probe import iter_process_records_winapi, process_command_line
+        from platforms import current as current_platform
     except Exception:
         return None
-    for pid, name in iter_process_records_winapi():
+    for pid, name in current_platform().processes.list_processes():
         if str(name or "").lower() not in ALL_WINWS_EXE_NAME_SET:
             continue
-        config = _at_config_of(process_command_line(pid))
+        config = _at_config_of(current_platform().processes.command_line(pid))
         if config is None or not config.is_file():
             continue
         return running_from_at_config(config, str(name), locks=locks)

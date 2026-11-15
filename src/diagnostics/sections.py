@@ -154,11 +154,11 @@ def environment_lines() -> list[str]:
 def zapret_status() -> tuple[bool | None, str]:
     try:
         from settings.mode import ALL_WINWS_EXE_NAME_SET, WINWS_EXE_FAMILY_LABEL
-        from utils.windows_process_probe import iter_process_records_winapi
+        from platforms import current as current_platform
 
         running = [
             f"{name} (PID {pid})"
-            for pid, name in iter_process_records_winapi()
+            for pid, name in current_platform().processes.list_processes()
             if str(name or "").lower() in ALL_WINWS_EXE_NAME_SET
         ]
     except Exception as exc:

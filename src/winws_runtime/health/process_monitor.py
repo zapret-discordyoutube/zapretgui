@@ -12,7 +12,7 @@ from log.log import log
 from settings.mode import EXE_NAME_WINWS1
 
 from utils.windows_event_log import get_recent_application_error_messages
-from utils.windows_process_probe import iter_process_records_winapi
+from platforms import current as current_platform
 
 from winws_runtime.health.antivirus_detection import _detect_active_antivirus
 
@@ -23,7 +23,7 @@ def _find_process_pid_by_name_winapi(process_name: str) -> Optional[int]:
     if not expected:
         return None
 
-    for pid, name in iter_process_records_winapi():
+    for pid, name in current_platform().processes.list_processes():
         normalized = str(name or "").strip().lower()
         if normalized == expected:
             return int(pid)

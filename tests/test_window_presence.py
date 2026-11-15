@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from ui import window_presence  # noqa: E402
 from ui.window_presence import WindowPresence  # noqa: E402
-from utils.windows_working_set import PrefetchResult, WorkingSetHold, WorkingSetSnapshot  # noqa: E402
+from platforms.base import PrefetchResult, WorkingSetHold, WorkingSetSnapshot  # noqa: E402
 
 
 _APP = QApplication.instance() or QApplication([])

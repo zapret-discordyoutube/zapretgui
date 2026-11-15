@@ -8,7 +8,8 @@ PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
-import utils.windows_process_probe as shared_probe
+import platforms.windows.process_probe as shared_probe
+import platforms.windows.processes as win_processes
 import winws_runtime.runtime.process_probe as winws_probe
 
 
@@ -23,7 +24,7 @@ class ProcessProbeCtypesIsolationTests(unittest.TestCase):
     def test_winws_probe_has_no_duplicate_struct(self) -> None:
         self.assertFalse(
             hasattr(winws_probe, "PROCESSENTRY32W"),
-            "winws-probe должен переиспользовать снапшот из utils.windows_process_probe",
+            "winws-probe должен переиспользовать снапшот из platforms.windows.process_probe",
         )
 
     def test_snapshot_functions_are_not_global_windll_cache(self) -> None:
@@ -38,7 +39,7 @@ class ProcessProbeCtypesIsolationTests(unittest.TestCase):
             "снапшот-функции должны жить на приватном WinDLL, а не на глобальном windll",
         )
         self.assertIsNot(
-            winws_probe._kernel32,
+            win_processes._kernel32,
             global_kernel32,
             "probe-функции должны жить на приватном WinDLL, а не на глобальном windll",
         )

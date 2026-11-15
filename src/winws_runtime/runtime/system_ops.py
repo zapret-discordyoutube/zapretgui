@@ -122,9 +122,9 @@ def _is_kaspersky_present_strict() -> bool:
 
 def kill_process_by_pid_runtime(pid: int, *, wait_timeout_ms: int = 3000) -> bool:
     try:
-        from utils.process_killer import kill_process_by_pid_winapi
+        from platforms import current as current_platform
 
-        return bool(kill_process_by_pid_winapi(int(pid), wait_timeout_ms=wait_timeout_ms))
+        return bool(current_platform().processes.kill(int(pid), wait_timeout_ms=wait_timeout_ms))
     except Exception as e:
         log(f"Ошибка kill_process_by_pid для PID={pid}: {e}", "DEBUG")
         return False
