@@ -104,6 +104,10 @@ class PresetLaunchRuntimeApi:
 
         Возвращает False, только если служба драйвера застряла.
         """
+        from platforms import Cap, current as current_platform
+
+        if not current_platform().has(Cap.DIRECT_ENGINE_PROCESS):
+            return True  # no WinDivert driver on this system: the engine's rules are removed with the engine
         try:
             result = release_windivert_driver_runtime()
         except Exception as e:

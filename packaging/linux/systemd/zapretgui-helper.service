@@ -19,7 +19,8 @@ RuntimeDirectory=zapretgui
 RuntimeDirectoryMode=0755
 RuntimeDirectoryPreserve=no
 # The engine gives up root itself and continues as the person who asked; the helper needs no more than this.
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SETUID CAP_SETGID CAP_SYS_NICE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_DAC_OVERRIDE CAP_SYS_ADMIN
+# CAP_KILL: the engine runs as that person, so without it the helper cannot stop it (SIGTERM/SIGKILL to another user).
+CapabilityBoundingSet=CAP_KILL CAP_NET_ADMIN CAP_NET_RAW CAP_SETUID CAP_SETGID CAP_SYS_NICE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_DAC_OVERRIDE CAP_SYS_ADMIN
 ProtectSystem=strict
 ProtectHome=read-only
 # The window may ask the helper to rewrite the hosts file (an in-place write of exactly this file, with a first backup

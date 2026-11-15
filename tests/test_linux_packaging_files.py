@@ -39,6 +39,9 @@ def test_the_unit_starts_the_helper_under_the_runtime_folder_of_the_socket() -> 
 def test_the_unit_gives_the_helper_only_what_firewall_work_needs() -> None:
     caps = _unit()["Service"]["CapabilityBoundingSet"].split()
     assert {"CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_SETUID", "CAP_SETGID"} <= set(caps)
+    # The engine runs as the person who asked: stopping it means signalling another user's process (found on a real
+    # desktop: without CAP_KILL "stop" removed the rules but left nfqws2 running).
+    assert "CAP_KILL" in caps
     assert "CAP_SYS_MODULE" not in caps and "CAP_SYS_PTRACE" not in caps
     assert _unit()["Service"]["ProtectSystem"] == "strict"
 

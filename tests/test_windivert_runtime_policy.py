@@ -137,6 +137,15 @@ class RunnerStopTests(unittest.TestCase):
 
 
 class RuntimeApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # These tests describe Windows (the WinDivert driver); other systems skip the driver cleanup.
+        from platforms import Cap
+        from platforms.stub import make_platform
+
+        patcher = patch("platforms.current", return_value=make_platform(capabilities=frozenset({Cap.DIRECT_ENGINE_PROCESS})))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _api(self):
         from winws_runtime.runtime.runtime_api import PresetLaunchRuntimeApi
 

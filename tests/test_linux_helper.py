@@ -8,6 +8,7 @@ import os
 import signal
 import socket
 import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -488,3 +489,19 @@ def test_the_process_scan_asks_the_engine_where_the_engine_is_not_found_by_name(
     monkeypatch.setattr(process_probe, "current_platform", lambda: make_platform(engine=Engine(), capabilities=frozenset({Cap.DIRECT_ENGINE_PROCESS})))
     monkeypatch.setattr(process_probe, "_iter_winws_process_entries", lambda: [])
     assert process_probe.scan_winws_processes().canonical_pids == {}
+
+
+def test_the_windivert_driver_cleanup_is_skipped_where_there_is_no_driver(monkeypatch) -> None:
+    """Seen in the log of a real Linux desktop: every stop warned "Не удалось прочитать службу драйвера WinDivert"."""
+    from platforms import Cap
+    from platforms.stub import make_platform
+    from winws_runtime.runtime import runtime_api
+
+    calls = []
+    monkeypatch.setattr(runtime_api, "release_windivert_driver_runtime", lambda: calls.append(1) or SimpleNamespace(stuck=False, message=""))
+    api = runtime_api.PresetLaunchRuntimeApi("/opt/zapretgui/exe/winws2.exe")
+    monkeypatch.setattr("platforms.current", lambda: make_platform(capabilities=frozenset()))
+    assert api.cleanup_windivert_service() is True and calls == []
+    monkeypatch.setattr("platforms.current", lambda: make_platform(capabilities=frozenset({Cap.DIRECT_ENGINE_PROCESS})))
+    api.cleanup_windivert_service()
+    assert calls == [1]
