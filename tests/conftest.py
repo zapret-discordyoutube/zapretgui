@@ -101,23 +101,21 @@ def _tests_assume_the_encrypted_dns_service_exists(monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
-def _tests_assume_the_browser_policy_switches_exist(monkeypatch):
+def _tests_assume_the_browser_policy_switches_exist(monkeypatch, request):
     """The BlockCheck tests describe the Windows buttons that switch ECH/QUIC off through the registry policy; outside
-    Windows the platform has no such switch (``Cap.BROWSER_POLICY_SWITCH``), so the platform gets the capability here.
-    Tests that look at the gate itself patch ``platforms.current`` on their own."""
-    if sys.platform == "win32":
+    Windows the platform has no such switch (``Cap.BROWSER_POLICY_SWITCH``), so the platform gets the capability here
+    (one object for the whole test). Tests that look at the gate itself patch ``platforms.current`` on their own;
+    the mark ``real_current`` keeps ``platforms.current`` untouched."""
+    if sys.platform == "win32" or request.node.get_closest_marker("real_current"):
         yield
         return
     import dataclasses
 
     import platforms
 
-    real = platforms.current
-    monkeypatch.setattr(
-        platforms,
-        "current",
-        lambda: (lambda p: dataclasses.replace(p, capabilities=p.capabilities | {platforms.Cap.BROWSER_POLICY_SWITCH}))(real()),
-    )
+    real = platforms.current()
+    augmented = dataclasses.replace(real, capabilities=real.capabilities | {platforms.Cap.BROWSER_POLICY_SWITCH})
+    monkeypatch.setattr(platforms, "current", lambda: augmented)
     yield
 
 

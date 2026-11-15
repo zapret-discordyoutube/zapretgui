@@ -113,6 +113,11 @@ class LinuxDns:
         code, text = self._run(["nmcli", "-t", "-f", "RUNNING", "general"])
         return code == 0 and text.strip() == "running"
 
+    def _network_manager_owns(self, name: str) -> bool:
+        """NetworkManager runs AND has a connection on this card. A card it leaves alone (systemd-networkd, ifupdown:
+        ``nmcli device`` says "unmanaged") is a systemd-resolved matter, even while NetworkManager runs for other cards."""
+        return self.uses_network_manager() and bool(self._connection_uuid(name))
+
     # -- interfaces ----------------------------------------------------------------------------------------
 
     def _interface_names(self) -> list[str]:
@@ -203,10 +208,8 @@ class LinuxDns:
         return text.strip() if code == 0 else ""
 
     def read_static_dns(self, guid: str) -> StaticDns:
-        if self.uses_network_manager():
+        if self._network_manager_owns(guid):
             uuid = self._connection_uuid(guid)
-            if not uuid:
-                return StaticDns()
             code, text = self._run(["nmcli", "-g", "ipv4.dns,ipv6.dns", "connection", "show", uuid])
             if code != 0:
                 raise DnsBackendError(f"nmcli: {text.strip() or code}")
@@ -221,7 +224,7 @@ class LinuxDns:
 
     def write_dns(self, guid: str, servers: Sequence[str], *, ipv6: bool, doh_templates=None) -> None:
         wanted = [item for item in dict.fromkeys(str(s).strip() for s in servers) if item]
-        if self.uses_network_manager():
+        if self._network_manager_owns(guid):
             self._write_network_manager(guid, wanted, ipv6=ipv6)
         else:
             self._write_resolved(guid, wanted, ipv6=ipv6)

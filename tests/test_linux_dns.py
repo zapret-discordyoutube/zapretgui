@@ -133,14 +133,20 @@ def test_network_manager_refusal_becomes_a_readable_error(tmp_path):
         LinuxDns(system, net_class=make_net(tmp_path)).write_dns("enp3s0", ["1.1.1.1"], ipv6=False)
 
 
-def test_without_an_active_connection_nothing_is_written(tmp_path):
+def test_a_card_networkmanager_leaves_alone_goes_through_resolved_even_while_it_runs(tmp_path):
+    """Found on a real Debian 13 KDE machine: NetworkManager runs, but the wired card is "unmanaged" (it has no
+    connection), so the servers must be set through systemd-resolved instead of failing with "connect first"."""
+    helper = FakeHelper()
     system = FakeSystem([
         (["nmcli", "-t", "-f", "RUNNING", "general"], (0, "running")),
-        (["nmcli", "-g", "GENERAL.CON-UUID", "device", "show", "wlp2s0"], (0, "")),
+        (["nmcli", "-g", "GENERAL.CON-UUID", "device", "show", "enp3s0"], (0, "")),
+        (["resolvectl", "dns", "enp3s0"], (0, "Link 2 (enp3s0): 9.9.9.9")),
     ])
-    with pytest.raises(DnsBackendError, match="no active connection"):
-        LinuxDns(system, net_class=make_net(tmp_path)).write_dns("wlp2s0", ["1.1.1.1"], ipv6=False)
+    dns = LinuxDns(system, net_class=make_net(tmp_path), helper=helper, record_path=tmp_path / "rec.json")
+    dns.write_dns("enp3s0", ["9.9.9.9"], ipv6=False)
+    assert helper.sets == [("enp3s0", ["9.9.9.9"])]
     assert not [c for c in system.calls if c[:2] == ["nmcli", "connection"]]
+    assert dns.read_static_dns("enp3s0").ipv4 == ("9.9.9.9",)
 
 
 def test_resolved_alone_goes_through_the_helper_and_keeps_both_families(tmp_path):

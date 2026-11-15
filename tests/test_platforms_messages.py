@@ -7,6 +7,8 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import platforms
+import pytest
+
 from platforms import MessageKind
 from platforms.linux.messages import LinuxMessageBox
 from platforms.stub import PLATFORM as STUB
@@ -19,6 +21,7 @@ def test_current_platform_is_chosen_from_sys_platform():
             assert platforms._select().name == expected
 
 
+@pytest.mark.real_current
 def test_current_platform_is_chosen_once():
     with patch.object(platforms, "_current", None):
         first = platforms.current()
