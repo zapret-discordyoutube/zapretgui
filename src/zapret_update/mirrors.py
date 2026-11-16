@@ -46,8 +46,14 @@ MIRRORS_PATH = "/_sites/mirrors.json"
 # Запасной список: сначала зеркала, основное имя в конце (пометка «заблокировано»
 # в списке сервера измерена из российских сетей, а не с этой машины, но на
 # практике основное имя закрывают первым).
-BOOTSTRAP_HOSTS = (*(f"git{number}.zapret.moe" for number in range(2, 9)), CANONICAL_HOST)
-WIKI_BOOTSTRAP_HOSTS = (*(f"wiki{number}.zapret.moe" for number in range(2, 9)), "wiki.zapret.moe")
+# Первыми — постоянные имена на втором домене (zapret.moe режут целиком, с 2026-11-14): они выбраны из тех, что
+# открывались из российских домашних сетей, и контроллер имён никогда их не удаляет.
+SEED_HOSTS = {
+    "git": ("adrlneccyo.fuckingspeedtest.com", "uayozmcsbx.fuckingspeedtest.com"),
+    "wiki": ("hhlpsoeaqx.fuckingspeedtest.com", "bxfutusgzu.fuckingspeedtest.com"),
+}
+BOOTSTRAP_HOSTS = (*SEED_HOSTS["git"], *(f"git{number}.zapret.moe" for number in range(2, 9)), CANONICAL_HOST)
+WIKI_BOOTSTRAP_HOSTS = (*SEED_HOSTS["wiki"], *(f"wiki{number}.zapret.moe" for number in range(2, 9)), "wiki.zapret.moe")
 MAX_PUBLISHED_HOSTS = 16
 LIST_TTL_S = 600.0
 # Не ответило ни одно имя: запасной список держится недолго, гонка не повторяется.
@@ -72,11 +78,56 @@ ENTRY_LISTS = (
 _HOST_RE = re.compile(r"^(git|wiki)\d*\.zapret\.moe$", re.IGNORECASE)
 
 
-# Любое имя из одной метки под zapret.moe: так выглядят и нумерованные, и случайные зеркала.
-_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.zapret\.moe$")
+# Домены сайтов проекта (пул доменов, владелец 2026-11-16: «чем больше доменов, тем лучше»): zapret.moe режут по SNI
+# целиком (с 2026-11-14), поэтому имена живут и на других доменах. Эти два известны прошивке; остальные программа
+# узнаёт из доверенного списка (``domains``), потому что прошивка не должна устаревать вместе с каждым доменом.
+# Подлинность обновлений от имени не зависит (манифест подписан Ed25519, ``manifest.py``): лишний домен в списке
+# может только не открыться, но не подсунуть файл.
+SITE_DOMAINS = ("zapret.moe", "fuckingspeedtest.com")
+MAX_LEARNED_DOMAINS = 16
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_LABEL_RE = re.compile(rf"^{_LABEL}$")
+_DOMAIN_RE = re.compile(rf"^(?:{_LABEL}\.)+[a-z][a-z0-9-]{{0,61}}[a-z0-9]$")
+# Домены, узнанные из доверенных списков (на время работы программы).
+_learned_domains: set[str] = set()
+
+
+def _site_domains() -> tuple[str, ...]:
+    with _learned_lock:
+        return (*SITE_DOMAINS, *sorted(_learned_domains))
+
+
+def _name_ok(name: str) -> bool:
+    """Одна метка под доменом проекта: так выглядят и нумерованные, и случайные зеркала."""
+    label, dot, domain = str(name or "").partition(".")
+    return bool(dot) and bool(_LABEL_RE.fullmatch(label)) and domain in _site_domains()
+
+
+def learn_domains(document: Any) -> None:
+    """Запомнить домены из доверенного списка (``domains``): имена под ними принимаются как имена сайтов проекта.
+
+    Принимается только имя домена из двух и более меток, не адрес и не вид ``a.b.c``-со-спецсимволами; не больше
+    ``MAX_LEARNED_DOMAINS`` новых за запуск.
+    """
+    try:
+        items = document["domains"]
+    except (KeyError, TypeError):
+        return
+    if not isinstance(items, list):
+        return
+    with _learned_lock:
+        for item in items:
+            domain = str(item or "").strip().lower()
+            if len(_learned_domains) >= MAX_LEARNED_DOMAINS:
+                return
+            if domain in SITE_DOMAINS or len(domain) > 253 or not _DOMAIN_RE.fullmatch(domain):
+                continue
+            if all(part.isdigit() for part in domain.split(".")):
+                continue
+            _learned_domains.add(domain)
 # Семейство случайного имени, узнанное из доверенного списка (имя -> семейство).
 _learned: dict[str, str] = {}
-_learned_lock = threading.Lock()
+_learned_lock = threading.RLock()  # learn() вызывает listed_family(), которому тоже нужен список доменов
 
 
 def family_of(host: str | None) -> str:
@@ -88,9 +139,9 @@ def family_of(host: str | None) -> str:
 
 
 def listed_family(name: str, family: str) -> bool:
-    """Можно ли принять имя из списка семейства: одна метка под zapret.moe, и имя с
+    """Можно ли принять имя из списка семейства: одна метка под доменом проекта, и имя с
     приставкой (git7, wiki3) — только своего семейства."""
-    if family not in FAMILIES or not _NAME_RE.fullmatch(name):
+    if family not in FAMILIES or not _name_ok(name):
         return False
     match = _HOST_RE.fullmatch(name)
     return match is None or match.group(1).lower() == family
@@ -186,6 +237,7 @@ def ordered_hosts(document: Any, family: str = "git") -> list[str]:
     не помеченные заблокированными, в конце заблокированные: помечены они из
     российских домашних сетей, а с этой машины всё равно могут открываться.
     """
+    learn_domains(document)
     try:
         entry = document["families"][family]
         items = [item for item in entry["names"] if isinstance(item, dict)]
@@ -245,6 +297,7 @@ def entry_hosts(document: Any, family: str = "git") -> list[str]:
     try:
         if document["schema"] != 1:
             return []
+        learn_domains(document)
         hosts = [str(h).strip().lower() for h in document["families"][family]["hosts"]]
     except (KeyError, TypeError, AttributeError):
         return []

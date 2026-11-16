@@ -12,12 +12,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from zapret_update import mirrors  # noqa: E402
 
 
+_REAL_BOOTSTRAP = (mirrors.BOOTSTRAP_HOSTS, mirrors.WIKI_BOOTSTRAP_HOSTS)
+
+
 def setUpModule() -> None:
     # Гонка в тестах: имена подключаются почти сразу, срок короткий.
     global _patches
     from unittest.mock import patch
 
-    _patches = [patch.object(mirrors, "RACE_STAGGER_S", 0.01), patch.object(mirrors, "RACE_DEADLINE_S", 1.5)]
+    # Старые правила этих тестов (порядок запасного списка: git2 первым) держатся со списками до 2026-11-16;
+    # настоящий порядок с постоянными именами второго домена проверяет DomainPoolTests (_REAL_BOOTSTRAP).
+    _patches = [
+        patch.object(mirrors, "RACE_STAGGER_S", 0.01),
+        patch.object(mirrors, "RACE_DEADLINE_S", 1.5),
+        patch.object(mirrors, "BOOTSTRAP_HOSTS", _REAL_BOOTSTRAP[0][len(mirrors.SEED_HOSTS["git"]):]),
+        patch.object(mirrors, "WIKI_BOOTSTRAP_HOSTS", _REAL_BOOTSTRAP[1][len(mirrors.SEED_HOSTS["wiki"]):]),
+    ]
     for patcher in _patches:
         patcher.start()
 
@@ -305,6 +315,59 @@ class RandomNamesAndEntryListsTests(unittest.TestCase):
 
         mirrors.MirrorList(fetch).choose()
         self.assertFalse(set(asked) & set(mirrors.ENTRY_LISTS))
+
+
+class DomainPoolTests(unittest.TestCase):
+    """Пул доменов (2026-11-16): имена живут не только под zapret.moe."""
+
+    def setUp(self) -> None:
+        mirrors._learned_domains.clear()
+        mirrors._learned.clear()
+        self.addCleanup(mirrors._learned_domains.clear)
+        self.addCleanup(mirrors._learned.clear)
+
+    def test_the_second_domain_is_known_from_the_firmware(self):
+        for name in ("adrlneccyo.fuckingspeedtest.com", "x.zapret.moe"):
+            self.assertTrue(mirrors.listed_family(name, "git"), name)
+        for bad in ("evil.example", "a.b.fuckingspeedtest.com", "fuckingspeedtest.com", "fuckingspeedtest.com.evil.example", ".zapret.moe"):
+            self.assertFalse(mirrors.listed_family(bad, "git"), bad)
+
+    def test_a_domain_from_a_trusted_list_is_learned_and_its_names_are_taken(self):
+        doc = _document(("qwertyuiop.newdom.top", False), ("git2.zapret.moe", True), preferred="qwertyuiop.newdom.top")
+        self.assertEqual(mirrors.ordered_hosts(doc, "git"), ["git2.zapret.moe"])        # not yet: the domain is unknown
+        doc["domains"] = ["newdom.top"]
+        self.assertEqual(mirrors.ordered_hosts(doc, "git"), ["qwertyuiop.newdom.top", "git2.zapret.moe"])
+        self.assertEqual(mirrors.family_of("qwertyuiop.newdom.top"), "git")             # and the family is remembered
+        self.assertTrue(mirrors.is_site_host("qwertyuiop.newdom.top"))
+
+    def test_the_entry_page_list_learns_domains_too(self):
+        doc = {"schema": 1, "domains": ["Newdom.TOP"], "families": {"git": {"hosts": ["abcdefghij.newdom.top", "git2.zapret.moe"]}}}
+        self.assertEqual(mirrors.entry_hosts(doc, "git"), ["abcdefghij.newdom.top", "git2.zapret.moe"])
+
+    def test_garbage_domains_are_ignored(self):
+        junk = ["", None, 5, "com", "127.0.0.1", "1.2.3.4", "a b.example", "-a.example", "a_b.example", "x" * 300 + ".example", "ex/ample.com", "a..b.com", "http://a.com"]
+        mirrors.learn_domains({"domains": junk})
+        self.assertEqual(mirrors._learned_domains, set())
+        for bad in ("nope", None, {"a": 1}, [[]]):
+            mirrors.learn_domains({"domains": bad})
+            mirrors.learn_domains(bad)
+        self.assertEqual(mirrors._learned_domains, set())
+
+    def test_the_number_of_learned_domains_is_capped(self):
+        mirrors.learn_domains({"domains": [f"d{i}.example" for i in range(100)]})
+        self.assertEqual(len(mirrors._learned_domains), mirrors.MAX_LEARNED_DOMAINS)
+
+    def test_a_known_domain_is_not_learned_twice_and_a_numbered_name_keeps_its_family_rule(self):
+        mirrors.learn_domains({"domains": ["zapret.moe", "fuckingspeedtest.com"]})
+        self.assertEqual(mirrors._learned_domains, set())
+        self.assertFalse(mirrors.listed_family("git2.zapret.moe", "wiki"))
+
+    def test_the_bootstrap_lists_start_with_the_seeds_of_the_second_domain(self):
+        self.assertEqual(_REAL_BOOTSTRAP[0][:2], mirrors.SEED_HOSTS["git"])
+        self.assertEqual(_REAL_BOOTSTRAP[1][:2], mirrors.SEED_HOSTS["wiki"])
+        self.assertEqual(_REAL_BOOTSTRAP[0][-1], mirrors.CANONICAL_HOST)                # the blocked-by-habit main name stays last
+        for host in (*_REAL_BOOTSTRAP[0], *_REAL_BOOTSTRAP[1]):
+            self.assertTrue(mirrors._name_ok(host), host)
 
 
 if __name__ == "__main__":
