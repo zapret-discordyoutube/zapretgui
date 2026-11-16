@@ -185,6 +185,8 @@ def test_the_appimage_launcher_installs_the_system_part_and_starts_the_installed
     assert "mktemp -d /var/tmp/zapretgui-install" in text and 'rm -rf "$tmp"' in text and "trap" not in text.split("\n", 1)[1].replace("# not a trap", "")
     assert "pkexec" in text and "sudo" in text and "--install-system-part" in text
     assert text.rstrip().endswith('exec /opt/zapretgui/bin/zapretgui "$@"')
+    # a fresh install adds the person to the group; the window then starts inside it at once (no re-login needed)
+    assert 'exec sg zapretgui -c "exec /opt/zapretgui/bin/zapretgui"' in text and 'Log out and in once' in text
     # the version the launcher compares is the one the bundle script writes
     assert "VERSION" in text
 

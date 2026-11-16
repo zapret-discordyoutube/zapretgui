@@ -53,7 +53,14 @@ if [ "$1" = "--install-system-part" ] || ! system_part_ready; then
     exit 1
   fi
   [ "$1" = "--install-system-part" ] && exit 0
-  getent group zapretgui | grep -qw "$(id -un)" || say "You were added to the group zapretgui. Log out and in once, then start Zapret again."
+  # The person was just added to the group zapretgui, but this session does not have it until the next login. Without
+  # arguments the window can start at once inside the new group (sg); the helper only talks to members of the group.
+  if ! id -nG | tr ' ' '\n' | grep -qx zapretgui && getent group zapretgui | grep -qw "$(id -un)"; then
+    if [ "$#" -eq 0 ] && command -v sg >/dev/null; then
+      exec sg zapretgui -c "exec /opt/zapretgui/bin/zapretgui"
+    fi
+    say "You were added to the group zapretgui. Log out and in once, then start Zapret again."
+  fi
 fi
 
 exec /opt/zapretgui/bin/zapretgui "$@"
