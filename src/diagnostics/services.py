@@ -156,6 +156,13 @@ SERVICES: dict[str, Service] = {
             Target("discord.com", "сайт и вход", read_body=True, main=True),
             Target("gateway.discord.gg", "чат и статусы"),
             Target("cdn.discordapp.com", "картинки и файлы"),
+            # Дальше — по профилю пресета на каждый список (Discord · обновления, картинки, голос и видео,
+            # vencord.dev): человек видит, какой именно кусок Discord закрыт и какой профиль его ведёт.
+            Target("updates.discord.com", "обновления"),
+            Target("media.discordapp.net", "картинки в чатах"),
+            Target("images-ext-1.discordapp.net", "картинки по ссылкам"),
+            Target("discord.media", "голос и видео"),
+            Target("vencord.dev", "Vencord"),
         ),
     ),
     "youtube": Service(

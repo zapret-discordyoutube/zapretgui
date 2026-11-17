@@ -982,7 +982,15 @@ class SiteWordsComeFromTheReportTests(unittest.TestCase):
             ],
         )
         self.assertTrue(site_service("m.youtube.com").targets[-1].discover_googlevideo)
-        self.assertEqual([target.host for target in related_targets("gateway.discord.gg")], ["discord.com", "cdn.discordapp.com"])
+        self.assertEqual([target.host for target in related_targets("gateway.discord.gg")], [
+            "discord.com",
+            "cdn.discordapp.com",
+            "updates.discord.com",
+            "media.discordapp.net",
+            "images-ext-1.discordapp.net",
+            "discord.media",
+            "vencord.dev",
+        ])
         self.assertEqual(
             [target.host for target in related_targets("www.youtube.com")],
             ["i.ytimg.com", "youtubei.googleapis.com", engine.GOOGLEVIDEO_FALLBACK_HOST],
