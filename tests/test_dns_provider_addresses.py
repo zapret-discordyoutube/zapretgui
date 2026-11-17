@@ -47,6 +47,9 @@ class ProviderAddressesTests(unittest.TestCase):
         self.addCleanup(lambda: self.malw["ipv4"].__setitem__(slice(None), shipped))
         self.addCleanup(provider_addresses._SHIPPED.clear)
         provider_addresses._SHIPPED.clear()
+        # Файл сборки читается раз за процесс: в тестах его нет, пока тест не положит свой.
+        provider_addresses._BASELINE = {}
+        self.addCleanup(setattr, provider_addresses, "_BASELINE", None)
         self.shipped = tuple(shipped)
 
     def _refresh(self, *ipv4: str, error: str = "", names=("Malw.link",)):
@@ -114,6 +117,48 @@ class ProviderAddressesTests(unittest.TestCase):
             fresh = provider_addresses.refresh_for_apply("Malw.link")
 
         self.assertEqual(fresh, self.shipped)
+
+
+class BuildBaselineTests(ProviderAddressesTests):
+    """Адреса «на день сборки»: сборка узнаёт их по имени DoH и кладёт в файл, код править не нужно."""
+
+    def test_build_learns_only_servers_whose_name_answered(self) -> None:
+        def lookup(template, **_kwargs):
+            return _found(*self.NEW) if "malw" in template.host else _found(error="закрыт из этой страны")
+
+        result = provider_addresses.learn_baseline(lookup=lookup)
+
+        self.assertEqual(result, {"Malw.link": list(self.NEW)})
+        self.assertEqual(self.memory.writes, [], "сборка не пишет в настройки машины")
+
+    def test_baseline_file_round_trips_and_ignores_junk(self) -> None:
+        import json
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "dns_provider_addresses.json"
+            path.write_text(provider_addresses.baseline_json({"Malw.link": list(self.NEW)}), encoding="utf-8")
+            self.assertEqual(provider_addresses.read_baseline(path), {"Malw.link": self.NEW})
+            path.write_text(json.dumps({"A": ["10.0.0.1"], "B": "не список", "C": ["8.8.8.8"]}), encoding="utf-8")
+            self.assertEqual(provider_addresses.read_baseline(path), {"C": ("8.8.8.8",)})
+            path.write_text("{не json", encoding="utf-8")
+            self.assertEqual(provider_addresses.read_baseline(path), {})
+            self.assertEqual(provider_addresses.read_baseline(Path(folder) / "нет.json"), {})
+
+    def test_baseline_beats_the_code_and_learned_beats_the_baseline(self) -> None:
+        provider_addresses._BASELINE = {"Malw.link": self.NEW}
+
+        self.assertEqual(provider_addresses.current_ipv4("Malw.link", self.malw, {}), self.NEW)
+        learned = {"Malw.link": {"ipv4": ["8.8.8.8"], "former_ipv4": []}}
+        self.assertEqual(provider_addresses.current_ipv4("Malw.link", self.malw, learned), ("8.8.8.8",))
+
+    def test_adapters_on_a_code_address_move_to_the_baseline(self) -> None:
+        provider_addresses._BASELINE = {"Malw.link": self.NEW}
+
+        pairs = provider_addresses.address_replacements({})
+
+        self.assertEqual(pairs, {address: self.NEW[0] for address in self.shipped})
 
 
 class ApplyWorkerUsesFreshAddressesTests(unittest.TestCase):

@@ -9,6 +9,11 @@
 (``dns.learned_servers``) и с этого момента — нынешние для плитки; адаптеры, которые смотрят на
 прежний адрес, переводятся на нынешний (``dns.address_migration``).
 
+Узнаётся это двумя путями, и они дополняют друг друга. При сборке (``learn_baseline``) выпуск сам спрашивает
+имена и кладёт проверенные адреса в файл ``system/dns_provider_addresses.json`` — это адреса «на день
+установки», код для них править не нужно. А на компьютере человека программа спрашивает то же имя в
+момент нажатия плитки (``refresh_for_apply``), при запуске и раз в сутки: новее всегда то, что узнано позже.
+
 Это то же, что делает ``dns.zapret_dns_server`` для своего сервера проекта, только для списка чужих.
 Имя не ответило или ни один адрес не прошёл проверку — остаются прежние: неудачный вопрос
 никогда не меняет сервер.
@@ -23,6 +28,9 @@ from dataclasses import dataclass
 from log.log import log
 
 __all__ = [
+    "baseline_json",
+    "learn_baseline",
+    "read_baseline",
     "FLAG",
     "ProviderChange",
     "adopt",
@@ -37,9 +45,11 @@ FLAG = "addresses_by_name"
 MAX_ADDRESSES = 4
 MAX_FORMER = 8
 
-# Встроенные адреса плиток на день выпуска: ``adopt`` меняет список плитки на месте, поэтому
+# Встроенные в код адреса плиток: ``adopt`` меняет список плитки на месте, поэтому
 # встроенное запоминается до первой замены.
 _SHIPPED: dict[str, tuple[str, ...]] = {}
+# Адреса из файла сборки (system/dns_provider_addresses.json); None — файл ещё не читали.
+_BASELINE: dict[str, tuple[str, ...]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,14 +101,42 @@ def tracked() -> list[tuple[str, dict]]:
 
 
 def _shipped(name: str, data: dict) -> tuple[str, ...]:
+    """Адреса, вшитые в код."""
     return _SHIPPED.setdefault(name, tuple(str(item) for item in data.get("ipv4") or ()))
 
 
+def read_baseline(path=None) -> dict[str, tuple[str, ...]]:
+    """Адреса из файла сборки: {название: IPv4}. Нет файла или он испорчен — пусто."""
+    import json
+
+    if path is None:
+        from config.runtime_layout import APPLICATION_PATHS
+
+        path = APPLICATION_PATHS.provider_addresses_file
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    result: dict[str, tuple[str, ...]] = {}
+    for name, values in (raw.items() if isinstance(raw, dict) else ()):
+        addresses = _global_ipv4(values if isinstance(values, list) else ())[:MAX_ADDRESSES]
+        if addresses:
+            result[str(name)] = addresses
+    return result
+
+
+def _baseline(name: str) -> tuple[str, ...]:
+    global _BASELINE
+    if _BASELINE is None:
+        _BASELINE = read_baseline()
+    return _BASELINE.get(name, ())
+
+
 def current_ipv4(name: str, data: dict, stored: dict | None = None) -> tuple[str, ...]:
-    """Адреса IPv4 сервера сейчас: проверенные по имени, а без них — встроенные."""
+    """Адреса IPv4 сервера сейчас: узнанные на компьютере, иначе из файла сборки, иначе вшитые в код."""
     shipped = _shipped(name, data)
     learned = _global_ipv4(((stored if stored is not None else _stored()).get(name) or {}).get("ipv4"))
-    return learned or shipped
+    return learned or _baseline(name) or shipped
 
 
 def address_replacements(stored: dict | None = None) -> dict[str, str]:
@@ -109,7 +147,11 @@ def address_replacements(stored: dict | None = None) -> dict[str, str]:
         current = current_ipv4(name, data, stored)
         if not current:
             continue
-        known = (*_shipped(name, data), *_global_ipv4((stored.get(name) or {}).get("former_ipv4")))
+        known = (
+            *_shipped(name, data),
+            *_baseline(name),
+            *_global_ipv4((stored.get(name) or {}).get("former_ipv4")),
+        )
         for address in known:
             if address not in current:
                 pairs[address] = current[0]
@@ -224,3 +266,33 @@ def refresh_for_apply(name: str, *, limit_s: float = APPLY_LOOKUP_LIMIT_S, looku
         if item_name == name:
             return current_ipv4(item_name, data)
     return ()
+
+
+def learn_baseline(*, cancel=None, lookup=None) -> dict[str, list[str]]:
+    """При сборке: {название: проверенные адреса} для отслеживаемых серверов, чьё имя ответило.
+
+    Ничего не пишет в настройки: итог кладёт в файл сборка (``baseline_json``). Сервер, имя которого
+    с машины сборки не ответило (закрыт из этой страны), в итог не входит — у него остаются адреса из кода.
+    """
+    from dns.custom_servers import parse_doh_template
+
+    if lookup is None:
+        from dns.doh_lookup import find_doh_addresses
+
+        lookup = find_doh_addresses
+    result: dict[str, list[str]] = {}
+    for name, data in tracked():
+        try:
+            found = lookup(parse_doh_template(str(data.get("doh") or "")), ipv6=False, doh_supported=True, cancel=cancel)
+        except Exception:
+            continue
+        learned = _global_ipv4(getattr(found, "ipv4", ()))[:MAX_ADDRESSES]
+        if learned:
+            result[name] = list(learned)
+    return result
+
+
+def baseline_json(mapping: dict[str, list[str]]) -> str:
+    import json
+
+    return json.dumps({name: list(values) for name, values in sorted(mapping.items())}, ensure_ascii=False, indent=2) + "\n"

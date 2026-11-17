@@ -188,6 +188,11 @@ class ApplicationPaths:
         return self.system_dir / "hosts_catalog.sqlite3"
 
     @property
+    def provider_addresses_file(self) -> Path:
+        """Адреса чужих DNS-серверов на день сборки (dns.provider_addresses): сборка узнаёт их по имени DoH."""
+        return self.system_dir / "dns_provider_addresses.json"
+
+    @property
     def fakes_catalog_database(self) -> Path:
         """Реестр фейков winws2: только чтение, кладёт установщик."""
         return self.system_dir / "fakes_catalog.sqlite3"
