@@ -105,6 +105,22 @@ class DnsPageTests(unittest.TestCase):
 
     # ── экскурсия ────────────────────────────────────────────
 
+    def test_silent_server_is_grey_and_only_proven_interference_is_blocked(self) -> None:
+        """«Не отвечает» (выключен или закрыт — не отличить) не выдаётся за красное «блокируется»."""
+        from dns.dns_providers import STATUS_BLOCKED, STATUS_SILENT
+        from dns.server_check_plans import CARD_NETWORK, CARD_OK, CARD_SILENT
+
+        page = self._page()
+        page._line_check = LineCheck(
+            time="2026-11-17T20:00:00",
+            cards=(("Gcore", CARD_SILENT, ""), ("Control D", CARD_NETWORK, ""), ("Comss DNS", CARD_OK, "")),
+        )
+
+        self.assertEqual(page._line_status("Gcore", {})[0], STATUS_SILENT)
+        self.assertEqual(page._line_status("Control D", {})[0], STATUS_BLOCKED)
+        # Своя проверка «Работает» снимает и отметку каталога.
+        self.assertEqual(page._line_status("Comss DNS", {"status": STATUS_BLOCKED})[0], "")
+
     def test_doh_switch_is_saved_at_once_not_after_the_apply(self) -> None:
         """Применение бывает долгим, а свежий снимок настроек возвращал переключатель назад."""
         page = self._page()

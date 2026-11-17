@@ -2170,6 +2170,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "под угрозой",
         "en": "at risk",
     },
+    "page.network.status.silent": {
+        "ru": "не отвечает",
+        "en": "not answering",
+    },
+    "page.network.status.silent.tooltip": {
+        "ru": "Не отвечает на вашей линии ни одним способом: сервер выключен или закрыт для вашей сети. Что именно — по одной линии не отличить.",
+        "en": "Does not answer on your line in any way: the server is down or closed to your network. One line cannot tell which.",
+    },
     "page.network.status.blocked.tooltip": {
         "ru": "В России блокируется: обычные запросы к этому серверу не доходят или подменяются по дороге.",
         "en": "Blocked in Russia: plain queries to this server do not arrive or are replaced on the way.",

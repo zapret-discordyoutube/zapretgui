@@ -43,6 +43,7 @@ from dns.dns_providers import (
     FUN_GROUP,
     LOCAL_PROXY_GROUP,
     STATUS_AT_RISK,
+    STATUS_SILENT,
     STATUS_BLOCKED,
     ZAPRET_DNS_GROUP,
     ZAPRET_DNS_PROVIDER_NAME,
@@ -114,6 +115,10 @@ STATUS_TOOLTIP_KEYS = {
     STATUS_AT_RISK: (
         "page.network.status.at_risk.tooltip",
         "Под угрозой блокировки в России: пока работает, но может перестать отвечать.",
+    ),
+    STATUS_SILENT: (
+        "page.network.status.silent.tooltip",
+        "Не отвечает на вашей линии ни одним способом: сервер выключен или закрыт для вашей сети. Что именно — по одной линии не отличить.",
     ),
 }
 FILTER_TEXT_KEYS = {
@@ -283,6 +288,7 @@ class NetworkPage(BasePage):
             add=self._t("page.network.add_tile.title", "Свой DNS"),
             status_blocked=self._t("page.network.status.blocked", "блокируется"),
             status_at_risk=self._t("page.network.status.at_risk", "под угрозой"),
+            status_silent=self._t("page.network.status.silent", "не отвечает"),
             grid_name=self._t("page.network.grid.name", "DNS-серверы"),
             grid_description=self._t(
                 "page.network.grid.description",
@@ -953,8 +959,12 @@ class NetworkPage(BasePage):
         if found is None:
             return status, ""
         card, note = found
-        if card in (CARD_NETWORK, CARD_SILENT):
+        if card == CARD_NETWORK:
+            # Доказано: сеть по дороге подменяет ответы или закрывает имя сервера.
             status = STATUS_BLOCKED
+        elif card == CARD_SILENT:
+            # Не ответил ничем: выключен он или закрыт для сети, не доказано — красного «блокируется» нет.
+            status = STATUS_SILENT
         elif card == CARD_OK:
             status = ""
         verdict = f"{CARD_TITLES[card]} — {note}" if note else CARD_TITLES[card]

@@ -43,7 +43,7 @@ from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPe
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import FluentIcon, getFont, isDarkTheme, themeColor
 
-from dns.dns_providers import STATUS_AT_RISK, STATUS_BLOCKED
+from dns.dns_providers import STATUS_AT_RISK, STATUS_BLOCKED, STATUS_SILENT
 from profile.ui.profile_icon import profile_icon_pixmap
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
@@ -174,6 +174,7 @@ class GridTexts:
     add: str = "Свой DNS"
     status_blocked: str = "блокируется"
     status_at_risk: str = "под угрозой"
+    status_silent: str = "не отвечает"
     grid_name: str = "DNS-серверы"
     grid_description: str = "Стрелки — выбор плитки, Enter или пробел — применить DNS."
 
@@ -233,15 +234,19 @@ def status_text(tile: DnsTile, texts: GridTexts = GridTexts()) -> str:
         return texts.status_blocked
     if tile.status == STATUS_AT_RISK:
         return texts.status_at_risk
+    if tile.status == STATUS_SILENT:
+        return texts.status_silent
     return ""
 
 
 def status_color(status: str, dark: bool) -> QColor | None:
-    """Цвет пометки: красный — блокируется, жёлтый — под угрозой."""
+    """Цвет пометки: красный — блокируется, жёлтый — под угрозой, серый — не отвечает."""
     if status == STATUS_BLOCKED:
         return QColor("#f85149" if dark else "#cf222e")
     if status == STATUS_AT_RISK:
         return QColor("#d29922" if dark else "#9a6700")
+    if status == STATUS_SILENT:
+        return QColor("#8b949e" if dark else "#57606a")
     return None
 
 

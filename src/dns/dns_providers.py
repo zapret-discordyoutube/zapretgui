@@ -65,6 +65,9 @@ from config import zapret_dns
 STATUS_BLOCKED = "blocked"
 STATUS_AT_RISK = "at_risk"
 STATUSES = (STATUS_BLOCKED, STATUS_AT_RISK)
+# Только с проверки «DNS-серверы» на линии человека, в каталоге не пишется: сервер не ответил ни одним
+# способом, а «выключен» это или «закрыт для сети», по одной линии не доказать (в отличие от STATUS_BLOCKED).
+STATUS_SILENT = "silent"
 
 LOCAL_PROXY_GROUP = "Шифрованные"
 
