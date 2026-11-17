@@ -723,6 +723,7 @@ class BlockcheckPage(BasePage):
                 embedded=True,
             )
             self._domain_lookup_tab_page.report_requested.connect(self._open_log_report)
+            self._domain_lookup_tab_page.start_button.clicked.connect(self._notice_system_proxy)
             self._domain_lookup_tab_page.card_opened.connect(self._open_card_detail)
             self._domain_lookup_tab_page.past_opened.connect(self._open_past_cards)
             self._push_tab_histories()
@@ -753,6 +754,7 @@ class BlockcheckPage(BasePage):
             )
             self._dns_servers_tab_page.details_requested.connect(self._open_server_detail)
             self._dns_servers_tab_page.report_requested.connect(self._open_log_report)
+            self._dns_servers_tab_page.start_button.clicked.connect(self._notice_system_proxy)
             self._dns_servers_tab_page.past_view_opened.connect(self._open_past_content)
             self._push_tab_histories()
             self._dns_servers_tab_page.setVisible(False)
@@ -781,6 +783,7 @@ class BlockcheckPage(BasePage):
                 open_dns_settings=self._open_dns_settings,
             )
             self._dns_spoofing_tab_page.report_requested.connect(self._open_log_report)
+            self._dns_spoofing_tab_page.check_button.clicked.connect(self._notice_system_proxy)
             self._dns_spoofing_tab_page.past_view_opened.connect(self._open_past_content)
             self._push_tab_histories()
             self._dns_spoofing_tab_page.setVisible(False)
@@ -923,10 +926,20 @@ class BlockcheckPage(BasePage):
         """Карточка сервиса: сразу проверить только его."""
         self._on_start(scope=service_scope(key))
 
+    def _notice_system_proxy(self, *_args) -> None:
+        """Перед любой проверкой: включён системный прокси — сказать об этом (``blockcheck.proxy_notice``)."""
+        try:
+            from blockcheck.proxy_notice import notify_if_system_proxy
+
+            notify_if_system_proxy(self._notify, window=self.window())
+        except Exception as exc:
+            log(f"BlockCheck: проверка системного прокси не удалась: {exc}", "WARNING")
+
     def _on_start(self, *_args, scope: str = ""):
         # Закрытую страницу не запускаем: поздние сигналы прошлого запуска уже никто не ждёт.
         if self._run_runtime.is_running() or self._cleanup_in_progress:
             return
+        self._notice_system_proxy()
         self._last_report = None
         # Отчёт прошлого запуска не должен уйти в обращение, если у этого запуска сохранить отчёт не вышло.
         self._run_log_file = None

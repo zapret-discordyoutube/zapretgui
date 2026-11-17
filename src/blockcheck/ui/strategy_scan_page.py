@@ -673,6 +673,13 @@ class StrategyScanPage(BasePage):
     def _on_start(self):
         if self._strategy_scan_run_runtime.is_running():
             return
+        # Системный прокси превращает «подбирать нечего» в ложный итог: говорим о нём до запуска.
+        try:
+            from blockcheck.proxy_notice import notify_if_system_proxy
+
+            notify_if_system_proxy(self._notify, window=self.window())
+        except Exception as exc:
+            logger.warning("Подбор стратегии: проверка системного прокси не удалась: %s", exc)
         self._cleanup_in_progress = False
         if not self._confirm_geo_site_scan():
             return
