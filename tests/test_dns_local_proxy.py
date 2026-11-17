@@ -448,6 +448,7 @@ class LocalProxyApplyWorkerTests(unittest.TestCase):
             load_state=lambda: "state",
             start_local_proxy=start_local_proxy,
             stop_local_proxy_if_unused=lambda: self.log.append(("stop_if_unused",)),
+            lookup_doh_name=lambda _host: [],
         )
 
     def test_engine_answers_first_and_only_then_adapters_get_the_local_address(self) -> None:
@@ -520,6 +521,20 @@ class LocalProxyApplyWorkerTests(unittest.TestCase):
         # Адаптер получает адрес движка, а не сервера; службу движка после этого не убирают.
         self.assertEqual(self.log, [("start", "doh", "Zapret DNS", 1), ("apply", ["127.0.0.1"], ["::1"])])
         self.assertFalse(result["plan"].doh_closed)
+
+    def test_engine_also_gets_the_addresses_of_the_doh_name(self) -> None:
+        """У GeoHide DoH отвечает только по адресу имени, а не по адресам обычного DNS (проверено 2026-11-17)."""
+        from dns.state import DnsCommandResult
+
+        worker = self._smart_worker(data=self.ZAPRET, started=DnsCommandResult(success=True, listen_ipv6=True))
+        asked: list[str] = []
+        worker._lookup_doh_name = lambda host: asked.append(host) or ["198.51.100.7", "2001:db8::1"]
+
+        worker._run_apply()
+
+        self.assertEqual(asked, ["dns.zapret.moe"])
+        # Адрес имени (IPv4) и адрес плитки; IPv6 движок не получает.
+        self.assertEqual(self.log[0], ("start", "doh", "Zapret DNS", 2))
 
     def test_ordinary_tile_falls_back_to_plain_addresses_and_says_so(self) -> None:
         from dns.state import DnsCommandResult

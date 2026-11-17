@@ -210,9 +210,12 @@ class DnsApplyWorker(QThread):
         load_state: Callable[[], Any],
         start_local_proxy: Callable[..., Any],
         stop_local_proxy_if_unused: Callable[[], Any],
+        lookup_doh_name: Callable[[str], list[str]] | None = None,
         parent=None,
     ):
         super().__init__(parent)
+        # Адреса имени DoH; подмена нужна тестам, чтобы не ходить в сеть.
+        self._lookup_doh_name = lookup_doh_name
         self._start_local_proxy = start_local_proxy
         self._stop_local_proxy_if_unused = stop_local_proxy_if_unused
         self._request_id = int(request_id)
@@ -244,6 +247,22 @@ class DnsApplyWorker(QThread):
             self.failed.emit(self._request_id, str(exc))
             return
         self.completed.emit(self._request_id, result)
+
+    def _doh_upstreams(self, proxy_upstreams):
+        """Серверы для движка: адреса имени DoH (там шифрованный сервис живёт на деле) и адреса плитки."""
+        from urllib.parse import urlsplit
+
+        from dns.doh_name_addresses import MAX_NAME_ADDRESSES, doh_host_addresses
+
+        lookup = self._lookup_doh_name or doh_host_addresses
+        from dns.step_log import timed_step
+
+        host = urlsplit(str(self._data.get("doh") or "")).hostname or ""
+        found: list[str] = []
+        if host:
+            with timed_step(f"адреса имени DoH {host}"):
+                found = [item for item in lookup(host) if ":" not in item][:MAX_NAME_ADDRESSES]
+        return proxy_upstreams(self._data, found)
 
     def _run_apply(self) -> dict[str, object]:
         from dns import page_plans as dns_page_plans
@@ -289,7 +308,7 @@ class DnsApplyWorker(QThread):
                         started = self._start_local_proxy(self._proxy_mode)
                     else:
                         started = self._start_local_proxy(
-                            self._proxy_mode, upstreams=proxy_upstreams(self._data), server_name=self._name
+                            self._proxy_mode, upstreams=self._doh_upstreams(proxy_upstreams), server_name=self._name
                         )
                 if started.success:
                     used_proxy = True

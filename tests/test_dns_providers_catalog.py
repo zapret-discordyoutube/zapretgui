@@ -77,6 +77,18 @@ class DnsProvidersCatalogTests(unittest.TestCase):
         self.assertIn("DNSCrypt: у режима шифрованного DNS адреса должны быть 127.0.0.1 и ::1", problems)
         self.assertIn("Cloudflare: неверный или повторный режим", problems)
 
+    def test_doh_name_addresses_come_first_and_are_not_repeated(self) -> None:
+        from dns.dns_providers import proxy_upstreams
+        from dns.local_proxy_catalog import doh_upstreams
+
+        data = {"doh": "https://geohide.ru/dns-query", "ipv4": ["193.233.112.67", "193.233.112.68"]}
+
+        result = proxy_upstreams(data, ["37.230.192.51", "193.233.112.67"])
+
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[0].stamp, doh_upstreams("https://geohide.ru/dns-query", ["37.230.192.51"])[0].stamp)
+        self.assertEqual(proxy_upstreams(data), doh_upstreams(data["doh"], data["ipv4"]))
+
     def test_tile_picks_its_own_way_to_encrypt(self) -> None:
         """Плитка одна: в Windows 11 шифрует сама система, в Windows 10 — встроенный шифрованный DNS."""
         from dns.dns_providers import proxy_mode_for, proxy_upstreams

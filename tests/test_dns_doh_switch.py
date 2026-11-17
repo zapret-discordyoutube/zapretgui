@@ -134,6 +134,7 @@ class DohSwitchWorkerTests(unittest.TestCase):
             load_state=lambda: "state",
             start_local_proxy=lambda mode, **kwargs: self.log.append(("start", mode)),
             stop_local_proxy_if_unused=lambda: self.log.append(("stop_if_unused",)),
+            lookup_doh_name=lambda _host: [],
         )
 
     def test_choice_is_saved_before_the_server_is_written_to_adapters(self) -> None:

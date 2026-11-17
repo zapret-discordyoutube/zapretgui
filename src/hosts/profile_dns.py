@@ -21,9 +21,9 @@ Zapret DNS здесь нет: за его адресом следит dns.zapret
 
 from __future__ import annotations
 
-import threading
-import time
 from urllib.parse import urlsplit
+
+from dns.doh_name_addresses import doh_host_addresses as _doh_host_addresses
 
 __all__ = ["PROFILE_SERVERS", "ask_profile", "has_server"]
 
@@ -36,35 +36,6 @@ PROFILE_SERVERS: dict[str, str] = {
 }
 
 TIMEOUT_S = 3.0
-# Адрес имени DoH-сервера запоминается на столько: проверка спрашивает десятки имён подряд.
-HOST_CACHE_S = 3600.0
-_host_cache: dict[str, tuple[float, list[str]]] = {}
-_host_lock = threading.Lock()
-
-
-def _doh_host_addresses(tls_host: str) -> list[str]:
-    """Адреса самого имени DoH (dns.dns-ai.ru и т. п.) по шифрованному DNS.
-
-    Шифрованный сервис живёт не всегда там же, где обычный DNS из списка: у DNS-AI
-    обычный DNS — 192.144.59.14, а DoH — 194.87.196.13 и 45.151.102.219 (2026-11-02).
-    """
-    now = time.monotonic()
-    with _host_lock:
-        cached = _host_cache.get(tls_host)
-        if cached is not None and now - cached[0] < HOST_CACHE_S:
-            return list(cached[1])
-    from utils.dns_reference import reference_ask
-    from utils.dns_wire import TYPE_A
-    from utils.socket_cancel import SocketCancel
-
-    try:
-        answer = reference_ask(SocketCancel(), timeout_s=TIMEOUT_S)(tls_host, TYPE_A)
-        found = [str(item) for item in answer.values(TYPE_A)] if answer is not None else []
-    except Exception:
-        found = []
-    with _host_lock:
-        _host_cache[tls_host] = (now, found)
-    return found
 
 
 def has_server(profile_id: str) -> bool:

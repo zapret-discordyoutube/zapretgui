@@ -473,7 +473,8 @@ DNS_PROVIDERS = {
         # остальные имена настоящие. Адреса IPv6 с их страницы с win10 не проверить.
         "Malw.link": {
             "ipv4": ["179.254.166.171", "164.5.224.81"],
-            "ipv6": [],
+            # IPv6 — со страницы info.dns.malw.link (2026-11-17); с win10 и из США IPv6 не проверить.
+            "ipv6": ["2a12:bec4:1bb0:27dd::2", "2a13:82c0:0:d::3"],
             "desc": "Нейросети и сайты",
             "icon": "fa5s.bug",
             "color": "#34D399",
@@ -574,11 +575,16 @@ def proxy_mode_for(data: dict, *, doh_supported: bool) -> str:
     return MODE_DOH
 
 
-def proxy_upstreams(data: dict) -> tuple:
-    """Серверы плитки для режима DoH встроенного посредника; пусто — нет шаблона DoH или адреса IPv4."""
+def proxy_upstreams(data: dict, name_addresses=()) -> tuple:
+    """Серверы плитки для режима DoH встроенного посредника; пусто — нет шаблона DoH или адреса IPv4.
+
+    ``name_addresses`` — адреса имени DoH (``dns.doh_name_addresses``): шифрованный сервис живёт не всегда
+    на адресах обычного DNS (у GeoHide DoH отвечает только по адресу имени). Они идут первыми.
+    """
     from dns.local_proxy_catalog import doh_upstreams
 
-    return doh_upstreams(str(data.get("doh") or ""), data.get("ipv4") or (), dnssec=bool(data.get("dnssec")))
+    addresses = list(dict.fromkeys([*(str(item) for item in name_addresses or ()), *(data.get("ipv4") or ())]))
+    return doh_upstreams(str(data.get("doh") or ""), addresses, dnssec=bool(data.get("dnssec")))
 
 
 def find_provider_by_address(address: str) -> tuple[str, str, dict] | None:
