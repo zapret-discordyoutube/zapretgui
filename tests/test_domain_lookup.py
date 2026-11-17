@@ -151,6 +151,33 @@ class WaveTests(unittest.TestCase):
         ping_card = next(card for card in build_lookup_cards(report) if card.key == KEY_PING)
         self.assertNotEqual(ping_card.status, "Подробный разбор не понадобился")
 
+    def test_ping_runs_beside_the_slow_site_check_not_after_it(self) -> None:
+        """Проверка закрытого сайта идёт почти весь срок: пинг во второй волне не успевал (YouTube, 2026-11-17)."""
+        import threading
+
+        net = _Network(self)
+        pinged = threading.Event()
+        saw_ping_during_site: list[bool] = []
+
+        def slow_site(domain, should_stop):
+            saw_ping_during_site.append(pinged.wait(5.0))
+            return {"level": "fail", "headline": domain}
+
+        ping = PingResult(ok=True, average_ms=20.0, sent=4, received=3, min_ms=10.0, max_ms=30.0, ttl=57)
+
+        def fast_ping(*_args, **_kwargs):
+            pinged.set()
+            return ping
+
+        with (
+            patch.object(engine, "_check_site", slow_site),
+            patch.object(current_platform().netprobe, "ping_ipv4_host", fast_ping, create=True),
+        ):
+            report = engine.run_domain_lookup("example.com", servers=[SECURE, GOOD])
+
+        self.assertEqual(saw_ping_during_site, [True])
+        self.assertIsNotNone(report.ping)
+
     def test_closed_site_gets_the_full_check(self) -> None:
         report, _net, asked, canary = self._run("fail")
 
@@ -822,6 +849,19 @@ class PlansTests(unittest.TestCase):
         self.assertEqual(lines[0].tone, plans.TONE_WARNING)
         self.assertIn("IPv6", lines[1].text)
         self.assertIn("порту 443", lines[2].text)
+
+    def test_finished_run_never_says_checking(self) -> None:
+        """Проверка кончилась по времени, а пинг и порт 443 без итога: строки не должны висеть «проверяем…»."""
+        base = dict(target="youtube.com", kind=engine.KIND_DOMAIN, primary_ip="64.233.162.198")
+
+        running = [line.text for line in plans.build_ping_lines(engine.DomainLookupReport(**base))]
+        timed_out = [line.text for line in plans.build_ping_lines(engine.DomainLookupReport(**base, finished=True, timed_out=True))]
+        stopped = [line.text for line in plans.build_ping_lines(engine.DomainLookupReport(**base, finished=True, stopped=True))]
+
+        self.assertTrue(all("проверяем…" in text for text in running[:2]))
+        self.assertFalse(any("проверяем…" in text for text in timed_out))
+        self.assertIn("не успели проверить", timed_out[0])
+        self.assertIn("остановлено", stopped[0])
 
     def test_silent_ping_with_open_port_is_explained(self) -> None:
         report = engine.DomainLookupReport(

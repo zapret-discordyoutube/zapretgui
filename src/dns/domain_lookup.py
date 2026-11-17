@@ -1254,6 +1254,9 @@ def _browser_stage(run: _Run, report: DomainLookupReport, publish) -> DomainLook
         run.pool.submit(_hosts_help, domain): "hosts_help",
         # Соединение с портом 443 браузер открывает и сам; по нему сравнивается дорога IPv6.
         run.pool.submit(_tcp_connect, ip): "tcp",
+        # Пинг не зависит от проверки сайта, а она у закрытого сайта идёт почти весь срок (YouTube, 2026-11-17):
+        # во второй волне пингу не оставалось времени, и строка так и висела «проверяем…».
+        run.pool.submit(_ping, ip, run.halted): "ping",
     }
     if ":" not in ip:
         futures[run.pool.submit(_inspect_quic, domain, ip, PATH_MAX_TTL, run.cancel)] = "quic"
@@ -1264,6 +1267,8 @@ def _browser_stage(run: _Run, report: DomainLookupReport, publish) -> DomainLook
     for key, result in run.each_done(futures):
         if key == "tcp" and isinstance(result, TcpReport):
             report = replace(report, tcp=result)
+        elif key == "ping" and isinstance(result, PingReport):
+            report = replace(report, ping=result)
         elif key == "road" and isinstance(result, ProgramRoad):
             report = replace(report, road=result)
         elif key == "site" and isinstance(result, dict):
@@ -1297,9 +1302,11 @@ def _address_stage(run: _Run, report: DomainLookupReport, servers, use_external:
 
     order = [SOURCE_PTR]
     futures: dict[Future, object] = {
-        run.pool.submit(_ping, ip, run.halted): "ping",
         run.pool.submit(_lookup_ptr, ip, helpers): SOURCE_PTR,
     }
+    # Пинг домена уже ушёл в первой волне; здесь он нужен только для адреса, который вводили без домена.
+    if report.ping is None:
+        futures[run.pool.submit(_ping, ip, run.halted)] = "ping"
     if report.tcp is None:
         futures[run.pool.submit(_tcp_connect, ip)] = "tcp"
     # Пингуется тот IPv6, на который Windows ведёт программы; нет такого — любой адрес IPv6 сайта.

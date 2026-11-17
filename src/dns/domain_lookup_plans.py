@@ -443,18 +443,27 @@ def build_path_text(report: DomainLookupReport) -> str:
     return "\n".join(rows)
 
 
+def _unfinished_line(report: DomainLookupReport, what: str) -> InfoLine:
+    """Строка проверки без итога: идёт — «проверяем…», а когда проверка кончилась, не успела или её остановили — так и пишет."""
+    if not report.finished:
+        return InfoLine(f"{what}: проверяем…")
+    if report.stopped:
+        return InfoLine(f"{what}: остановлено до ответа.", TONE_MUTED)
+    return InfoLine(f"{what}: не успели проверить за отведённое время.", TONE_MUTED)
+
+
 def build_ping_lines(report: DomainLookupReport) -> tuple[InfoLine, ...]:
     if not report.primary_ip:
         if report.kind == KIND_DOMAIN and report.finished:
             return (InfoLine("Пинговать нечего: ни один DNS-сервер не назвал адрес.", TONE_WARNING),)
         return ()
     lines: list[InfoLine] = []
-    lines.append(_ping_line(report.ping, "Пинг") if report.ping else InfoLine(f"Пинг {report.primary_ip}: проверяем…"))
+    lines.append(_ping_line(report.ping, "Пинг") if report.ping else _unfinished_line(report, f"Пинг {report.primary_ip}"))
     if report.ping6 is not None:
         lines.append(_ping_line(report.ping6, "Пинг по IPv6"))
     tcp = report.tcp
     if tcp is None:
-        lines.append(InfoLine(f"Подключение к порту 443 ({report.primary_ip}): проверяем…"))
+        lines.append(_unfinished_line(report, f"Подключение к порту 443 ({report.primary_ip})"))
     elif tcp.status == "ok":
         lines.append(InfoLine(f"Подключение к порту {tcp.port} (HTTPS): успешно за {_ms(tcp.elapsed_ms)}.", TONE_SUCCESS))
     elif tcp.status == "refused":
