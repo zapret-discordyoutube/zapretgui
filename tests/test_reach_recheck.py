@@ -29,7 +29,7 @@ def _dead(ip: str) -> ProbeResult:
 
 
 class ReachRecheckTests(unittest.TestCase):
-    def _reach(self, answers, *, hosts=(), system=REAL, reference=REAL, ipv6=(), quic_ok=False):
+    def _reach(self, answers, *, hosts=(), system=REAL, reference=REAL, ipv6=(), quic_ok=False, ping=None):
         """Прогоняет «открывается ли» с заданным ответом каждого адреса. Возвращает (проба, порядок запросов)."""
         probe = engine._Probe(target=engine.Target("x.com", "сайт", main=True), service="x", host="x.com")
         probe.hosts_ips = tuple(hosts)
@@ -49,6 +49,8 @@ class ReachRecheckTests(unittest.TestCase):
             # Адреса IPv6 эталон отдаёт только запасной попытке, когда IPv4 не открылся.
             patch.object(net_access, "doh_lookup", return_value=(True, tuple(ipv6))),
             patch.object(reach, "RETRY_PAUSE_S", 0.0),
+            # Пинг молчавшего адреса: по умолчанию «пинга нет», тесты не выходят в сеть.
+            patch.object(reach, "_answers_ping", return_value=ping),
         ):
             reach.check_reach(run, probe, read_limit=0)
         probe.reach_state = judge_reach(probe.reach)
@@ -85,6 +87,21 @@ class ReachRecheckTests(unittest.TestCase):
         self.assertEqual(probe.reach.ip, REAL[2])
         self.assertFalse(probe.hosts_stale)
         self.assertEqual(probe.kind, "")
+
+    def test_address_that_answers_ping_is_not_called_banned(self) -> None:
+        """Порт молчит, а адрес пингуется (и обходится стратегиями): это не «бан по адресу» (YouTube, 2026-11-17)."""
+        probe, _asked = self._reach(_dead, ping=True)
+
+        self.assertTrue(probe.ping_alive)
+        self.assertFalse(probe.address_confirmed)
+        self.assertEqual(probe.kind, bk.KIND_NO_CONNECT)
+
+    def test_silent_address_that_does_not_answer_ping_is_still_banned(self) -> None:
+        probe, _asked = self._reach(_dead, ping=False)
+
+        self.assertFalse(probe.ping_alive)
+        self.assertTrue(probe.address_confirmed)
+        self.assertEqual(probe.kind, bk.KIND_IP)
 
     def test_every_address_silent_is_a_confirmed_address_ban(self) -> None:
         probe, asked = self._reach(_dead)

@@ -30,6 +30,29 @@ from platforms.netprobe_types import ERROR_CANCELLED
 __all__ = ["check_reach", "same_network"]
 
 
+PING_COUNT = 2
+PING_TIMEOUT_MS = 1000
+
+
+def _answers_ping(run: Run, ip: str) -> bool | None:
+    """Отвечает ли адрес на пинг. None — пинга здесь нет, его прервали или он не сложился."""
+    try:
+        from platforms import current as current_platform
+
+        netprobe = current_platform().netprobe
+        if ":" in ip:
+            result = netprobe.ping_ipv6(ip, count=PING_COUNT, timeout_ms=PING_TIMEOUT_MS, cancelled=run.dns_cancelled)
+        else:
+            result = netprobe.ping_ipv4_host(
+                ip, count=PING_COUNT, timeout_ms=PING_TIMEOUT_MS, resolved_ip=ip, cancelled=run.dns_cancelled
+            )
+    except Exception:
+        return None
+    if result.error_code in ("UNSUPPORTED", ERROR_CANCELLED):
+        return None
+    return int(result.received) > 0
+
+
 def _reach_order(probe: Probe, *, local_ok: bool) -> tuple[list[str], str]:
     """Адреса для проверки «открывается ли» и откуда они взяты."""
     if probe.hosts_ips:
@@ -142,6 +165,9 @@ def check_reach(run: Run, probe: Probe, *, read_limit: int) -> None:
         for item in attempts
         if item.kind != KIND_CANCELLED
     )
+    if probe.tried_silent and not run.dns_cancelled():
+        # Соединение молчало везде: прежде чем звать это закрытым адресом, спрашиваем, жив ли он вообще.
+        probe.ping_alive = _answers_ping(run, probe.tried[0][0])
     opened = next((item for item in attempts if item.ok), None)
     probe.reach = opened or attempts[0]
     if opened is None and run.dns_cancelled() and len(probe.tried) < 2:
