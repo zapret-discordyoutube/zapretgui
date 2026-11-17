@@ -28,6 +28,46 @@ from ui.smooth_scroll import (
 from ui.widgets.stagger_float_in import attach_stagger_float_in, float_in_group
 
 
+class _PageSubtitleLabel(BodyLabel):
+    """Описание страницы: высота всегда равна высоте его текста при нынешней ширине.
+
+    У переносимой подписи Qt без этого берёт одну неизменную «желаемую» высоту,
+    а лишнее место страницы (мало блоков, высокое окно) раздаёт всем блокам с
+    политикой Preferred: описание раздувалось до сотен пикселей пустоты.
+    Здесь желаемая высота считается по ширине (``heightForWidth``), а политика
+    по вертикали — Fixed: подпись ни растёт, ни сжимается.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._fitted_height = -1
+
+    def _wrapped_height(self) -> int:
+        width = self.width()
+        if width <= 0 or not self.wordWrap():
+            return -1
+        return self.heightForWidth(width)
+
+    def sizeHint(self):  # noqa: N802
+        hint = super().sizeHint()
+        height = self._wrapped_height()
+        if height > 0:
+            hint.setHeight(height)
+        return hint
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        height = self._wrapped_height()
+        if height != self._fitted_height:
+            self._fitted_height = height
+            self.updateGeometry()
+
+    def setText(self, text) -> None:  # noqa: N802
+        super().setText(text)
+        self._fitted_height = -1
+        self.updateGeometry()
+
+
 class ScrollBlockingPlainTextEdit(_FluentPlainTextEdit):
     """PlainTextEdit с fluent-скроллбарами, не пропускающий прокрутку к родителю.
 
@@ -269,7 +309,7 @@ class BasePage(_FluentScrollArea):
 
         # --- Subtitle ---
         if subtitle:
-            self.subtitle_label = BodyLabel(self.content)
+            self.subtitle_label = _PageSubtitleLabel(self.content)
             self.subtitle_label.setText(subtitle)
             set_state_text(self.subtitle_label, f"Описание страницы: {subtitle}")
             self.subtitle_label.setWordWrap(True)
@@ -277,10 +317,9 @@ class BasePage(_FluentScrollArea):
             # включённом переносе. Не учитываем её по горизонтали, чтобы
             # компоновка сужала описание до окна, а Qt переносил строки.
             self.subtitle_label.setMinimumWidth(0)
-            self.subtitle_label.setSizePolicy(
-                QSizePolicy.Policy.Ignored,
-                QSizePolicy.Policy.Preferred,
-            )
+            subtitle_policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            subtitle_policy.setHeightForWidth(True)
+            self.subtitle_label.setSizePolicy(subtitle_policy)
             self.vBoxLayout.addWidget(self.subtitle_label)
         else:
             self.subtitle_label = None

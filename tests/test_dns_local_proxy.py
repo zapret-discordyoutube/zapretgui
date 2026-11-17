@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from dns import local_proxy
@@ -280,6 +281,43 @@ class LocalProxyTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(self.system.slept, 2 * local_proxy._POLL_S)
+
+    def test_slow_silent_probes_count_towards_the_wait(self) -> None:
+        """Каждая проверка ответа идёт до 1,5 с: одни паузы по 0,5 с давали ~100 с вместо 25 (win10, 2026-11-17)."""
+        clock = [0.0]
+        calls = [0]
+
+        def silent_probe(_address) -> bool:
+            calls[0] += 1
+            clock[0] += 1.5
+            return False
+
+        self.system.answers = silent_probe
+        with patch.object(local_proxy.time, "monotonic", lambda: clock[0]):
+            result = local_proxy.start("anonymized", system=self.system)
+
+        self.assertFalse(result.success)
+        self.assertLessEqual(calls[0], 20)
+
+    def test_no_server_line_is_seen_when_the_engine_restarts_its_log_shorter(self) -> None:
+        """Движок начал журнал заново: он короче прежнего, и срез по старой длине терял его строки."""
+        log_path = self.system.work_dir() / local_proxy.LOG_NAME
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("старая строка прошлого запуска\n" * 50, encoding="utf-8")
+        self.system.answers_after_start = [False]
+        original_start = self.system.start_service
+
+        def restart_log_then_start(name):
+            result = original_start(name)
+            log_path.write_text(self.NO_SERVERS_LOG, encoding="utf-8")
+            return result
+
+        self.system.start_service = restart_log_then_start
+
+        result = local_proxy.start("anonymized", system=self.system)
+
+        self.assertFalse(result.success)
+        self.assertLess(self.system.slept, 1.0)
 
     def test_failed_switch_brings_the_previous_mode_back(self) -> None:
         self.assertTrue(local_proxy.start("dnscrypt", system=self.system).success)

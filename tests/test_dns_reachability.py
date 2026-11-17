@@ -37,6 +37,16 @@ class DnsReachabilityTests(unittest.TestCase):
         self.assertEqual(self._check(["9.9.9.9"], udp=True), reachability.ServerReach())
         self.assertEqual(self._check(["9.9.9.9"], tcp=True), reachability.ServerReach())
 
+    def test_server_that_answers_only_the_speed_test_name_is_alive(self) -> None:
+        """Плитка показала сервер живым по google.com, а проверка отказывала по example.com."""
+        def udp(address, name, *_args, **_kwargs):
+            return _result(name == reachability.SPEED_TEST_NAME)
+
+        with patch.object(reachability, "query_udp", side_effect=udp), patch.object(
+            reachability, "query_tcp", return_value=_result(False)
+        ):
+            self.assertEqual(reachability.check_servers(["135.106.217.200"], [], {}), reachability.ServerReach())
+
     def test_closed_doh_with_working_plain_dns_is_reported(self) -> None:
         """Windows откатится на обычный DNS молча — об этом должна сказать программа."""
         quad9 = {"9.9.9.9": "https://dns.quad9.net/dns-query"}
@@ -68,10 +78,10 @@ class DnsReachabilityTests(unittest.TestCase):
         a, b, c = self._probe()
         with a as udp, b, c:
             reachability.check_servers(["9.9.9.9"], ["2620:fe::fe"])
-            self.assertEqual([call.args[0] for call in udp.call_args_list], ["9.9.9.9"])
+            self.assertEqual({call.args[0] for call in udp.call_args_list}, {"9.9.9.9"})
             udp.reset_mock()
             reachability.check_servers([], ["2620:fe::fe"])
-            self.assertEqual([call.args[0] for call in udp.call_args_list], ["2620:fe::fe"])
+            self.assertEqual({call.args[0] for call in udp.call_args_list}, {"2620:fe::fe"})
 
 
 if __name__ == "__main__":

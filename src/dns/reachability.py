@@ -27,6 +27,10 @@ from utils.dns_wire import TYPE_A, query_doh, query_tcp, query_udp
 
 # Безобидное имя для самой проверки связи.
 PROBE_NAME = "example.com"
+# Имя, которым замер скорости (dns.latency) спрашивает серверы. Есть серверы, что отвечают не на любое
+# имя: плитка уже показала их живыми по этому имени, а проверка перед применением отказывала.
+# Поэтому обычный запрос идёт и с этим именем: достаточно ответа на любое из двух.
+SPEED_TEST_NAME = "google.com"
 UDP_TIMEOUT_S = 2.0
 TCP_TIMEOUT_S = 3.0
 DOH_TIMEOUT_S = 4.0
@@ -60,7 +64,9 @@ def _answers(address: str, template: str) -> _Answers:
     probes = [
         lambda: query_udp(address, PROBE_NAME, TYPE_A, timeout_s=UDP_TIMEOUT_S),
         lambda: query_tcp(address, PROBE_NAME, TYPE_A, timeout_s=TCP_TIMEOUT_S),
+        lambda: query_udp(address, SPEED_TEST_NAME, TYPE_A, timeout_s=UDP_TIMEOUT_S),
     ]
+    plain_count = len(probes)
     url = urlsplit(template) if template else None
     if url is not None and url.hostname:
         probes.append(
@@ -76,7 +82,7 @@ def _answers(address: str, template: str) -> _Answers:
         )
     with ThreadPoolExecutor(max_workers=len(probes), thread_name_prefix="dns-reach") as pool:
         answered = [future.result().answered for future in [pool.submit(probe) for probe in probes]]
-    return _Answers(plain=any(answered[:2]), doh=answered[2] if len(answered) > 2 else None)
+    return _Answers(plain=any(answered[:plain_count]), doh=answered[plain_count] if len(answered) > plain_count else None)
 
 
 def check_servers(ipv4: list[str], ipv6: list[str], templates: dict[str, str] | None = None) -> ServerReach:

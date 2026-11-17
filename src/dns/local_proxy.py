@@ -26,6 +26,7 @@ user\\dnscrypt. Обновление программы заменяет фай�
 
 from __future__ import annotations
 
+import time
 import hashlib
 import shutil
 from collections.abc import Iterable
@@ -148,14 +149,21 @@ def _wait_answer(system, log_from: int = 0) -> bool:
     """Ждёт первого ответа движка; False — не дождались или движок сам сказал, что серверов нет.
 
     log_from — сколько символов журнала было до запуска: старые строки прошлых запусков не в счёт.
+
+    Время считается и по паузам, и по часам: проверка ответа (``system.answers``) сама идёт до
+    1,5 с, пока движок молчит, и одни паузы по 0,5 с растягивали ожидание в четыре раза
+    (замер у человека 2026-11-17: «ожидание первого ответа — 98728 мс» вместо 25 с).
     """
     log_path = system.work_dir() / LOG_NAME
+    started = time.monotonic()
     waited = 0.0
-    while waited < START_TIMEOUT_S:
+    while max(waited, time.monotonic() - started) < START_TIMEOUT_S:
         if system.answers(LISTEN_IPV4):
             return True
-        if NO_SERVERS_MARK in _read(log_path)[log_from:]:
-            log(f"DNS: шифрованный DNS сообщил, что ни один сервер не годится (через {waited:.1f} с)", "WARNING")
+        text = _read(log_path)
+        # Движок начал журнал заново и он короче прежнего: старого хвоста уже нет, читаем с начала.
+        if NO_SERVERS_MARK in text[log_from if len(text) >= log_from else 0:]:
+            log(f"DNS: шифрованный DNS сообщил, что ни один сервер не годится (через {max(waited, time.monotonic() - started):.1f} с)", "WARNING")
             return False
         system.sleep(_POLL_S)
         waited += _POLL_S

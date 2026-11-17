@@ -58,6 +58,7 @@ def _feature(state=STATE):
         create_dns_answering_worker=Mock(),
         create_isp_dns_warning_worker=Mock(),
         create_custom_server_worker=Mock(),
+        set_doh_enabled=Mock(),
     )
 
 
@@ -103,6 +104,16 @@ class DnsPageTests(unittest.TestCase):
         return page
 
     # ── экскурсия ────────────────────────────────────────────
+
+    def test_doh_switch_is_saved_at_once_not_after_the_apply(self) -> None:
+        """Применение бывает долгим, а свежий снимок настроек возвращал переключатель назад."""
+        page = self._page()
+        feature = page._dns
+        was = page._doh_enabled
+
+        page._on_doh_toggled(not was)
+
+        feature.set_doh_enabled.assert_called_once_with(not was)
 
     def test_tour_opens_ai_group_and_returns_the_previous_filter(self) -> None:
         page = self._page()

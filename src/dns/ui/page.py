@@ -1104,6 +1104,12 @@ class NetworkPage(BasePage):
             )
             return
         self._doh_enabled = checked
+        # Выбор запоминается сразу, а не по окончании применения: оно бывает долгим (шифрованный DNS
+        # ждёт до 25 с), а свежий снимок настроек с диска в это время вернул бы переключатель назад.
+        try:
+            self._dns.set_doh_enabled(checked)
+        except Exception as exc:
+            log(f"DNS: переключатель DoH не сохранён: {exc}", "WARNING")
         adapters = self._selected_adapters()
         if data is not None and adapters and not data.get("local_proxy") and data.get("doh"):
             self._pending_choice = name
