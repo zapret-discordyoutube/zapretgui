@@ -420,6 +420,8 @@ DNS_PROVIDERS = {
             "icon": "fa5s.shield-alt",
             "color": "#2F80ED",
             "doh": "https://dns.comss.one/dns-query",
+            # Имя DoH отдаёт те же ответы, что и адреса плитки (проверено 2026-11-17): его адреса программа добавляет сама (dns.provider_addresses).
+            "addresses_by_name": True,
             "dot": "dns.comss.one"
         },
         # Адреса — у официального имени DoH dns.astracat.network: опубликованный
@@ -431,10 +433,10 @@ DNS_PROVIDERS = {
             "icon": "fa5s.cat",
             "color": "#F59E0B",
             "doh": "https://dns.astracat.network/dns-query",
+            # Имя DoH отдаёт те же ответы, что и адреса плитки (проверено 2026-11-17): его адреса программа добавляет сама (dns.provider_addresses).
+            "addresses_by_name": True,
             "dot": "dns.astracat.network",
             "dnssec": True,
-            # Адреса плитки — адреса имени DoH: программа узнаёт их сама (dns.provider_addresses).
-            "addresses_by_name": True,
         },
         # Российская пара из официального geohide.ru/static/metadata/servers.json.
         # Подменяет ответы только для сайтов из своего списка (ChatGPT, Grok, Notion…).
@@ -445,6 +447,8 @@ DNS_PROVIDERS = {
             "icon": "fa5s.globe-europe",
             "color": "#8B5CF6",
             "doh": "https://geohide.ru/dns-query",
+            # Имя DoH отдаёт те же ответы, что и адреса плитки (проверено 2026-11-17): его адреса программа добавляет сама (dns.provider_addresses).
+            "addresses_by_name": True,
             "dot": "geohide.ru"
         },
         # Европейский и американский узлы того же GeoHide (адреса — из того же
@@ -458,6 +462,8 @@ DNS_PROVIDERS = {
             "icon": "fa5s.globe-europe",
             "color": "#A78BFA",
             "doh": "https://eu.geohide.ru/dns-query",
+            # Имя DoH отдаёт те же ответы, что и адреса плитки (проверено 2026-11-17): его адреса программа добавляет сама (dns.provider_addresses).
+            "addresses_by_name": True,
             "dot": "eu.geohide.ru",
         },
         "GeoHide US": {
@@ -467,6 +473,8 @@ DNS_PROVIDERS = {
             "icon": "fa5s.globe-americas",
             "color": "#C4B5FD",
             "doh": "https://us.geohide.ru/dns-query",
+            # Имя DoH отдаёт те же ответы, что и адреса плитки (проверено 2026-11-17): его адреса программа добавляет сама (dns.provider_addresses).
+            "addresses_by_name": True,
             "dot": "us.geohide.ru",
         },
         # Вернулся 2026-10-20 с новыми адресами со страницы info.dns.malw.link (страница
@@ -481,9 +489,9 @@ DNS_PROVIDERS = {
             "icon": "fa5s.bug",
             "color": "#34D399",
             "doh": "https://dns.malw.link/dns-query",
-            "dot": "dns.malw.link",
-            # Адреса плитки — адреса имени DoH (проверено 2026-11-17): программа узнаёт их сама.
+            # Имя DoH отдаёт те же ответы, что и адреса плитки (проверено 2026-11-17): его адреса программа добавляет сама (dns.provider_addresses).
             "addresses_by_name": True,
+            "dot": "dns.malw.link",
         },
         # Белорусский проект 2026 года (bezmezhau.com), открыт для всех. С win10
         # (2026-10-20) обычный DNS и DoT отвечают у обоих адресов, DoH — у второго адреса
@@ -495,6 +503,8 @@ DNS_PROVIDERS = {
             "icon": "fa5s.unlock-alt",
             "color": "#38BDF8",
             "doh": "https://dns.bezmezhau.com/dns-query",
+            # Имя DoH отдаёт те же ответы, что и адреса плитки (проверено 2026-11-17): его адреса программа добавляет сама (dns.provider_addresses).
+            "addresses_by_name": True,
             "dot": "dns.bezmezhau.com",
         },
         # Адреса и шаблон — с официального dns-ai.ru. Обычный DNS наружу не отдаёт.
@@ -509,6 +519,8 @@ DNS_PROVIDERS = {
             "icon": "fa5s.robot",
             "color": "#d946ef",
             "doh": "https://dns.dns-ai.ru/dns-query",
+            # Имя DoH отдаёт те же ответы, что и адреса плитки (проверено 2026-11-17): его адреса программа добавляет сама (dns.provider_addresses).
+            "addresses_by_name": True,
             "dot": "dns.dns-ai.ru",
             "dnssec": True,
             "encrypted_only": True,

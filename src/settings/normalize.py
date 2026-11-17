@@ -457,7 +457,7 @@ def _normalize_zapret_dns_server(data: object) -> dict[str, Any]:
     }
 
 
-MAX_LEARNED_SERVERS = 32
+MAX_LEARNED_SERVERS = 64
 
 
 def _normalize_learned_servers(data: object) -> dict[str, Any]:

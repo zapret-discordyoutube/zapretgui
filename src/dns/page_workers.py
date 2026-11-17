@@ -252,8 +252,10 @@ class DnsApplyWorker(QThread):
         self.completed.emit(self._request_id, result)
 
     def _take_fresh_addresses(self, timed_step) -> None:
-        """Сервер, адреса которого узнаются по имени DoH: спросить имя сейчас, а не ждать суточной проверки."""
-        if self._refresh_provider is None or not self._data.get("addresses_by_name"):
+        """Сервер с адресом DoH: проверить его адреса сейчас (по имени DoH), а не ждать суточной проверки."""
+        from dns.provider_addresses import is_tracked
+
+        if self._refresh_provider is None or not is_tracked(self._name, self._data):
             return
         try:
             with timed_step(f"свежие адреса {self._name}"):
