@@ -68,6 +68,8 @@ class ReachRecheckTests(unittest.TestCase):
         self.assertNotEqual(probe.reach_source, reach.SOURCE_HOSTS)
         self.assertEqual(probe.kind, "")
         self.assertIn("запись в нём устарела", service_view.reach_text(probe))
+        # Названа сама запись: видно, какой адрес в hosts обновлять.
+        self.assertIn(HOSTS_IP, service_view.reach_text(probe))
 
     def test_hosts_address_alone_never_proves_an_address_ban(self) -> None:
         """Других адресов узнать не удалось: проверена запись в hosts, а не сайт."""

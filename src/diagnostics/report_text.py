@@ -100,6 +100,8 @@ def target_report(probe: Probe) -> dict:
         "tried": [{"address": ip, "result": kind} for ip, kind in probe.tried],
         "address_confirmed": probe.address_confirmed,
         "hosts_stale": probe.hosts_stale,
+        # Какие адреса записаны в hosts для этого имени: видно, какую запись обновлять.
+        "hosts_ips": list(probe.hosts_ips),
         # Повторная проверка поодиночке: "opened" — открылся со второго раза, "same" — сбой повторился.
         "rechecked": probe.rechecked,
         # Какой профиль запущенного пресета ловит имя: profile пусто — ни один. None — не проверяли.

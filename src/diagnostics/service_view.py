@@ -327,11 +327,15 @@ def target_rows(item: dict) -> tuple[ViewRow, ...]:
     elif item.get("rechecked") == "same":
         rows.append(ViewRow(INFO, "Повторная проверка", "поодиночке, когда остальные проверки закончились, — результат тот же"))
     if item.get("hosts_stale"):
+        written = ", ".join(str(ip) for ip in item.get("hosts_ips") or ())
+        entry = f"записанный в нём адрес {written} не работает" if written else "записанный в нём адрес не работает"
+        real = str(item.get("address") or "")
+        opened = f"по настоящему адресу {real}" if real else "по настоящему адресу"
         rows.append(
             ViewRow(
                 WARN,
                 "Файл hosts",
-                "записанный в нём адрес не работает. Проверка открыла сайт по настоящему адресу, "
+                f"для {item.get('host')}: {entry}. Проверка открыла сайт {opened}, "
                 "а браузер пойдёт по записи и сайт не откроет — обновите её в «Редакторе hosts»",
             )
         )
@@ -840,7 +844,12 @@ def reach_text(probe: Probe) -> str:
             return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
         stale = ""
         if probe.hosts_stale:
-            what = probe.cert.text if probe.cert is not None else "адрес из файла hosts не работает, запись в нём устарела"
+            written = ", ".join(probe.hosts_ips)
+            what = probe.cert.text if probe.cert is not None else (
+                f"адрес {written} из файла hosts не работает, запись в нём устарела"
+                if written
+                else "адрес из файла hosts не работает, запись в нём устарела"
+            )
             stale = f" — {what}; браузер пойдёт по этой записи и сайт не откроет"
         again = " — со второй проверки, поодиночке: первый сбой дала нагрузка самой проверки" if probe.rechecked == RECHECK_OPENED else ""
         if probe.unstable:
