@@ -4317,3 +4317,17 @@ description = Составная стратегия: для узлов googlevid
 --lua-desync=wssize_ramp:wsize=1:scale=1
 --out-range=-d8
 --lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
+[fake_stun2_tls_max_multisplit_664_tcp]
+name = Fake stun2 + tls_max + MultiSplit seqovl 664
+author = Custom
+label = experimental
+description = Фейки stun2 и tls_max (8 повторов, tcp_ts назад), для HTTP — tls_max, для остального — fake_unknown_256; затем multisplit с перекрытием 664 из tls_max
+blobs = stun2,tls_max,fake_unknown_256
+--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=8
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=8
+--payload=http_req
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=8
+--payload=all
+--lua-desync=fake:blob=fake_unknown_256:tcp_ts=-600000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max:payload=~empty

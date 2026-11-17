@@ -679,3 +679,16 @@ blobs = quic_google,fake_zero64,game_active
 --lua-desync=fake:blob=fake_zero64:repeats=10
 --payload=all
 --lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[fake_quic_google_x11_game_udp]
+name = Fake QUIC Google x11 + игры UDP
+author = Custom
+label = experimental
+description = QUIC: фейк quic_google (11 повторов); WireGuard, DHT, Discord, STUN: fake_zero64; остальное: quic_4pda и game_active
+blobs = quic_google,fake_zero64,quic_4pda,game_active
+--lua-desync=fake:blob=quic_google:repeats=11
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=5
+--payload=all
+--lua-desync=fake:blob=quic_4pda:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=game_active:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
