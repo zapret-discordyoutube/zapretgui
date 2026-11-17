@@ -211,9 +211,12 @@ class DnsApplyWorker(QThread):
         start_local_proxy: Callable[..., Any],
         stop_local_proxy_if_unused: Callable[[], Any],
         lookup_doh_name: Callable[[str], list[str]] | None = None,
+        refresh_provider: Callable[[str], Any] | None = None,
         parent=None,
     ):
         super().__init__(parent)
+        # Свежие адреса сервера прямо сейчас, по нажатию плитки (dns.provider_addresses); None — не спрашивать.
+        self._refresh_provider = refresh_provider
         # Адреса имени DoH; подмена нужна тестам, чтобы не ходить в сеть.
         self._lookup_doh_name = lookup_doh_name
         self._start_local_proxy = start_local_proxy
@@ -247,6 +250,19 @@ class DnsApplyWorker(QThread):
             self.failed.emit(self._request_id, str(exc))
             return
         self.completed.emit(self._request_id, result)
+
+    def _take_fresh_addresses(self, timed_step) -> None:
+        """Сервер, адреса которого узнаются по имени DoH: спросить имя сейчас, а не ждать суточной проверки."""
+        if self._refresh_provider is None or not self._data.get("addresses_by_name"):
+            return
+        try:
+            with timed_step(f"свежие адреса {self._name}"):
+                fresh = tuple(str(item) for item in (self._refresh_provider(self._name) or ()))
+        except Exception as exc:
+            log(f"DnsApplyWorker: свежие адреса {self._name} узнать не вышло: {exc}", "WARNING")
+            return
+        if fresh:
+            self._data = {**self._data, "ipv4": list(fresh)}
 
     def _doh_upstreams(self, proxy_upstreams):
         """Серверы для движка: адреса имени DoH (там шифрованный сервис живёт на деле) и адреса плитки."""
@@ -288,6 +304,7 @@ class DnsApplyWorker(QThread):
                 error=str(command_result.message or ""),
             )
         elif self._action == "provider":
+            self._take_fresh_addresses(timed_step)
             provider_plan = dns_page_plans.build_provider_dns_plan(
                 name=self._name,
                 data=self._data,

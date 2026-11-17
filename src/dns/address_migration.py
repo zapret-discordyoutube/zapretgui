@@ -85,10 +85,14 @@ def usable_replacements(replacements: Mapping[str, str], *, doh_supported: bool)
 
 def outdated_address_plan() -> tuple[dict[str, str], tuple[str, ...]]:
     """Все замены и удаления сейчас: чужие провайдеры и прежние адреса своего Zapret DNS."""
-    from dns import zapret_dns_server
+    from dns import provider_addresses, zapret_dns_server
     from dns.dns_providers import OUTDATED_DNS_ADDRESS_REPLACEMENTS
 
-    replacements = {**OUTDATED_DNS_ADDRESS_REPLACEMENTS, **zapret_dns_server.address_replacements()}
+    replacements = {
+        **OUTDATED_DNS_ADDRESS_REPLACEMENTS,
+        **provider_addresses.address_replacements(),
+        **zapret_dns_server.address_replacements(),
+    }
     return replacements, zapret_dns_server.dropped_ipv6()
 
 

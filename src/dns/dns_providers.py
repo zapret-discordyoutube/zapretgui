@@ -433,6 +433,8 @@ DNS_PROVIDERS = {
             "doh": "https://dns.astracat.network/dns-query",
             "dot": "dns.astracat.network",
             "dnssec": True,
+            # Адреса плитки — адреса имени DoH: программа узнаёт их сама (dns.provider_addresses).
+            "addresses_by_name": True,
         },
         # Российская пара из официального geohide.ru/static/metadata/servers.json.
         # Подменяет ответы только для сайтов из своего списка (ChatGPT, Grok, Notion…).
@@ -480,6 +482,8 @@ DNS_PROVIDERS = {
             "color": "#34D399",
             "doh": "https://dns.malw.link/dns-query",
             "dot": "dns.malw.link",
+            # Адреса плитки — адреса имени DoH (проверено 2026-11-17): программа узнаёт их сама.
+            "addresses_by_name": True,
         },
         # Белорусский проект 2026 года (bezmezhau.com), открыт для всех. С win10
         # (2026-10-20) обычный DNS и DoT отвечают у обоих адресов, DoH — у второго адреса

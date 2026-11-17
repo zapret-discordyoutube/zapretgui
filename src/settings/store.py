@@ -1546,6 +1546,21 @@ def set_zapret_dns_server(*, ipv4: list[str], former_ipv4: list[str], checked_at
     _update_settings(lambda data: data["dns"].__setitem__("zapret_dns_server", value))
 
 
+def get_dns_learned_servers() -> dict[str, Any]:
+    """Узнанные по имени DoH адреса чужих серверов (dns.provider_addresses); пусто — не узнавали."""
+    value = _read_path_value(("dns", "learned_servers"), {})
+    return copy.deepcopy(value) if isinstance(value, dict) else {}
+
+
+def set_dns_learned_server(name: str, *, ipv4: list[str], former_ipv4: list[str], checked_at: float) -> None:
+    value = {"ipv4": list(ipv4), "former_ipv4": list(former_ipv4), "checked_at": float(checked_at)}
+
+    def update(data: dict) -> None:
+        data["dns"].setdefault("learned_servers", {})[str(name)] = value
+
+    _update_settings(update)
+
+
 def get_isp_dns_info_shown() -> bool:
     return _get_bool(("warnings", "isp_dns_info_shown"), False)
 
@@ -2126,6 +2141,7 @@ __all__ = [
     "get_display_mode",
     "get_custom_dns_servers",
     "get_dns_doh_enabled",
+    "get_dns_learned_servers",
     "get_dpi_autostart",
     "get_editor_smooth_scroll_enabled",
     "get_live_animations_enabled",
@@ -2237,6 +2253,7 @@ __all__ = [
     "set_hosts_engine",
     "set_hosts_selection",
     "set_dns_doh_enabled",
+    "set_dns_learned_server",
     "set_isp_dns_info_shown",
     "set_onboarding_tour_done",
     "set_profile_display_order_hint_shown",

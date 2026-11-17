@@ -32,6 +32,14 @@ def install_zapret_dns_server_watch(
             return
         with permit:
             change = dns_feature.refresh_zapret_dns_server()
+            # Чужие серверы с адресами по имени DoH: тот же пропуск, та же суточная проверка.
+            try:
+                provider_changes = dns_feature.refresh_provider_addresses() or []
+            except Exception as exc:
+                provider_changes = []
+                log(f"Адреса серверов DNS по имени не узнаны: {exc}", "WARNING")
+        if any(getattr(item, "changed", False) for item in provider_changes):
+            dns_feature.migrate_outdated_dns_addresses()
         changed = bool(getattr(change, "changed", False))
         log_startup_metric(
             "ZapretDnsAddressChecked",

@@ -182,6 +182,9 @@ def default_dns() -> dict[str, Any]:
         # с них переводятся адаптеры; checked_at — время UNIX прошлого удачного вопроса;
         # relay_ipv4 — адрес посредника, узнанный у самого сервера (пусто — не узнан или выключен).
         "zapret_dns_server": {"ipv4": [], "former_ipv4": [], "checked_at": 0.0, "relay_ipv4": []},
+        # Адреса чужих серверов, которые программа сама узнаёт по имени DoH (dns.provider_addresses):
+        # {название плитки: {"ipv4": нынешние, "former_ipv4": прежние, "checked_at": время UNIX}}.
+        "learned_servers": {},
     }
 
 

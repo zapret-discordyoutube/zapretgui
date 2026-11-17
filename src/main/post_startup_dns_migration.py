@@ -26,6 +26,11 @@ def install_dns_address_migration(
             dns_feature.adopt_zapret_dns_server()
         except Exception as exc:
             log(f"Адрес Zapret DNS из настроек не поставлен: {exc}", "WARNING")
+        # То же для чужих серверов, чьи адреса программа узнаёт по имени DoH (dns.provider_addresses).
+        try:
+            dns_feature.adopt_provider_addresses()
+        except Exception as exc:
+            log(f"Узнанные адреса серверов DNS не поставлены: {exc}", "WARNING")
         try:
             changed_count = len(list(dns_feature.migrate_outdated_dns_addresses() or []))
         except Exception as exc:

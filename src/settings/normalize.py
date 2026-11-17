@@ -426,6 +426,7 @@ def normalize_dns(data: object) -> dict[str, Any]:
         "custom_servers": normalize_custom_dns_servers(raw.get("custom_servers")),
         "doh_enabled": as_bool(raw.get("doh_enabled"), True),
         "zapret_dns_server": _normalize_zapret_dns_server(raw.get("zapret_dns_server")),
+        "learned_servers": _normalize_learned_servers(raw.get("learned_servers")),
     }
 
 
@@ -454,6 +455,28 @@ def _normalize_zapret_dns_server(data: object) -> dict[str, Any]:
         "checked_at": checked_at,
         "relay_ipv4": _global_ipv4_list(raw.get("relay_ipv4"), 2),
     }
+
+
+MAX_LEARNED_SERVERS = 32
+
+
+def _normalize_learned_servers(data: object) -> dict[str, Any]:
+    """Узнанные адреса чужих серверов: только глобальные IPv4, имя — непустая строка, число серверов ограничено."""
+    result: dict[str, Any] = {}
+    for raw_name, raw_value in as_dict(data).items():
+        name = as_clean_str(raw_name)
+        if not name or len(result) >= MAX_LEARNED_SERVERS:
+            continue
+        raw = as_dict(raw_value)
+        try:
+            checked_at = max(float(raw.get("checked_at") or 0.0), 0.0)
+        except (TypeError, ValueError):
+            checked_at = 0.0
+        ipv4 = _global_ipv4_list(raw.get("ipv4"), 4)
+        if not ipv4:
+            continue
+        result[name] = {"ipv4": ipv4, "former_ipv4": _global_ipv4_list(raw.get("former_ipv4"), 8), "checked_at": checked_at}
+    return result
 
 
 def normalize_hosts(data: object) -> dict[str, Any]:

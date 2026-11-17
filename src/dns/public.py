@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dns.commands import (
+    adopt_provider_addresses,
     adopt_zapret_dns_server,
     apply_dns,
     check_dns_answering,
@@ -13,6 +14,8 @@ from dns.commands import (
     mark_isp_dns_warning_shown,
     measure_dns_latency,
     migrate_outdated_dns_addresses,
+    refresh_provider_addresses,
+    refresh_provider_for_apply,
     refresh_zapret_dns_server,
     repair_local_proxy,
     reset_to_auto,
@@ -31,6 +34,7 @@ __all__ = [
     "CustomServerResult",
     "DnsCommandResult",
     "DnsState",
+    "adopt_provider_addresses",
     "adopt_zapret_dns_server",
     "apply_dns",
     "check_dns_answering",
@@ -43,6 +47,8 @@ __all__ = [
     "mark_isp_dns_warning_shown",
     "measure_dns_latency",
     "migrate_outdated_dns_addresses",
+    "refresh_provider_addresses",
+    "refresh_provider_for_apply",
     "refresh_zapret_dns_server",
     "repair_local_proxy",
     "reset_to_auto",

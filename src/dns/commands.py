@@ -25,6 +25,27 @@ def refresh_zapret_dns_server():
     return refresh()
 
 
+def adopt_provider_addresses() -> dict:
+    """Ставит узнанные адреса чужих серверов в их плитки (dns.provider_addresses)."""
+    from dns.provider_addresses import adopt
+
+    return adopt()
+
+
+def refresh_provider_addresses(names=None) -> list:
+    """Спрашивает имена DoH отслеживаемых серверов; ходит в сеть — по нажатию человека или с пропуском шлюза проб."""
+    from dns.provider_addresses import refresh
+
+    return refresh(names=names)
+
+
+def refresh_provider_for_apply(name: str) -> tuple[str, ...]:
+    """Свежие адреса одного сервера прямо сейчас, перед применением плитки (не дольше нескольких секунд)."""
+    from dns.provider_addresses import refresh_for_apply
+
+    return refresh_for_apply(name)
+
+
 def is_isp_dns_warning_shown() -> bool:
     from settings.store import get_isp_dns_info_shown
 

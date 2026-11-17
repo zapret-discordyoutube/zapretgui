@@ -24,6 +24,9 @@ class DnsFeature:
     # Свой сервер Zapret DNS (dns.zapret_dns_server): адрес при запуске, вопрос по имени, отметка.
     adopt_zapret_dns_server: Callable = lambda: ()
     refresh_zapret_dns_server: Callable = lambda: None
+    # Адреса чужих серверов, узнанные по имени DoH (dns.provider_addresses): при запуске и раз в сутки.
+    adopt_provider_addresses: Callable = lambda: {}
+    refresh_provider_addresses: Callable = lambda: []
     # Текст прошлой проверки домена по пути из записи истории; пусто — файла нет.
     load_past_domain_lookup: Callable = lambda _log_file: ""
     load_past_domain_lookup_report: Callable = lambda _log_file: None
@@ -51,6 +54,7 @@ def build_dns_feature() -> DnsFeature:
     reset_to_auto = lambda *args, **kwargs: _public().reset_to_auto(*args, **kwargs)
     start_local_proxy = lambda *args, **kwargs: _public().start_local_proxy(*args, **kwargs)
     stop_local_proxy_if_unused = lambda *args, **kwargs: _public().stop_local_proxy_if_unused(*args, **kwargs)
+    refresh_provider_for_apply = lambda *args, **kwargs: _public().refresh_provider_for_apply(*args, **kwargs)
     set_doh_enabled = lambda *args, **kwargs: _public().set_doh_enabled(*args, **kwargs)
     is_isp_dns_warning_shown = lambda *args, **kwargs: _public().is_isp_dns_warning_shown(*args, **kwargs)
     mark_isp_dns_warning_shown = lambda *args, **kwargs: _public().mark_isp_dns_warning_shown(*args, **kwargs)
@@ -113,6 +117,7 @@ def build_dns_feature() -> DnsFeature:
             load_state=load_state,
             start_local_proxy=start_local_proxy,
             stop_local_proxy_if_unused=stop_local_proxy_if_unused,
+            refresh_provider=refresh_provider_for_apply,
             parent=parent,
         )
 
@@ -191,6 +196,8 @@ def build_dns_feature() -> DnsFeature:
         repair_local_dns_proxy=lambda *args, **kwargs: _public().repair_local_proxy(*args, **kwargs),
         adopt_zapret_dns_server=lambda: _public().adopt_zapret_dns_server(),
         refresh_zapret_dns_server=lambda: _public().refresh_zapret_dns_server(),
+        adopt_provider_addresses=lambda: _public().adopt_provider_addresses(),
+        refresh_provider_addresses=lambda: _public().refresh_provider_addresses(),
         warm_page_data_cache=lambda *args, **kwargs: _public().warm_state(*args, **kwargs),
         consume_warmed_page_data=lambda *args, **kwargs: _public().consume_warmed_state(*args, **kwargs),
         create_dns_check_worker=_create_dns_check_worker,
