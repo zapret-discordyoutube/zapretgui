@@ -293,3 +293,66 @@ def test_a_message_of_the_appimage_start_reaches_a_desktop_without_dialog_tools(
     order = [say.index(tool) for tool in ("zenity", "kdialog", "notify-send", "xmessage", "x-terminal-emulator")]
     assert order == sorted(order)
     assert subprocess.run(["sh", "-n", str(PACKAGING / "appimage" / "AppRun")]).returncode == 0
+
+
+def _run_appimage_start(tmp_path, *, pkexec_exit: int | None, terminal: bool):
+    """Runs the real AppRun as a non-root person on a "desktop" (DISPLAY set, no terminal) with stub system tools."""
+    import os
+    import shutil
+    import stat
+    import subprocess
+
+    app = tmp_path / "app"
+    root = app / "zapretgui-root"
+    root.mkdir(parents=True)
+    shutil.copy2(PACKAGING / "appimage" / "AppRun", app / "AppRun")
+    (root / "VERSION").write_text("21.1.7.999\n", encoding="utf-8")
+    log = tmp_path / "calls.log"
+    (root / "install.sh").write_text(f'#!/bin/sh\necho "install $*" >> "{log}"\n', encoding="utf-8")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+
+    def stub(name: str, body: str) -> None:
+        path = stubs / name
+        path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    for quiet in ("zenity", "kdialog", "notify-send", "xmessage"):
+        stub(quiet, f'echo "{quiet} $*" >> "{log}"')
+    stub("id", 'case "$1" in -u) echo 1000;; -un) echo tester;; -nG) echo tester;; *) exec /usr/bin/id "$@";; esac')
+    stub("sudo", f'echo "sudo" >> "{log}"; exec "$@"')
+    if pkexec_exit is not None:
+        stub("pkexec", f'echo "pkexec" >> "{log}"; if [ {pkexec_exit} = 0 ]; then exec "$@"; fi; exit {pkexec_exit}')
+    if terminal:
+        stub("x-terminal-emulator", f'echo "terminal" >> "{log}"; shift; exec "$@" < /dev/null')
+    else:
+        # a terminal program that is there but cannot open a window (no display server behind DISPLAY)
+        for name in ("x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "mate-terminal", "lxterminal", "xterm"):
+            stub(name, "exit 1")
+    env = {"PATH": f"{stubs}:/usr/bin:/bin", "DISPLAY": ":99", "HOME": str(tmp_path)}
+    done = subprocess.run(["/bin/sh", str(app / "AppRun")], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return done.returncode, calls
+
+
+def test_the_appimage_asks_for_the_password_in_a_terminal_when_pkexec_is_missing(tmp_path) -> None:
+    """Debian 13 ships pkexec as its own package; a double-clicked AppImage has no terminal for a plain sudo."""
+    code, calls = _run_appimage_start(tmp_path, pkexec_exit=None, terminal=True)
+    assert "terminal" in calls and "sudo" in calls and any(call.startswith("install --user tester") for call in calls)
+
+
+def test_the_appimage_falls_back_to_the_terminal_when_pkexec_has_no_password_agent(tmp_path) -> None:
+    code, calls = _run_appimage_start(tmp_path, pkexec_exit=127, terminal=True)
+    assert calls.index("pkexec") < calls.index("terminal") and any(call.startswith("install --user tester") for call in calls)
+
+
+def test_a_dismissed_password_dialog_is_final_and_a_working_pkexec_needs_no_terminal(tmp_path) -> None:
+    code, calls = _run_appimage_start(tmp_path / "no", pkexec_exit=126, terminal=True)
+    assert code == 1 and "terminal" not in calls and not any(call.startswith("install") for call in calls)
+    code, calls = _run_appimage_start(tmp_path / "yes", pkexec_exit=0, terminal=True)
+    assert "pkexec" in calls and "terminal" not in calls and sum(call.startswith("install") for call in calls) == 1
+
+
+def test_without_any_way_to_ask_the_appimage_says_what_to_run(tmp_path) -> None:
+    code, calls = _run_appimage_start(tmp_path, pkexec_exit=None, terminal=False)
+    assert code == 1 and any(call.startswith("zenity") and "sudo" in call and "--install-system-part" in call for call in calls)

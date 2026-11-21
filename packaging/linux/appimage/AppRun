@@ -31,22 +31,66 @@ system_part_ready() {
     && systemctl is-active --quiet zapretgui-helper.service 2>/dev/null
 }
 
+# Runs install.sh through sudo in a terminal window, for a desktop where the graphical password dialog (pkexec) is missing
+# or has no agent: a double-clicked AppImage has no terminal, so sudo alone cannot ask for the password. The terminal
+# programs differ in how they take a command and in whether they wait, so the result comes back through a marker file.
+sudo_in_terminal() {
+  marker="$1/.install-status"
+  rm -f "$marker"
+  script='sudo "$1" --user "$2"; code=$?; echo "$code" > "$3"; echo
+if [ "$code" = 0 ]; then echo "Zapret is installed. You can close this window."; else echo "The installation failed (see above)."; fi
+printf "Enter to close: "; read answer'
+  for term in x-terminal-emulator gnome-terminal konsole xfce4-terminal mate-terminal lxterminal xterm; do
+    command -v "$term" >/dev/null 2>&1 || continue
+    case "$term" in
+      gnome-terminal) "$term" -- sh -c "$script" sh "$1/install.sh" "$(id -un)" "$marker" >/dev/null 2>&1 & ;;
+      xfce4-terminal|mate-terminal) "$term" -x sh -c "$script" sh "$1/install.sh" "$(id -un)" "$marker" >/dev/null 2>&1 & ;;
+      *) "$term" -e sh -c "$script" sh "$1/install.sh" "$(id -un)" "$marker" >/dev/null 2>&1 & ;;
+    esac
+    pid=$!
+    # a terminal that cannot start exits with an error at once: try the next one instead of waiting for the password
+    tries=0
+    while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 10 ]; do sleep 0.2; tries=$((tries + 1)); done
+    if ! kill -0 "$pid" 2>/dev/null && ! wait "$pid" 2>/dev/null; then
+      [ -s "$marker" ] || continue
+    fi
+    waited=0
+    while [ ! -s "$marker" ] && [ "$waited" -lt 900 ]; do sleep 1; waited=$((waited + 1)); done
+    [ -s "$marker" ] && return "$(cat "$marker")"
+    return 1
+  done
+  return 1
+}
+
 install_system_part() {
   tmp="$(mktemp -d /var/tmp/zapretgui-install.XXXXXX)" || return 1
   status=1
   if cp -a "$ROOT"/. "$tmp"/; then
     # a build made from a git export may have lost the executable bit (Dev 296 did: sudo said "command not found")
     chmod 0755 "$tmp/install.sh" "$tmp/uninstall.sh" 2>/dev/null
+    gui=
+    [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && gui=1
     if [ "$(id -u)" = 0 ]; then
       "$tmp/install.sh"
-    elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v pkexec >/dev/null; then
-      pkexec "$tmp/install.sh" --user "$(id -un)"
-    elif command -v sudo >/dev/null; then
-      sudo "$tmp/install.sh" --user "$(id -un)"
+      status=$?
     else
-      false
+      status=127
+      if [ -n "$gui" ] && command -v pkexec >/dev/null; then
+        pkexec "$tmp/install.sh" --user "$(id -un)"
+        status=$?
+      fi
+      # pkexec missing (Debian 13 ships it as its own package) or without a password agent exits 127, a dismissed dialog
+      # 126 (the person said no: stop). With a terminal around, ask there through sudo; without a desktop sudo is plain.
+      if [ "$status" = 127 ]; then
+        if [ -t 0 ] && command -v sudo >/dev/null; then
+          sudo "$tmp/install.sh" --user "$(id -un)"
+          status=$?
+        elif [ -n "$gui" ] && command -v sudo >/dev/null; then
+          sudo_in_terminal "$tmp"
+          status=$?
+        fi
+      fi
     fi
-    status=$?
   fi
   rm -rf "$tmp"   # not a trap: the script ends with exec, which would skip it
   return $status
