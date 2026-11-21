@@ -11,6 +11,27 @@ WHO="${SUDO_USER:-}"
 [ -z "$WHO" ] && [ -n "${PKEXEC_UID:-}" ] && WHO="$(getent passwd "$PKEXEC_UID" | cut -d: -f1)"
 if [ "${1:-}" = "--user" ]; then WHO="${2:?name}"; fi
 
+# Everything the output of this script says also goes to a log the AppImage start shows when something fails: pkexec has no terminal.
+mkdir -p /var/log && exec > >(tee -a /var/log/zapretgui-install.log) 2>&1
+echo "== $(date '+%F %T') install.sh $*"
+
+# The .deb pulls these in by itself; an AppImage does not, and a lean desktop (XFCE, LXQt) may lack some of them: without the
+# window-system libraries the window never opens and nothing says why. The list is the Depends line of deb/control.in
+# (a test keeps them equal).
+DEPENDENCIES="nftables libluajit-5.1-2 zlib1g libnetfilter-queue1 libnfnetlink0 libmnl0 libcap2 libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libfontconfig1 libdbus-1-3 libx11-6 libx11-xcb1 libxcb1 libxcb-glx0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon0 libwayland-client0"
+install_dependencies() {
+  command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1 || return 0
+  missing=""
+  for pkg in $DEPENDENCIES; do dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"; done
+  [ -n "$missing" ] || return 0
+  echo "Installing the libraries and tools Zapret needs:$missing"
+  export DEBIAN_FRONTEND=noninteractive
+  # shellcheck disable=SC2086
+  apt-get install -y --no-install-recommends $missing || { apt-get update -qq && apt-get install -y --no-install-recommends $missing; } \
+    || echo "warning: apt-get could not install:$missing (no network?)"
+}
+install_dependencies
+
 for tool in nft systemctl; do command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 1; }; done
 
 mkdir -p "$TARGET"

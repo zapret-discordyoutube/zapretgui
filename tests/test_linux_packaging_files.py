@@ -185,9 +185,9 @@ def test_the_appimage_launcher_installs_the_system_part_and_starts_the_installed
     # root cannot read the AppImage's own mount: files are copied out first, and the copy is removed explicitly
     assert "mktemp -d /var/tmp/zapretgui-install" in text and 'rm -rf "$tmp"' in text and "trap" not in text.split("\n", 1)[1].replace("# not a trap", "")
     assert "pkexec" in text and "sudo" in text and "--install-system-part" in text
-    assert text.rstrip().endswith('exec /opt/zapretgui/bin/zapretgui "$@"')
+    assert text.rstrip().endswith('start_window "$PREFIX/bin/zapretgui" "$@"')
     # a fresh install adds the person to the group; the window then starts inside it at once (no re-login needed)
-    assert 'exec sg zapretgui -c "exec /opt/zapretgui/bin/zapretgui"' in text and 'Log out and in once' in text
+    assert 'start_window sg zapretgui -c "exec $PREFIX/bin/zapretgui"' in text and 'Log out and in once' in text
     # the version the launcher compares is the one the bundle script writes
     assert "VERSION" in text
 
@@ -355,4 +355,90 @@ def test_a_dismissed_password_dialog_is_final_and_a_working_pkexec_needs_no_term
 
 def test_without_any_way_to_ask_the_appimage_says_what_to_run(tmp_path) -> None:
     code, calls = _run_appimage_start(tmp_path, pkexec_exit=None, terminal=False)
-    assert code == 1 and any(call.startswith("zenity") and "sudo" in call and "--install-system-part" in call for call in calls)
+    said = "\n".join(calls)
+    assert code == 1 and "zenity" in said and "not installed" in said and "sudo" in said and "--install-system-part" in said
+
+
+def _deb_depends() -> list[str]:
+    control = (PACKAGING / "deb" / "control.in").read_text(encoding="utf-8")
+    line = next(row for row in control.splitlines() if row.startswith("Depends:"))
+    return [item.strip() for item in line.removeprefix("Depends:").split(",") if item.strip()]
+
+
+def test_the_appimage_installer_brings_the_same_libraries_the_deb_depends_on() -> None:
+    """The AppImage has no package manager behind it: install.sh must install what the .deb would pull in."""
+    import re
+
+    text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+    listed = re.search(r'^DEPENDENCIES="([^"]+)"', text, re.M)
+    assert listed is not None
+    assert sorted(listed.group(1).split()) == sorted(name for name in _deb_depends() if name != "systemd")
+    # the window-system libraries whose absence on a lean desktop made "nothing happens"
+    for needed in ("libxcb-icccm4", "libxcb-keysyms1", "libxcb-render-util0", "libxcb-cursor0", "libxkbcommon-x11-0"):
+        assert needed in _deb_depends()
+    assert "/var/log/zapretgui-install.log" in text
+
+
+def test_install_dependencies_installs_only_what_is_missing(tmp_path) -> None:
+    import re
+    import stat
+    import subprocess
+
+    text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+    function = re.search(r"^install_dependencies\(\) \{.*?^\}", text, re.M | re.S).group(0)
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    log = tmp_path / "apt.log"
+
+    def stub(name: str, body: str) -> None:
+        (stubs / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        (stubs / name).chmod((stubs / name).stat().st_mode | stat.S_IXUSR)
+
+    stub("dpkg", 'case "$2" in libcap2|zlib1g) exit 0;; *) exit 1;; esac')
+    stub("apt-get", f'echo "apt-get $*" >> "{log}"')
+    script = 'DEPENDENCIES="zlib1g libxcb-icccm4 libcap2 libxcb-keysyms1"\n' + function + "\ninstall_dependencies\n"
+    done = subprocess.run(["bash", "-c", script], env={"PATH": f"{stubs}:/usr/bin:/bin"}, capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    calls = log.read_text(encoding="utf-8").splitlines()
+    assert calls == ["apt-get install -y --no-install-recommends libxcb-icccm4 libxcb-keysyms1"]
+    # nothing missing: apt-get is not even called
+    log.unlink()
+    stub("dpkg", "exit 0")
+    subprocess.run(["bash", "-c", script], env={"PATH": f"{stubs}:/usr/bin:/bin"}, capture_output=True, text=True, timeout=30)
+    assert not log.exists()
+
+
+def test_a_window_that_dies_at_start_is_explained_instead_of_nothing_happening(tmp_path) -> None:
+    """The report: password window, then nothing. A missing Qt library made the window exit at once, unseen without a terminal."""
+    import os
+    import stat
+    import subprocess
+
+    app = tmp_path / "app"
+    (app / "zapretgui-root").mkdir(parents=True)
+    import shutil
+
+    shutil.copy2(PACKAGING / "appimage" / "AppRun", app / "AppRun")
+    (app / "zapretgui-root" / "VERSION").write_text("1\n", encoding="utf-8")
+    prefix = tmp_path / "opt"
+    (prefix / "bin").mkdir(parents=True)
+    (prefix / "VERSION").write_text("1\n", encoding="utf-8")
+    program = prefix / "bin" / "zapretgui"
+    program.write_text('#!/bin/sh\necho "qt.qpa.plugin: Could not load the Qt platform plugin xcb" >&2\nexit 134\n', encoding="utf-8")
+    program.chmod(program.stat().st_mode | stat.S_IXUSR)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    log = tmp_path / "calls.log"
+    for name, body in {
+        "zenity": f'echo "zenity $*" >> "{log}"',
+        "getent": 'echo "zapretgui:x:999:tester"',
+        "systemctl": "exit 0",
+        "id": 'case "$1" in -u) echo 1000;; -un) echo tester;; -nG) echo "tester zapretgui";; *) exec /usr/bin/id "$@";; esac',
+    }.items():
+        (stubs / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        (stubs / name).chmod(0o755)
+    env = {"PATH": f"{stubs}:/usr/bin:/bin", "DISPLAY": ":99", "HOME": str(tmp_path), "ZAPRETGUI_PREFIX": str(prefix)}
+    done = subprocess.run(["/bin/sh", str(app / "AppRun")], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 134
+    said = log.read_text(encoding="utf-8")
+    assert "did not start" in said and "Could not load the Qt platform plugin xcb" in said

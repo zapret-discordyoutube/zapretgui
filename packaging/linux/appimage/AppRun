@@ -3,6 +3,7 @@
 # the group) of the SAME version. The helper reads the program files from /opt/zapretgui, and root cannot read an
 # AppImage's own mount (it belongs to the user), so on first start (or after an update) the files are copied to a
 # temporary folder and install.sh puts them into /opt/zapretgui. After that the installed program runs, like the .deb.
+PREFIX="${ZAPRETGUI_PREFIX:-/opt/zapretgui}"   # a test points it at a scratch folder
 HERE="$(dirname "$(readlink -f "$0")")"
 ROOT="$HERE/zapretgui-root"
 export PYTHONUTF8=1
@@ -10,7 +11,7 @@ export PYTHONUTF8=1
 export LC_CTYPE=C.UTF-8
 
 bundled="$(cat "$ROOT/VERSION" 2>/dev/null)"
-installed="$(cat /opt/zapretgui/VERSION 2>/dev/null)"
+installed="$(cat "$PREFIX/VERSION" 2>/dev/null)"
 
 say() {
   echo "zapretgui: $*" >&2
@@ -27,7 +28,7 @@ say() {
 }
 
 system_part_ready() {
-  [ "$bundled" = "$installed" ] && [ -x /opt/zapretgui/bin/zapretgui ] && getent group zapretgui >/dev/null \
+  [ "$bundled" = "$installed" ] && [ -x "$PREFIX/bin/zapretgui" ] && getent group zapretgui >/dev/null \
     && systemctl is-active --quiet zapretgui-helper.service 2>/dev/null
 }
 
@@ -96,10 +97,40 @@ install_system_part() {
   return $status
 }
 
+# Starts the window and, when it dies within a few seconds, says why: a double-clicked AppImage has no terminal, so a
+# missing window-system library ("could not load the Qt platform plugin xcb") would otherwise be "nothing happens".
+start_window() {
+  log="$(mktemp /var/tmp/zapretgui-start.XXXXXX)" || exec "$@"
+  "$@" 2>"$log" &
+  pid=$!
+  waited=0
+  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 8 ]; do sleep 1; waited=$((waited + 1)); done
+  if kill -0 "$pid" 2>/dev/null; then
+    rm -f "$log"   # still running: the program keeps writing into the removed file, nothing is lost that matters
+    exit 0
+  fi
+  wait "$pid"
+  code=$?
+  if [ "$code" != 0 ]; then
+    lacking="$(for f in "$PREFIX/_internal/zapretgui" $(find "$PREFIX/_internal" -name libqxcb.so 2>/dev/null); do ldd "$f" 2>/dev/null | grep 'not found'; done | sort -u | tr -s '\t ' ' ' | head -8)"
+    say "Zapret did not start (exit code $code).
+$(tail -n 8 "$log" 2>/dev/null)${lacking:+
+
+Libraries that are missing on this system:
+$lacking}"
+  fi
+  rm -f "$log"
+  exit "$code"
+}
+
 if [ "$1" = "--install-system-part" ] || ! system_part_ready; then
   say "First start: Zapret installs its system part (a small root service and the firewall table). It asks for your password once."
   if ! install_system_part; then
-    say "The system part was not installed. Run:  sudo $(readlink -f "$0") --install-system-part"
+    reason="$(tail -n 8 /var/log/zapretgui-install.log 2>/dev/null)"
+    say "The system part was not installed.${reason:+
+$reason
+}
+Run it in a terminal to see everything:  sudo $(readlink -f "$0") --install-system-part"
     exit 1
   fi
   [ "$1" = "--install-system-part" ] && exit 0
@@ -107,10 +138,10 @@ if [ "$1" = "--install-system-part" ] || ! system_part_ready; then
   # arguments the window can start at once inside the new group (sg); the helper only talks to members of the group.
   if ! id -nG | tr ' ' '\n' | grep -qx zapretgui && getent group zapretgui | grep -qw "$(id -un)"; then
     if [ "$#" -eq 0 ] && command -v sg >/dev/null; then
-      exec sg zapretgui -c "exec /opt/zapretgui/bin/zapretgui"
+      start_window sg zapretgui -c "exec $PREFIX/bin/zapretgui"
     fi
     say "You were added to the group zapretgui. Log out and in once, then start Zapret again."
   fi
 fi
 
-exec /opt/zapretgui/bin/zapretgui "$@"
+start_window "$PREFIX/bin/zapretgui" "$@"

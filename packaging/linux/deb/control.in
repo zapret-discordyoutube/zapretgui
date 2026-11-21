@@ -4,7 +4,7 @@ Section: net
 Priority: optional
 Architecture: amd64
 Maintainer: Zapret <noreply@zapret.moe>
-Depends: nftables, systemd, libluajit-5.1-2, zlib1g, libnetfilter-queue1, libnfnetlink0, libmnl0, libcap2, libxcb-cursor0, libxkbcommon-x11-0, libegl1, libgl1, libfontconfig1, libdbus-1-3
+Depends: nftables, systemd, libluajit-5.1-2, zlib1g, libnetfilter-queue1, libnfnetlink0, libmnl0, libcap2, libxcb-cursor0, libxkbcommon-x11-0, libegl1, libgl1, libfontconfig1, libdbus-1-3, libx11-6, libx11-xcb1, libxcb1, libxcb-glx0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render0, libxcb-render-util0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-util1, libxcb-xfixes0, libxcb-xkb1, libxkbcommon0, libwayland-client0
 Recommends: pkexec | policykit-1, polkitd | policykit-1, libnotify-bin, xdg-utils
 Installed-Size: @SIZE@
 Homepage: https://wiki.zapret.moe/
