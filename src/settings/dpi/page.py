@@ -535,6 +535,12 @@ class DpiSettingsPage(BasePage):
         """Обработчик выбора метода"""
         try:
             selected_method = normalize_launch_method(method, default="")
+            if selected_method and selected_method != str(method or "").strip().lower():
+                # The mode has no engine on this system (Zapret 1 / Orchestra on Linux). The page hides its card, but
+                # while the page is rebuilt there is no selected mode yet and a stray click used to reach the launch
+                # code with the raw name and start a Zapret 1 preset ("--wf-tcp" has no nftables translation).
+                log(f"Режим {method} недоступен в этой системе: выбор проигнорирован", "WARNING")
+                return
             if selected_method and selected_method == str(
                 self.__dict__.get("_selected_launch_method", "") or ""
             ).strip().lower():

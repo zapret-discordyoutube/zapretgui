@@ -29,3 +29,25 @@ def test_the_tour_has_no_mode_steps_without_the_modes() -> None:
     assert not keys & {"dpi_mode", "dpi_modes"}
     assert {"dpi_mode", "dpi_modes"} <= {step.key for step in tour_steps_for(_WINDOWS)}
     assert {"dpi_mode", "dpi_modes"} <= {step.key for step in ALL_TOUR_STEPS}
+
+
+def test_a_click_on_a_mode_without_an_engine_is_ignored_even_while_the_page_has_no_selection(monkeypatch) -> None:
+    """The Linux report: during a page rebuild no mode is selected yet, and a click reached the launch code as Zapret 1."""
+    from types import SimpleNamespace
+
+    from settings.dpi.page import DpiSettingsPage
+
+    monkeypatch.setattr("platforms.current", lambda: _LINUX)
+    calls: list[str] = []
+    fake = SimpleNamespace(
+        _selected_launch_method="",
+        _dpi_settings=SimpleNamespace(describe_visibility=lambda method: calls.append(f"visibility {method}")),
+        _update_method_selection=lambda method: calls.append(f"selection {method}"),
+        _apply_visibility=lambda visibility: calls.append("apply"),
+        _request_launch_method_apply=lambda method: calls.append(f"apply {method}"),
+    )
+    DpiSettingsPage._select_method(fake, mode.ZAPRET1_MODE)
+    DpiSettingsPage._select_method(fake, mode.ORCHESTRA_MODE)
+    assert calls == []
+    DpiSettingsPage._select_method(fake, mode.ZAPRET2_MODE)
+    assert f"apply {mode.ZAPRET2_MODE}" in calls
