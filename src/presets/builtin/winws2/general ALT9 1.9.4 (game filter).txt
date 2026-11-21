@@ -1,5 +1,5 @@
 # Preset: general ALT9 1.9.4 (game filter)
-# BuiltinVersion: 2.46
+# BuiltinVersion: 2.47
 # IconColor: #e6c300ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -166,14 +166,6 @@
 --name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
---out-range=-d8
---lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
-
---name=vencord.dev
---filter-tcp=80,443
---hostlist=lists/vencord.txt
 --out-range=-d8
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
 

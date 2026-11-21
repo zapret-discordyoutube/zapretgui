@@ -1,5 +1,5 @@
 # Preset: Ultimate Main Riot + Valorant (game filter)
-# BuiltinVersion: 2.46
+# BuiltinVersion: 2.47
 # Description: YouTube + Discord (as MAIN) + Valorant/Riot
 # IconColor: #60cdff
 
@@ -111,14 +111,6 @@
 --name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
---out-range=-d10
---lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
-
---new
-
---name=vencord.dev
---filter-tcp=80,443
---hostlist=lists/vencord.txt
 --out-range=-d10
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 

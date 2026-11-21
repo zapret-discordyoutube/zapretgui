@@ -1,5 +1,5 @@
 # Preset: general SIMPLE FAKE ALT
-# BuiltinVersion: 2.46
+# BuiltinVersion: 2.47
 
 --lua-init=@lua/zapret-lib.lua
 --lua-init=@lua/zapret-antidpi.lua
@@ -164,14 +164,6 @@
 --name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
---out-range=-d10
---lua-desync=fake:blob=tls_google:repeats=6:tcp_seq=2
-
---new
-
---name=vencord.dev
---filter-tcp=80,443
---hostlist=lists/vencord.txt
 --out-range=-d10
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_seq=2
 
