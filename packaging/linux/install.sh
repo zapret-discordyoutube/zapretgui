@@ -18,7 +18,7 @@ echo "== $(date '+%F %T') install.sh $*"
 # The .deb pulls these in by itself; an AppImage does not, and a lean desktop (XFCE, LXQt) may lack some of them: without the
 # window-system libraries the window never opens and nothing says why. The list is the Depends line of deb/control.in
 # (a test keeps them equal).
-DEPENDENCIES="nftables libluajit-5.1-2 zlib1g libnetfilter-queue1 libnfnetlink0 libmnl0 libcap2 libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libfontconfig1 libdbus-1-3 libx11-6 libx11-xcb1 libxcb1 libxcb-glx0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon0 libwayland-client0"
+DEPENDENCIES="nftables libluajit-5.1-2 zlib1g libnetfilter-queue1 libnfnetlink0 libmnl0 libcap2 libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libfontconfig1 libdbus-1-3 libx11-6 libx11-xcb1 libxcb1 libxcb-glx0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon0 libwayland-client0 libwayland-cursor0 libglib2.0-0t64"
 install_dependencies() {
   command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1 || return 0
   missing=""

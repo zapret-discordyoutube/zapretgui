@@ -374,7 +374,7 @@ def test_the_appimage_installer_brings_the_same_libraries_the_deb_depends_on() -
     assert listed is not None
     assert sorted(listed.group(1).split()) == sorted(name for name in _deb_depends() if name != "systemd" and "(" not in name)
     # the window-system libraries whose absence on a lean desktop made "nothing happens"
-    for needed in ("libxcb-icccm4", "libxcb-keysyms1", "libxcb-render-util0", "libxcb-cursor0", "libxkbcommon-x11-0"):
+    for needed in ("libxcb-icccm4", "libxcb-keysyms1", "libxcb-render-util0", "libxcb-cursor0", "libxkbcommon-x11-0", "libglib2.0-0t64", "libwayland-cursor0"):
         assert needed in _deb_depends()
     assert "/var/log/zapretgui-install.log" in text
 
