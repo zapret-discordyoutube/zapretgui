@@ -1,4 +1,6 @@
-"""Release files on Linux: the .deb package. The program never replaces itself; the system's package manager installs it."""
+"""Release files on Linux: the .deb package. The program never replaces itself; the system's package manager installs it.
+
+The texts returned here are shown to the person in the window (a toast), whose language is Russian."""
 
 from __future__ import annotations
 
@@ -31,13 +33,13 @@ class LinuxUpdates:
         package = Path(path)
         manual = f"sudo apt install {package}"
         if package.suffix != self.package_suffix or not package.is_file():
-            return False, f"This is not a package file: {package}"
+            return False, f"Это не файл пакета: {package}"
         if not self._which("pkexec"):
-            return False, f"pkexec is not installed. Install the package by hand: {manual}"
+            return False, f"Не установлена программа pkexec. Установите пакет вручную: {manual}"
         code, text = self._run(["pkexec", "apt-get", "install", "-y", str(package)])
         if code == 0:
-            return True, "The new version is installed. Close and start Zapret again."
+            return True, "Новая версия установлена. Закройте Zapret и запустите снова."
         if code in (126, 127):
-            return False, f"The password window was closed or refused. You can also install by hand: {manual}"
+            return False, f"Окно пароля закрыто или пароль не принят. Пакет можно поставить и вручную: {manual}"
         tail = " ".join(text.strip().splitlines()[-2:])[:300]
-        return False, f"The installation failed ({code}): {tail} You can also install by hand: {manual}"
+        return False, f"Установка не удалась (код {code}): {tail} Пакет можно поставить и вручную: {manual}"

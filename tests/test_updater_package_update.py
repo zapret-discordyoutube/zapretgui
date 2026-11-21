@@ -201,11 +201,11 @@ def test_linux_install_runs_pkexec_apt_on_the_package(tmp_path):
     package.write_bytes(b"x")
     calls = []
     updates = LinuxUpdates(run=lambda command: calls.append(list(command)) or (0, ""), which=lambda name: "/usr/bin/" + name)
-    assert updates.install_package(package) == (True, "The new version is installed. Close and start Zapret again.")
+    assert updates.install_package(package) == (True, "Новая версия установлена. Закройте Zapret и запустите снова.")
     assert calls == [["pkexec", "apt-get", "install", "-y", str(package)]]
 
 
-@pytest.mark.parametrize(("code", "needle"), [(126, "password"), (127, "password"), (100, "failed (100)")])
+@pytest.mark.parametrize(("code", "needle"), [(126, "пароль"), (127, "пароль"), (100, "не удалась (код 100)")])
 def test_linux_install_failures_always_say_how_to_do_it_by_hand(tmp_path, code, needle):
     package = tmp_path / DEB
     package.write_bytes(b"x")
@@ -220,7 +220,7 @@ def test_linux_install_refuses_other_files_and_a_missing_pkexec(tmp_path):
     package = tmp_path / DEB
     package.write_bytes(b"x")
     done, text = LinuxUpdates(run=lambda c: (0, ""), which=lambda n: None).install_package(package)
-    assert done is False and "pkexec is not installed" in text
+    assert done is False and "Не установлена программа pkexec" in text
 
 
 def test_the_capabilities_choose_the_update_path():
