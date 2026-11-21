@@ -65,6 +65,12 @@ METHOD_OPTION_TEXT = {
 }
 
 
+def _legacy_modes_available() -> bool:
+    from platforms import Cap, current
+
+    return current().has(Cap.LEGACY_ENGINE_MODES)
+
+
 def _set_method_description_accessibility(label, text: str) -> None:
     set_state_text(label, f"Описание выбора метода запуска: {text}")
 
@@ -132,8 +138,22 @@ class DpiSettingsPage(BasePage):
                 return text
         return text
 
+    def _zapret2_header_text(self) -> str:
+        if _legacy_modes_available():
+            return self._tr("page.dpi_settings.section.zapret2", f"Zapret 2 ({EXE_NAME_WINWS2})")
+        # Where the engine is not winws2.exe the file name would be wrong.
+        return self._tr("page.dpi_settings.section.zapret2_basic", "Zapret 2")
+
     def _method_option_text(self, method: str) -> tuple[str, str]:
         text = METHOD_OPTION_TEXT[method]
+        if method == ZAPRET2_MODE and not _legacy_modes_available():
+            return (
+                self._tr(text["title_key"], text["title"]),
+                self._tr(
+                    "page.dpi_settings.method.zapret2_mode.desc_basic",
+                    "Режим Zapret 2 + готовые пресеты для быстрого запуска. Поддерживает Lua-код для своих стратегий.",
+                ),
+            )
         return (
             self._tr(text["title_key"], text["title"]),
             self._tr(text["desc_key"], text["desc"]),
@@ -174,7 +194,7 @@ class DpiSettingsPage(BasePage):
         # ZAPRET 2
         # ═══════════════════════════════════════
         self.zapret2_header = StrongBodyLabel(
-            self._tr("page.dpi_settings.section.zapret2", f"Zapret 2 ({EXE_NAME_WINWS2})")
+            self._zapret2_header_text()
         )
         _set_method_section_accessibility(self.zapret2_header, self.zapret2_header.text())
         self.zapret2_header.setContentsMargins(0, 8, 0, 4)
@@ -220,6 +240,12 @@ class DpiSettingsPage(BasePage):
         method_layout.addWidget(self.method_zapret1_mode)
 
         # Разделитель 2
+        if not _legacy_modes_available():
+            # Linux has one engine (Zapret 2); Zapret 1 and the Orchestra have none there.
+            self.method_orchestra.setVisible(False)
+            zapret1_header.setVisible(False)
+            self.method_zapret1_mode.setVisible(False)
+
         self.separator2 = QFrame()
         self.separator2.setFrameShape(QFrame.Shape.HLine)
         self.separator2.setFixedHeight(1)
@@ -753,7 +779,7 @@ class DpiSettingsPage(BasePage):
             _set_method_description_accessibility(self._method_desc_label, self._method_desc_label.text())
 
         if hasattr(self, "zapret2_header") and self.zapret2_header is not None:
-            self.zapret2_header.setText(self._tr("page.dpi_settings.section.zapret2", f"Zapret 2 ({EXE_NAME_WINWS2})"))
+            self.zapret2_header.setText(self._zapret2_header_text())
             _set_method_section_accessibility(self.zapret2_header, self.zapret2_header.text())
         if self._zapret1_header is not None:
             self._zapret1_header.setText(self._tr("page.dpi_settings.section.zapret1", f"Zapret 1 ({EXE_NAME_WINWS1})"))

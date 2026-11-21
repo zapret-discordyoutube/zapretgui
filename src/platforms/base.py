@@ -453,6 +453,7 @@ class Cap:
     DIRECT_ENGINE_PROCESS = "direct_engine_process"  # the program starts the engine process itself (no root helper in between)
     PACKAGE_UPDATE = "package_update"  # a newer version is announced and installed through the system's package manager
     LOCAL_DNS_PROXY = "local_dns_proxy"  # the built-in encrypted DNS (dnscrypt-proxy as a service) can be installed
+    LEGACY_ENGINE_MODES = "legacy_engine_modes"  # the launch modes Zapret 1 (winws.exe) and the Orchestra exist: only Windows has those engines
     WORKING_SET = "working_set"  # the system pages out a hidden window's memory and the program can hold it
 
 

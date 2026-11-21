@@ -64,9 +64,19 @@ EXE_NAME_BY_LAUNCH_METHOD = {
 }
 
 
+def _legacy_engine_modes_available() -> bool:
+    """Zapret 1 and the Orchestra run on engines only Windows has (``Cap.LEGACY_ENGINE_MODES``)."""
+    from platforms import Cap, current
+
+    return current().has(Cap.LEGACY_ENGINE_MODES)
+
+
 def normalize_launch_method(value: object, *, default: str = DEFAULT_LAUNCH_METHOD) -> str:
     method = str(value or "").strip().lower()
     if method in ALL_LAUNCH_METHODS:
+        if method in (ZAPRET1_MODE, ORCHESTRA_MODE) and not _legacy_engine_modes_available():
+            # A settings file copied from Windows must not start a mode with no engine here.
+            return ZAPRET2_MODE
         return method
     return default
 

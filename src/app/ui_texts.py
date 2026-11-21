@@ -1520,6 +1520,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": f"Zapret 2 ({EXE_NAME_WINWS2})",
         "en": f"Zapret 2 ({EXE_NAME_WINWS2})",
     },
+    "page.dpi_settings.section.zapret2_basic": {
+        "ru": "Zapret 2",
+        "en": "Zapret 2",
+    },
+    "page.dpi_settings.method.zapret2_mode.desc_basic": {
+        "ru": "Режим Zapret 2 + готовые пресеты для быстрого запуска. Поддерживает Lua-код для своих стратегий.",
+        "en": "Zapret 2 mode with ready presets for quick launch. Supports custom Lua code for your own strategies.",
+    },
     "page.dpi_settings.section.zapret1": {
         "ru": f"Zapret 1 ({EXE_NAME_WINWS1})",
         "en": f"Zapret 1 ({EXE_NAME_WINWS1})",

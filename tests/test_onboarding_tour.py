@@ -627,10 +627,14 @@ class TourStepCapabilityTests(unittest.TestCase):
         self.assertNotIn("(DoH)», серверы", TEXTS["onboarding.step.dns_providers_basic.body"]["ru"])
 
     def test_the_running_tour_is_the_one_of_this_system(self) -> None:
-        from platforms import current
+        # The tour is built when the module is first imported: either under the system's own platform or, in a test
+        # run, under the one the test setup gave extra capabilities (tests/conftest.py).
+        from platforms import _select, current
         from ui.onboarding.steps import TOUR_STEPS, tour_steps_for
 
-        self.assertEqual([step.key for step in TOUR_STEPS], [step.key for step in tour_steps_for(current())])
+        running = [step.key for step in TOUR_STEPS]
+        allowed = ([step.key for step in tour_steps_for(platform)] for platform in (_select(), current()))
+        self.assertIn(running, list(allowed))
 
 
 class TourStepCatalogTests(unittest.TestCase):
@@ -700,9 +704,9 @@ class TourStepCatalogTests(unittest.TestCase):
                 self.assertTrue(str((TEXTS.get(f"onboarding.chapter.{chapter}") or {}).get(language) or "").strip(), chapter)
 
     def test_tour_visits_the_pages_added_after_presets_and_profiles(self) -> None:
-        from ui.onboarding.steps import TOUR_STEPS
+        from ui.onboarding.steps import ALL_TOUR_STEPS
 
-        pages = {step.page for step in TOUR_STEPS}
+        pages = {step.page for step in ALL_TOUR_STEPS}
         for page in (
             "fakes_page",
             "dpi_settings",

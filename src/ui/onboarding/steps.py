@@ -363,8 +363,9 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
     ),
     *_chapter(
         "mode",
-        TourStep("dpi_mode", _nav_item(PageName.DPI_SETTINGS, PageName.ORCHESTRA_SETTINGS)),
-        TourStep("dpi_modes", _page_target("modes"), page="dpi_settings"),
+        # Where only Zapret 2 has an engine there is nothing to choose between: no steps about the modes.
+        TourStep("dpi_mode", _nav_item(PageName.DPI_SETTINGS, PageName.ORCHESTRA_SETTINGS), requires=Cap.LEGACY_ENGINE_MODES),
+        TourStep("dpi_modes", _page_target("modes"), page="dpi_settings", requires=Cap.LEGACY_ENGINE_MODES),
     ),
     *_chapter(
         "tools",

@@ -43,6 +43,7 @@ PLATFORM = Platform(
             Cap.SELF_UPDATE,
             Cap.WINDOWS_STARTUP_CHECKS,
             Cap.WORKING_SET,
+            Cap.LEGACY_ENGINE_MODES,
             Cap.DEFENDER,
             Cap.MAX_BLOCKER,
             Cap.ANTIVIRUS_PROBE,
