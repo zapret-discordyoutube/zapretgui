@@ -19,6 +19,9 @@ desktop_shortcut_once() {
   mkdir -p "$state" || return 0
   if [ ! -e "$desk/zapretgui.desktop" ] && cp "$source" "$desk/zapretgui.desktop"; then
     chmod +x "$desk/zapretgui.desktop"
+    # a file on the desktop is looked at before the icon cache of the theme is refreshed: name the picture by its path
+    icon="/usr/share/icons/hicolor/256x256/apps/zapretgui.png"
+    [ -r "$icon" ] && sed -i "s|^Icon=.*|Icon=$icon|" "$desk/zapretgui.desktop"
     # GNOME and Cinnamon show the file as a launcher only when it is marked as trusted
     command -v gio >/dev/null && gio set "$desk/zapretgui.desktop" metadata::trusted true 2>/dev/null
   fi

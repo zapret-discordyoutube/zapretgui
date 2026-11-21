@@ -78,10 +78,11 @@ def test_install_and_uninstall_put_and_remove_the_same_system_files() -> None:
         "/usr/lib/systemd/system/zapretgui-helper.service",
         "/usr/share/polkit-1/rules.d/50-zapretgui.rules",
         "/usr/share/applications/zapretgui.desktop",
-        "/usr/share/icons/hicolor/256x256/apps/zapretgui.png",
     ):
         assert path in install, path
         assert path in uninstall, path
+    # the icon theme tree (every size and the scalable one) goes in with one copy and comes out by name
+    assert "/usr/share/icons/hicolor/" in install and "find /usr/share/icons/hicolor -name 'zapretgui.*'" in uninstall
     assert "/opt/zapretgui" in install and "rm -rf /opt/zapretgui" in uninstall
     assert "systemctl enable --now zapretgui-helper.service" in install
     assert f"nft delete table inet {capture_rules.TABLE_NAME}" in uninstall
@@ -242,7 +243,9 @@ def test_the_window_wrapper_puts_a_desktop_shortcut_once_per_user(tmp_path) -> N
     shortcut = home / "Desktop" / "zapretgui.desktop"
     subprocess.run(["sh", str(script)], env=env, check=True)
     assert shortcut.is_file() and os.access(shortcut, os.X_OK)
-    assert shortcut.read_text(encoding="utf-8") == entry.read_text(encoding="utf-8")
+    # the same entry; only its icon line may differ (it names the picture by path when the theme icon is installed)
+    strip_icon = lambda text: [line for line in text.splitlines() if not line.startswith("Icon=")]  # noqa: E731
+    assert strip_icon(shortcut.read_text(encoding="utf-8")) == strip_icon(entry.read_text(encoding="utf-8"))
     shortcut.unlink()
     subprocess.run(["sh", str(script)], env=env, check=True)
     assert not shortcut.exists(), "a shortcut the user deleted must not come back"
