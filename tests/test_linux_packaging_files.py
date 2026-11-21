@@ -359,6 +359,18 @@ def test_without_any_way_to_ask_the_appimage_says_what_to_run(tmp_path) -> None:
     assert code == 1 and "zenity" in said and "not installed" in said and "sudo" in said and "--install-system-part" in said
 
 
+def test_the_appimage_start_leaves_a_log_file_the_person_can_send(tmp_path) -> None:
+    """Report 2026-11-21 (Dev 300): nothing visible happened; without a terminal there was no way to see why."""
+    _run_appimage_start(tmp_path / "ok", pkexec_exit=0, terminal=True)
+    text = (tmp_path / "ok" / ".cache" / "zapretgui" / "appimage-start.log").read_text(encoding="utf-8")
+    assert "=== AppRun start" in text and "tools found:" in text and "desktop: DISPLAY=:99" in text
+    assert "running the installer through pkexec" in text and "pkexec finished with code 0" in text
+    _run_appimage_start(tmp_path / "no", pkexec_exit=126, terminal=True)
+    refused = (tmp_path / "no" / ".cache" / "zapretgui" / "appimage-start.log").read_text(encoding="utf-8")
+    assert "pkexec finished with code 126" in refused and "message to the person: The system part was not installed" in refused
+    assert "appimage-start.log" in refused  # the message to the person names the file
+
+
 def _deb_depends() -> list[str]:
     control = (PACKAGING / "deb" / "control.in").read_text(encoding="utf-8")
     line = next(row for row in control.splitlines() if row.startswith("Depends:"))
@@ -442,6 +454,8 @@ def test_a_window_that_dies_at_start_is_explained_instead_of_nothing_happening(t
     assert done.returncode == 134
     said = log.read_text(encoding="utf-8")
     assert "did not start" in said and "Could not load the Qt platform plugin xcb" in said
+    journal = (tmp_path / ".cache" / "zapretgui" / "appimage-start.log").read_text(encoding="utf-8")
+    assert "exited after" in journal and "code 134" in journal and "Could not load the Qt platform plugin xcb" in journal
 
 
 def _run_appimage_with_glibc(tmp_path, glibc: str):

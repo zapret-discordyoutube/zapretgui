@@ -13,8 +13,26 @@ export LC_CTYPE=C.UTF-8
 bundled="$(cat "$ROOT/VERSION" 2>/dev/null)"
 installed="$(cat "$PREFIX/VERSION" 2>/dev/null)"
 
+# A double-clicked AppImage has no terminal and a lean desktop may show none of our dialogs, so everything this script does
+# is also written to a file the person can open and send: ~/.cache/zapretgui/appimage-start.log (the last runs only).
+LOGDIR="${XDG_CACHE_HOME:-$HOME/.cache}/zapretgui"
+LOG="$LOGDIR/appimage-start.log"
+mkdir -p "$LOGDIR" 2>/dev/null
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 200000 ]; then
+  tail -n 300 "$LOG" > "$LOG.tmp" 2>/dev/null && mv -f "$LOG.tmp" "$LOG" 2>/dev/null
+fi
+log() { printf '%s %s\n' "$(date '+%F %T' 2>/dev/null)" "$*" >> "$LOG" 2>/dev/null; return 0; }
+# the same for the output of other programs (the installer, the window): every line of $1 goes into the log
+log_file() { [ -s "$1" ] && sed 's/^/    | /' "$1" >> "$LOG" 2>/dev/null; return 0; }
+have() { command -v "$1" >/dev/null 2>&1 && echo "$1" ; return 0; }
+log "=== AppRun start: bundled=$bundled installed=${installed:-none} user=$(id -un 2>/dev/null) uid=$(id -u 2>/dev/null) args=[$*]"
+log "desktop: DISPLAY=${DISPLAY:-} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-} session=${XDG_SESSION_TYPE:-} desktop=${XDG_CURRENT_DESKTOP:-} tty_stdin=$([ -t 0 ] && echo yes || echo no)"
+log "tools found: $(for t in pkexec sudo zenity kdialog notify-send xmessage x-terminal-emulator gnome-terminal konsole xfce4-terminal xterm sg apt-get systemctl nft; do have "$t"; done | tr '\n' ' ')"
+log "system: $(uname -sr 2>/dev/null) glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null) os=$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"
+
 say() {
   echo "zapretgui: $*" >&2
+  log "message to the person: $*"
   if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
     command -v zenity >/dev/null && zenity --info --no-wrap --title=Zapret --text="$*" 2>/dev/null && return 0
     command -v kdialog >/dev/null && kdialog --msgbox "$*" 2>/dev/null && return 0
@@ -38,8 +56,11 @@ if [ -n "$have_glibc" ] && [ "$(printf '%s\n%s\n' "$MIN_GLIBC" "$have_glibc" | s
 fi
 
 system_part_ready() {
-  [ "$bundled" = "$installed" ] && [ -x "$PREFIX/bin/zapretgui" ] && getent group zapretgui >/dev/null \
-    && systemctl is-active --quiet zapretgui-helper.service 2>/dev/null
+  if [ "$bundled" != "$installed" ]; then log "system part: installed version '${installed:-none}' is not the bundled '$bundled'"; return 1; fi
+  if [ ! -x "$PREFIX/bin/zapretgui" ]; then log "system part: $PREFIX/bin/zapretgui is missing"; return 1; fi
+  if ! getent group zapretgui >/dev/null; then log "system part: the group zapretgui does not exist"; return 1; fi
+  if ! systemctl is-active --quiet zapretgui-helper.service 2>/dev/null; then log "system part: zapretgui-helper.service is not active"; return 1; fi
+  log "system part: ready"
 }
 
 # Runs install.sh through sudo in a terminal window, for a desktop where the graphical password dialog (pkexec) is missing
@@ -87,22 +108,37 @@ install_system_part() {
     else
       status=127
       if [ -n "$gui" ] && command -v pkexec >/dev/null; then
-        pkexec "$tmp/install.sh" --user "$(id -un)"
+        log "running the installer through pkexec"
+        out="$tmp/pkexec.out"
+        pkexec "$tmp/install.sh" --user "$(id -un)" > "$out" 2>&1
         status=$?
+        log "pkexec finished with code $status"
+        log_file "$out"
+        cat "$out" >&2
+      else
+        log "pkexec is not used (gui=${gui:-no}, pkexec=$(have pkexec))"
       fi
       # pkexec missing (Debian 13 ships it as its own package) or without a password agent exits 127, a dismissed dialog
       # 126 (the person said no: stop). With a terminal around, ask there through sudo; without a desktop sudo is plain.
       if [ "$status" = 127 ]; then
         if [ -t 0 ] && command -v sudo >/dev/null; then
+          log "running the installer through sudo in this terminal"
           sudo "$tmp/install.sh" --user "$(id -un)"
           status=$?
+          log "sudo finished with code $status"
         elif [ -n "$gui" ] && command -v sudo >/dev/null; then
+          log "running the installer through sudo in a new terminal window"
           sudo_in_terminal "$tmp"
           status=$?
+          log "sudo in a terminal window finished with code $status"
+        else
+          log "no way to ask for the password (no terminal, no sudo)"
         fi
       fi
     fi
   fi
+  log "install_system_part result: $status; the installer's own log is /var/log/zapretgui-install.log (last lines follow)"
+  tail -n 15 /var/log/zapretgui-install.log 2>/dev/null | sed 's/^/    | /' >> "$LOG" 2>/dev/null
   rm -rf "$tmp"   # not a trap: the script ends with exec, which would skip it
   return $status
 }
@@ -111,23 +147,30 @@ install_system_part() {
 # missing window-system library ("could not load the Qt platform plugin xcb") would otherwise be "nothing happens".
 start_window() {
   log="$(mktemp /var/tmp/zapretgui-start.XXXXXX)" || exec "$@"
+  log "starting the window: $*"
   "$@" 2>"$log" &
   pid=$!
   waited=0
   while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 8 ]; do sleep 1; waited=$((waited + 1)); done
   if kill -0 "$pid" 2>/dev/null; then
+    log "the window is still running after $waited s: good"
     rm -f "$log"   # still running: the program keeps writing into the removed file, nothing is lost that matters
     exit 0
   fi
   wait "$pid"
   code=$?
+  log "the window exited after $waited s with code $code; its error output follows"
+  log_file "$log"
   if [ "$code" != 0 ]; then
     lacking="$(for f in "$PREFIX/_internal/zapretgui" $(find "$PREFIX/_internal" -name libqxcb.so 2>/dev/null); do ldd "$f" 2>/dev/null | grep 'not found'; done | sort -u | tr -s '\t ' ' ' | head -8)"
+    log "missing libraries: ${lacking:-none found}"
     say "Zapret did not start (exit code $code).
 $(tail -n 8 "$log" 2>/dev/null)${lacking:+
 
 Libraries that are missing on this system:
-$lacking}"
+$lacking}
+
+The details are in $LOG"
   fi
   rm -f "$log"
   exit "$code"
@@ -140,6 +183,7 @@ if [ "$1" = "--install-system-part" ] || ! system_part_ready; then
     say "The system part was not installed.${reason:+
 $reason
 }
+The details are in $LOG
 Run it in a terminal to see everything:  sudo $(readlink -f "$0") --install-system-part"
     exit 1
   fi
