@@ -254,3 +254,13 @@ def test_the_window_wrapper_puts_a_desktop_shortcut_once_per_user(tmp_path) -> N
     env.pop("DISPLAY")
     subprocess.run(["sh", str(script)], env=env, check=True)
     assert not shortcut.exists() and not (home / "state").exists()
+
+
+def test_the_deb_recommends_the_package_that_has_pkexec() -> None:
+    """Debian 13 split polkit: ``polkitd`` is the daemon, ``pkexec`` the binary. The AppImage installer and the in-program
+    update both run ``pkexec``; a desktop with only ``polkitd`` (the KDE test machine) answered "pkexec is not installed"."""
+    control = (PACKAGING / "deb" / "control.in").read_text(encoding="utf-8")
+    recommends = next(line for line in control.splitlines() if line.startswith("Recommends:"))
+    assert "pkexec" in recommends and "polkitd" in recommends
+    # an old system without the split still resolves through the transitional name
+    assert recommends.count("policykit-1") == 2
