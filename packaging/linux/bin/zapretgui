@@ -4,4 +4,27 @@
 export PYTHONUTF8=1
 # The compiled program ignores PYTHONUTF8; its file-name and text encoding follow the C library's character type.
 export LC_CTYPE=C.UTF-8
+
+# A shortcut on the desktop, once per user (the menu entry comes with the package). Best effort and silent: no desktop
+# folder or no graphical session means no shortcut; a shortcut the user deletes does not come back (the marker stays).
+desktop_shortcut_once() {
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 0
+  state="${XDG_STATE_HOME:-$HOME/.local/state}/zapretgui"
+  [ -e "$state/desktop-shortcut" ] && return 0
+  source="/usr/share/applications/zapretgui.desktop"
+  [ -r "$source" ] || return 0
+  desk="$(xdg-user-dir DESKTOP 2>/dev/null)"
+  [ -n "$desk" ] || desk="$HOME/Desktop"
+  [ -d "$desk" ] || return 0
+  mkdir -p "$state" || return 0
+  if [ ! -e "$desk/zapretgui.desktop" ] && cp "$source" "$desk/zapretgui.desktop"; then
+    chmod +x "$desk/zapretgui.desktop"
+    # GNOME and Cinnamon show the file as a launcher only when it is marked as trusted
+    command -v gio >/dev/null && gio set "$desk/zapretgui.desktop" metadata::trusted true 2>/dev/null
+  fi
+  : >"$state/desktop-shortcut"
+  return 0
+}
+desktop_shortcut_once || true
+
 exec /opt/zapretgui/_internal/zapretgui "$@"

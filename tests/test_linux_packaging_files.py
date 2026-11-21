@@ -223,3 +223,31 @@ def test_the_hosts_backup_goes_with_the_program_unless_hosts_still_differs_from_
     (tmp_path / "hosts").write_text("127.0.0.1 localhost\n1.2.3.4 x.example\n")
     assert subprocess.run(["sh", "-c", block]).returncode == 0
     assert (tmp_path / "var" / "hosts.original").exists()
+
+
+def test_the_window_wrapper_puts_a_desktop_shortcut_once_per_user(tmp_path) -> None:
+    import os
+    import shutil
+    import subprocess
+
+    wrapper = (PACKAGING / "bin" / "zapretgui").read_text(encoding="utf-8")
+    entry = PACKAGING / "zapretgui.desktop"
+    script = tmp_path / "wrapper.sh"
+    # only the shortcut function runs: the real program is not started, the menu entry is the one of the repository
+    script.write_text(wrapper.replace("/usr/share/applications/zapretgui.desktop", str(entry)).replace("exec /opt/zapretgui/_internal/zapretgui", "true"), encoding="utf-8")
+    home = tmp_path / "home"
+    (home / "Desktop").mkdir(parents=True)
+    env = {**os.environ, "HOME": str(home), "DISPLAY": ":0", "XDG_STATE_HOME": str(home / "state")}
+    env.pop("WAYLAND_DISPLAY", None)
+    shortcut = home / "Desktop" / "zapretgui.desktop"
+    subprocess.run(["sh", str(script)], env=env, check=True)
+    assert shortcut.is_file() and os.access(shortcut, os.X_OK)
+    assert shortcut.read_text(encoding="utf-8") == entry.read_text(encoding="utf-8")
+    shortcut.unlink()
+    subprocess.run(["sh", str(script)], env=env, check=True)
+    assert not shortcut.exists(), "a shortcut the user deleted must not come back"
+    # no graphical session: nothing is created and nothing is remembered
+    shutil.rmtree(home / "state")
+    env.pop("DISPLAY")
+    subprocess.run(["sh", str(script)], env=env, check=True)
+    assert not shortcut.exists() and not (home / "state").exists()
