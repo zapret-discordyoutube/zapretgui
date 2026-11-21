@@ -105,6 +105,38 @@ class ReachRecheckTests(unittest.TestCase):
         self.assertTrue(probe.address_confirmed)
         self.assertEqual(probe.kind, bk.KIND_IP)
 
+    def test_site_that_a_strategy_already_opened_is_not_called_banned(self) -> None:
+        """«Подбор стратегии» нашёл для сайта рабочую стратегию: адрес открыт, это не «бан по адресу»."""
+        from diagnostics import strategy_opened
+
+        probe, _asked = self._reach(_dead, ping=False)
+        self.assertEqual(probe.kind, bk.KIND_IP)
+
+        history = {"tcp_https|x.com": {"confirmed": ["s1"], "failed": {}}}
+        with patch("settings.store.get_blockcheck_settings", return_value={"strategy_history": history}):
+            strategy_opened.annotate([probe])
+
+        self.assertTrue(probe.opened_by_strategy)
+        self.assertFalse(probe.address_confirmed)
+        self.assertEqual(probe.kind, bk.KIND_NO_CONNECT)
+
+    def test_strategy_memory_counts_only_confirmed_web_targets_and_their_subdomains(self) -> None:
+        from diagnostics import strategy_opened
+
+        history = {
+            "tcp_https|youtube.com": {"confirmed": ["a"], "failed": {}},
+            "tcp_https|discord.com": {"confirmed": [], "failed": {"b": 1.0}},
+            "udp_games|all|1.2.3.4:3478": {"confirmed": ["c"], "failed": {}},
+        }
+        with patch("settings.store.get_blockcheck_settings", return_value={"strategy_history": history}):
+            targets = strategy_opened.opened_targets()
+
+        self.assertEqual(targets, frozenset({"youtube.com"}))
+        self.assertTrue(strategy_opened.covers("www.youtube.com", targets))
+        self.assertTrue(strategy_opened.covers("youtube.com", targets))
+        self.assertFalse(strategy_opened.covers("notyoutube.com", targets))
+        self.assertFalse(strategy_opened.covers("discord.com", targets))
+
     def test_every_address_silent_is_a_confirmed_address_ban(self) -> None:
         probe, asked = self._reach(_dead)
 

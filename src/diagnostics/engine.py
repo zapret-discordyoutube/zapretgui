@@ -56,6 +56,7 @@ from diagnostics import (
     report_text,
     sections,
     service_view,
+    strategy_opened,
     system_state,
     telegram_check,
     transfer_probe,
@@ -484,6 +485,8 @@ def _run_probes(
         sections.recheck_quic(run, [probe for _key, _target, probe, _error in done_probes if probe is not None])
         if ask_outside:
             sections.ask_outside(run, services, done_probes)
+        # Сайт, который подбор стратегии уже открывал, «баном по адресу» не называется (решает вид блокировки).
+        strategy_opened.annotate([probe for _key, _target, probe, _error in done_probes if probe is not None])
         # До печати: строка «Профиль пресета» должна попасть и в текст, и на карточку.
         preset_coverage.annotate([probe for _key, _target, probe, _error in done_probes if probe is not None], zapret_running)
 
