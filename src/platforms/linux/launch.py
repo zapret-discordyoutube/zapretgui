@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 import sys
 
 from platforms.base import SystemSupport
@@ -27,6 +28,27 @@ def restart_in_utf8_mode() -> None:
 
 
 class LinuxLaunch:
+    @staticmethod
+    def _boot_unix_seconds() -> float | None:
+        """When the machine booted, to a millisecond.
+
+        ``CLOCK_BOOTTIME`` is the exact time since boot and, unlike /proc/uptime, is not rewritten inside a container.
+        ``btime`` in /proc/stat is a whole number of seconds: with it the "process start" was off by up to a second
+        (a constant 0.8 s on the test machine), which made the start-up gap in the log look 20 times longer than it is.
+        It stays as the fallback."""
+        try:
+            return time.time() - time.clock_gettime(time.CLOCK_BOOTTIME)
+        except (AttributeError, OSError):
+            pass
+        try:
+            with open("/proc/stat", "rb") as handle:
+                for line in handle.read().decode("ascii", "replace").splitlines():
+                    if line.startswith("btime "):
+                        return float(line.split()[1])
+        except (OSError, ValueError):
+            pass
+        return None
+
     def process_creation_unix_seconds(self) -> float | None:
         """Start time of this process: the kernel counts it in clock ticks since boot (field 22 of /proc/self/stat)."""
         try:
@@ -35,14 +57,7 @@ class LinuxLaunch:
             # The command name (field 2) is in brackets and may contain spaces: count after the last ")".
             fields = raw.rsplit(")", 1)[1].split()
             start_ticks = int(fields[19])
-            # Boot time from "btime" in /proc/stat (what psutil uses too). /proc/uptime would be wrong
-            # inside a container: it shows the container's uptime while the ticks count from host boot.
-            boot_unix = None
-            with open("/proc/stat", "rb") as handle:
-                for line in handle.read().decode("ascii", "replace").splitlines():
-                    if line.startswith("btime "):
-                        boot_unix = float(line.split()[1])
-                        break
+            boot_unix = self._boot_unix_seconds()
             if boot_unix is None:
                 return None
             return boot_unix + start_ticks / os.sysconf("SC_CLK_TCK")

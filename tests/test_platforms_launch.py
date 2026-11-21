@@ -89,8 +89,33 @@ def test_linux_process_start_survives_spaces_in_the_command_name(monkeypatch, tm
     import os
 
     monkeypatch.setattr(os, "sysconf", lambda name: 100)
+    monkeypatch.delattr(time, "clock_gettime", raising=False)  # no CLOCK_BOOTTIME: the btime fallback
     # boot = 9900 (btime); start = 9900 + 5000/100 = 9950
     assert LinuxLaunch().process_creation_unix_seconds() == pytest.approx(9950.0)
+
+
+def test_linux_process_start_uses_the_exact_boot_time_not_whole_seconds(monkeypatch, tmp_path) -> None:
+    """btime is a whole number of seconds and made the start-up gap look 0.8 s too long: CLOCK_BOOTTIME is exact."""
+    import builtins
+    import os
+
+    stat = "123 (name) S " + " ".join(["0"] * 18) + " 5000 " + " ".join(["0"] * 20)
+    real_open = builtins.open
+
+    def fake_open(path, *args, **kwargs):
+        if path == "/proc/self/stat":
+            f = tmp_path / "stat"
+            f.write_bytes(stat.encode())
+            return real_open(f, *args, **kwargs)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    monkeypatch.setattr(os, "sysconf", lambda name: 100)
+    monkeypatch.setattr(time, "time", lambda: 10000.5)
+    monkeypatch.setattr(time, "clock_gettime", lambda clock: 100.0, raising=False)
+    monkeypatch.setattr(time, "CLOCK_BOOTTIME", 7, raising=False)
+    # boot = 10000.5 - 100.0 = 9900.5; start = 9900.5 + 50 = 9950.5 (btime would say 9950.0 or 9951.0)
+    assert LinuxLaunch().process_creation_unix_seconds() == pytest.approx(9950.5)
 
 
 def test_stub_has_no_start_time() -> None:
