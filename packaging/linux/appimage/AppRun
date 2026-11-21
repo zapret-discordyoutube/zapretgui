@@ -17,7 +17,11 @@ say() {
   if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
     command -v zenity >/dev/null && zenity --info --no-wrap --title=Zapret --text="$*" 2>/dev/null && return 0
     command -v kdialog >/dev/null && kdialog --msgbox "$*" 2>/dev/null && return 0
-    command -v notify-send >/dev/null && notify-send Zapret "$*" 2>/dev/null
+    command -v notify-send >/dev/null && notify-send Zapret "$*" 2>/dev/null && return 0
+    # a desktop without any of the above (a bare window manager) still has xmessage or a terminal: a double-clicked
+    # AppImage must never fail silently
+    command -v xmessage >/dev/null && xmessage -center "$*" 2>/dev/null && return 0
+    command -v x-terminal-emulator >/dev/null && x-terminal-emulator -e sh -c 'echo "$1"; echo; printf "Enter to close: "; read answer' sh "$*" 2>/dev/null
   fi
   return 0
 }

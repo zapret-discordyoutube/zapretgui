@@ -284,3 +284,12 @@ def test_the_appimage_start_makes_its_installer_copy_executable_whatever_the_bui
     text = (PACKAGING / "appimage" / "AppRun").read_text(encoding="utf-8")
     copy = text.index('cp -a "$ROOT"/. "$tmp"/')
     assert 'chmod 0755 "$tmp/install.sh"' in text[copy : copy + 400]
+
+
+def test_a_message_of_the_appimage_start_reaches_a_desktop_without_dialog_tools() -> None:
+    """Double-clicked, the AppImage has no terminal: a message printed only to stderr is "nothing happens" for the person."""
+    text = (PACKAGING / "appimage" / "AppRun").read_text(encoding="utf-8")
+    say = text[text.index("say() {") : text.index("system_part_ready()")]
+    order = [say.index(tool) for tool in ("zenity", "kdialog", "notify-send", "xmessage", "x-terminal-emulator")]
+    assert order == sorted(order)
+    assert subprocess.run(["sh", "-n", str(PACKAGING / "appimage" / "AppRun")]).returncode == 0
