@@ -280,3 +280,11 @@ def test_the_notification_handler_builds_the_install_action_only_when_it_is_wire
     callback()
     assert seen == [(TAG, "bar")]
     assert build(False).build_action_callback(action, "bar") is None
+
+
+def test_linux_package_keeps_its_own_version_when_the_channel_moved_on(as_linux):
+    # a Windows-only release (new engine) changed the channel version; the Linux package is still the older one
+    newer = {**ENTRY, "version": "21.1.7.294", "linux": {**ENTRY["linux"], "version": TAG}}
+    result = mirrors.release_from_versions({"stable": newer}, "stable", base_url="https://m:888", verify_ssl=False, source="m")
+    assert (result["version"], result["file_name"]) == (TAG, DEB)
+

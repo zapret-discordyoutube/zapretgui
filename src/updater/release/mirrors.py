@@ -113,6 +113,9 @@ def release_from_versions(
         package = entry.get(platform_key)
         if not isinstance(package, dict) or not package.get("file_name"):
             raise MirrorReleaseError(f"в ответе нет пакета для {platform_key}")
+        # Выпуски без пакета этой системы (только новый движок Windows) меняют версию канала, а пакет остаётся
+        # прежним: у пакета своя версия.
+        version = normalize_version(str(package.get("version") or entry.get("version") or ""))
     file_name = str(package.get("file_name") or "").strip()
     release = {
         "version": version,
