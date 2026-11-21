@@ -264,3 +264,23 @@ def test_the_deb_recommends_the_package_that_has_pkexec() -> None:
     assert "pkexec" in recommends and "polkitd" in recommends
     # an old system without the split still resolves through the transitional name
     assert recommends.count("policykit-1") == 2
+
+
+SCRIPTS = ("install.sh", "uninstall.sh", "appimage/AppRun", "bin/zapretgui", "bin/zapretgui-helper", "deb/postinst", "deb/postrm", "deb/prerm")
+
+
+def test_the_packaging_scripts_are_executable_in_git() -> None:
+    """A release is built from ``git archive`` of the commit, not from a working tree. Dev 296 was built that way with the
+    scripts stored as 100644: the AppImage carried a non-executable install.sh, and on every desktop its first start died
+    (``sudo: ...install.sh: command not found``, pkexec the same)."""
+    listing = subprocess.run(["git", "ls-files", "-s", "--", "packaging/linux"], cwd=PACKAGING.parents[1], capture_output=True, text=True)
+    if listing.returncode != 0:
+        pytest.skip("not a git checkout")
+    modes = {line.split("\t")[1].removeprefix("packaging/linux/"): line.split()[0] for line in listing.stdout.splitlines()}
+    assert [name for name in SCRIPTS if modes.get(name) != "100755"] == []
+
+
+def test_the_appimage_start_makes_its_installer_copy_executable_whatever_the_build_did() -> None:
+    text = (PACKAGING / "appimage" / "AppRun").read_text(encoding="utf-8")
+    copy = text.index('cp -a "$ROOT"/. "$tmp"/')
+    assert 'chmod 0755 "$tmp/install.sh"' in text[copy : copy + 400]

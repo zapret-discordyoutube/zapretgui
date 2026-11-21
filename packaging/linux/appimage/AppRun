@@ -31,6 +31,8 @@ install_system_part() {
   tmp="$(mktemp -d /var/tmp/zapretgui-install.XXXXXX)" || return 1
   status=1
   if cp -a "$ROOT"/. "$tmp"/; then
+    # a build made from a git export may have lost the executable bit (Dev 296 did: sudo said "command not found")
+    chmod 0755 "$tmp/install.sh" "$tmp/uninstall.sh" 2>/dev/null
     if [ "$(id -u)" = 0 ]; then
       "$tmp/install.sh"
     elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v pkexec >/dev/null; then
