@@ -1,5 +1,5 @@
 # Preset: Dead by Daylight v2 (game filter)
-# BuiltinVersion: 2.44
+# BuiltinVersion: 2.45
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -179,6 +179,14 @@
 --name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
+--out-range=-d10
+--lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
+
+--new
+
+--name=vencord.dev
+--filter-tcp=80,443
+--hostlist=lists/vencord.txt
 --out-range=-d10
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
 

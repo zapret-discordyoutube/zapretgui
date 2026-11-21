@@ -1,5 +1,5 @@
 # Preset: Universal V5
-# BuiltinVersion: 2.44
+# BuiltinVersion: 2.45
 # IconColor: #a371f7
 # Description: Основной пресет. Десинк применяется точечно и только к реально заблокированным сервисам; работающие сайты, RU-трафик и личный прокси проходят нетронутыми. Покрытие: YouTube, Discord, Telegram, соцсети, Google, AI, LinkedIn, торренты, Twitch, EpicGames/Fortnite, Amazon.
 
@@ -249,6 +249,15 @@
 --name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
+--out-range=-d10
+--lua-desync=send:repeats=3
+--lua-desync=syndata:blob=tls_google
+
+--new
+
+--name=vencord.dev
+--filter-tcp=80,443
+--hostlist=lists/vencord.txt
 --out-range=-d10
 --lua-desync=send:repeats=3
 --lua-desync=syndata:blob=tls_google

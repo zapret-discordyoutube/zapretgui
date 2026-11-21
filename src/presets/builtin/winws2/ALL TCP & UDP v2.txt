@@ -1,5 +1,5 @@
 # Preset: ALL TCP & UDP v2
-# BuiltinVersion: 2.45
+# BuiltinVersion: 2.46
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -66,6 +66,14 @@
 --name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
+--out-range=-n2
+--lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
+
+--new
+
+--name=vencord.dev
+--filter-tcp=80,443
+--hostlist=lists/vencord.txt
 --out-range=-n2
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 

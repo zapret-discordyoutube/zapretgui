@@ -1,5 +1,5 @@
 # Preset: general ALT6
-# BuiltinVersion: 2.45
+# BuiltinVersion: 2.46
 # IconColor: #67d1e4ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -166,6 +166,14 @@
 --name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
+--out-range=-d10
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
+
+--new
+
+--name=vencord.dev
+--filter-tcp=80,443
+--hostlist=lists/vencord.txt
 --out-range=-d10
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 

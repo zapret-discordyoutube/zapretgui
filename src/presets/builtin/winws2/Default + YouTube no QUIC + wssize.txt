@@ -1,5 +1,5 @@
 # Preset: Default + YouTube no QUIC + wssize
-# BuiltinVersion: 2.44
+# BuiltinVersion: 2.45
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -199,6 +199,14 @@
 --name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
+--out-range=-d10
+--lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
+
+--new
+
+--name=vencord.dev
+--filter-tcp=80,443
+--hostlist=lists/vencord.txt
 --out-range=-d10
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 

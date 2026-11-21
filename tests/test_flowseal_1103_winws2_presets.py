@@ -92,27 +92,29 @@ IPSET_UDP_HYBRID = "Cloudflare UDP"
 # profile as #2. Undoing exactly those two edits reproduces the previous pins for all 20 files.
 # 2026-10-28: refreshed for the Matrix and SimpleX profiles added as #3–#4 to every builtin preset.
 # Removing exactly those two blocks reproduces the previous pins for all 20 files.
+# 2026-11-21: refreshed for the vencord.dev profile added after "Discord · сайт и приложение" (a copy of that
+# profile's strategy with lists/vencord.txt); removing that one block reproduces the previous pins.
 OLD_PORT_SHA256 = {
-    "general 1.9.9 (game filter).txt": "afe1c4c9d931bf5b4b41620949175cb34ade45eb7307f84bcd73b568ea6ab745",
-    "general ALT10 1.9.9 (game filter).txt": "1c6997390aebf76d6426d5d3fa6f33d2e606738ccaa91842b1503b5dabee2289",
-    "general ALT11 1.9.9 (game filter).txt": "4c4236f895eccff07bb75c639e88e241cc7b64d6948a16cd82093f920135c398",
-    "general ALT1 1.9.9 (game filter).txt": "2dcb819b8dfc301c1ca2d83e3004601da5c8c1ba692bc8251c96d0b720a95898",
-    "general ALT12 1.9.9 (game filter).txt": "9d59b7c3361beb272382e3018e4339268c2b3526b6074d2866731cc0cbd002f0",
-    "general ALT2 1.9.9 (game filter).txt": "8d3b657c884e75d55eeb8a11ec194bbd66c32778791381712eaf2e1c4549f1ac",
-    "general ALT3 1.9.9 (game filter).txt": "0e347a8369c0672c2c069ded23d032d2c902db23a3a99e63098415a635ea9b1f",
-    "general ALT4 1.9.9 (game filter).txt": "af1a21ec68d4bdd725fbae8b662a4df02c967dbda6405e9e7ce889a0d586655e",
-    "general ALT6 1.9.9 (game filter).txt": "c52c122317c8109c90df3dd92195120e7974d5272dcf30e684f9ebe25e33d517",
-    "general ALT7 1.9.9 (game filter).txt": "7a957a19e208a824715bb230d840b8c9ad8a0b682c579ce1b840d15fc83be025",
-    "general ALT8 1.9.9 (game filter).txt": "c578dc9131d307fe28612b1da5a911062aab6a70701406992cdf3e872904ce82",
-    "general ALT9 1.9.9 (game filter).txt": "90145564440acc7b0b093cc1d037c2cd5a0fc641cf4dff7c1e1e020f8f41c041",
+    "general 1.9.9 (game filter).txt": "0cbd0d42157bc46a66290c7a41fe49e50c7e07eb71847c1f50283e618bd0c3b1",
+    "general ALT10 1.9.9 (game filter).txt": "078a7bbaafef32ef991a6a0f255dcade7e7592bee7ca58171f0cbe3215d8c4f5",
+    "general ALT11 1.9.9 (game filter).txt": "8572dbfdd89701a62e8ffa309cef1309c08b4ba84a04d4f7607df54b38371f30",
+    "general ALT1 1.9.9 (game filter).txt": "64d15fe91a9ed5345a5ec9773de6886975c06e64aa75bba5db44a46255835532",
+    "general ALT12 1.9.9 (game filter).txt": "afa03a1abc39518c0807ebe6015bcac41e147c3edceaa191a60741162826a08a",
+    "general ALT2 1.9.9 (game filter).txt": "5b96405653fe9e4e88d5d3a62c03ef475bdc25ffdbcdc6075f5cf3ef0fd4391d",
+    "general ALT3 1.9.9 (game filter).txt": "6c65a15df12aa7c18bdf15d51329cc0879e24c041a761927f835e69b51b090c4",
+    "general ALT4 1.9.9 (game filter).txt": "777d5c2654d4dad6f5a2e01dd10490654bab819de1b924a57da486e633922a02",
+    "general ALT6 1.9.9 (game filter).txt": "b55c539bd96b591bfa2c766cc520b533262214037e10de4c6da88f44c688c121",
+    "general ALT7 1.9.9 (game filter).txt": "945819cda4940b4a8af7463f84787ba002d5a539113d005184069b4f904824e3",
+    "general ALT8 1.9.9 (game filter).txt": "83a27b9ffeb42b50a714a16b55289b6a04bf5b7850049966e38edba934914750",
+    "general ALT9 1.9.9 (game filter).txt": "ae3e3327d23e77ba7fede8db6ddb24c5be603feb4224ab44869c4af252f6f2a1",
     "general EXP 1.10.0 (game filter).txt": "73d1a76653a627fb01088d6487ebb9ea1e1ae2593f1ed6e9d124e204bc5756f2",
-    "general FAKE TLS AUTO 1.9.9 (game filter).txt": "bd86f713a2012afec0bf71624679e61afe11bb823110502a3b732e34d969bdac",
-    "general FAKE TLS AUTO ALT 1.9.9 (game filter).txt": "1740d660cdfd911ee41623b6dd66086515ebe62905a8c8d7e8bfe24f708d7e4c",
-    "general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt": "d2f7f11ab357e3dccb0aee18a50478e717d6976cc7741fc6962a28c5b5d01a25",
-    "general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt": "c94e61855e4220821df2586ee4f4d9504566c89d6831ac29e4f22ad1b04fcf61",
-    "general SIMPLE FAKE 1.9.9 (game filter).txt": "f9755eada32838cca964fa6ad1e056739ce2481dee969e079153fa4f1d8f25df",
-    "general SIMPLE FAKE ALT 1.9.9 (game filter).txt": "bf5d1d014a904c5bdd0f7d8791c1216277cc9c091f209829979e53f3c9e53831",
-    "general SIMPLE FAKE ALT2 1.9.9 (game filter).txt": "88b0c70d42a9e8fc84ee8b001f964fa99b5c22fddaf19d576327cc11507e10e5",
+    "general FAKE TLS AUTO 1.9.9 (game filter).txt": "c29d31d98093b22fcfc1d8544dc04637dc7e6499263edf895e5f481f304f1fee",
+    "general FAKE TLS AUTO ALT 1.9.9 (game filter).txt": "6b4d0ac457668ba28837a454170b151606b67fdd22e098fb1ac70e81242669c0",
+    "general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt": "67ed31a1b148ca31f23902bea7db073ea12191e42e163349901cbf9f63293832",
+    "general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt": "9105525b0acf9bbf8821f91591079683220c2c8e3219df9c7ee69872f4293e50",
+    "general SIMPLE FAKE 1.9.9 (game filter).txt": "53376dc64ce017209103d372d1cb9b5d78ab5800ecc22c01d9a509489f9fdfc0",
+    "general SIMPLE FAKE ALT 1.9.9 (game filter).txt": "c536c407a4a33f0a2f733f9264be09fc1a755f396409e099d746acf9c8cd03bb",
+    "general SIMPLE FAKE ALT2 1.9.9 (game filter).txt": "c9b22272b454f8b3e6c6fabe6db82eea5cda3b8c337350732f382d92ca0fa13a",
 }
 _BATCH_SYNTAX = re.compile(r"%[A-Za-z_]+%|\^|\"|(?:^|\s)start(?:\s|$)|call service\.bat|winws\.exe", re.MULTILINE)
 
