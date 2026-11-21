@@ -100,7 +100,15 @@ class ReaderHostTests(unittest.TestCase):
             return body.encode()
 
         self.assertEqual(mirrors.reader_host(fetch), "git3.zapret.moe")
-        self.assertEqual(asked[:2], ["https://git2.zapret.moe/_sites/mirrors.json", "https://git3.zapret.moe/_sites/mirrors.json"])
+        # Сначала лёгкий links.json, и только если имя не отдало его — mirrors.json; потом следующее имя.
+        self.assertEqual(
+            asked[:3],
+            [
+                "https://git2.zapret.moe/_sites/links.json",
+                "https://git2.zapret.moe/_sites/mirrors.json",
+                "https://git3.zapret.moe/_sites/links.json",
+            ],
+        )
 
     def test_without_any_answer_never_falls_back_to_the_blocked_main_name(self) -> None:
         self.assertEqual(mirrors.reader_host(lambda url: None), "git2.zapret.moe")
@@ -144,18 +152,18 @@ class MirrorListTests(unittest.TestCase):
 
     def test_list_comes_from_the_first_name_that_answers(self) -> None:
         body = json.dumps(_document(("git2.zapret.moe", False), ("git.zapret.moe", True))).encode()
-        mirror_list, asked = self._list({"https://git3.zapret.moe/_sites/mirrors.json": body})
+        mirror_list, asked = self._list({"https://git3.zapret.moe/_sites/links.json": body})
 
         self.assertEqual(mirror_list.hosts(), ["git2.zapret.moe", "git.zapret.moe"])
         # Все имена спрашиваются параллельно: первым — лучшее, победителем стало то, что ответило.
-        self.assertEqual(asked[0], "https://git2.zapret.moe/_sites/mirrors.json")
-        self.assertIn("https://git3.zapret.moe/_sites/mirrors.json", asked)
+        self.assertEqual(asked[0], "https://git2.zapret.moe/_sites/links.json")
+        self.assertIn("https://git3.zapret.moe/_sites/links.json", asked)
         self.assertEqual(mirror_list.choose(), "git3.zapret.moe")
 
     def test_list_is_cached_and_asked_again_after_the_time_is_up(self) -> None:
         now = [0.0]
         body = json.dumps(_document(("git2.zapret.moe", False))).encode()
-        mirror_list, asked = self._list({"https://git2.zapret.moe/_sites/mirrors.json": body}, clock=lambda: now[0])
+        mirror_list, asked = self._list({"https://git2.zapret.moe/_sites/links.json": body}, clock=lambda: now[0])
 
         mirror_list.hosts()
         mirror_list.hosts()
@@ -183,9 +191,9 @@ class MirrorListTests(unittest.TestCase):
         good = json.dumps(_document(("git4.zapret.moe", False))).encode()
         mirror_list, _asked = self._list(
             {
-                "https://git2.zapret.moe/_sites/mirrors.json": OSError("нет связи"),
-                "https://git3.zapret.moe/_sites/mirrors.json": "не JSON".encode(),
-                "https://git4.zapret.moe/_sites/mirrors.json": good,
+                "https://git2.zapret.moe/_sites/links.json": OSError("нет связи"),
+                "https://git3.zapret.moe/_sites/links.json": "не JSON".encode(),
+                "https://git4.zapret.moe/_sites/links.json": good,
             }
         )
 
@@ -193,7 +201,7 @@ class MirrorListTests(unittest.TestCase):
 
     def test_remembered_name_goes_first_and_foreign_names_are_ignored(self) -> None:
         body = json.dumps(_document(("git2.zapret.moe", False), ("git3.zapret.moe", False))).encode()
-        mirror_list, _asked = self._list({"https://git2.zapret.moe/_sites/mirrors.json": body})
+        mirror_list, _asked = self._list({"https://git2.zapret.moe/_sites/links.json": body})
 
         mirror_list.remember("git3.zapret.moe")
         self.assertEqual(mirror_list.hosts(), ["git3.zapret.moe", "git2.zapret.moe"])
@@ -203,6 +211,75 @@ class MirrorListTests(unittest.TestCase):
 
         mirror_list.forget()
         self.assertEqual(mirror_list.hosts()[0], "git2.zapret.moe")
+
+
+class FeedFileTests(unittest.TestCase):
+    """Лента имён: сначала лёгкий links.json, mirrors.json — только запасной (его читают и старые копии)."""
+
+    def _fetch(self, answers: dict):
+        asked: list[str] = []
+
+        def fetch(url: str):
+            asked.append(url)
+            value = answers.get(url)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        return fetch, asked
+
+    def _links(self, *names, link: str) -> bytes:
+        document = _document(*names, preferred="")
+        document["families"]["git"].pop("preferred", None)
+        document["families"]["git"]["link"] = link
+        return json.dumps(document).encode()
+
+    def test_links_json_is_enough_and_mirrors_json_is_never_asked(self) -> None:
+        body = self._links(("git.zapret.moe", True), ("git3.zapret.moe", False), link="git3.zapret.moe")
+        fetch, asked = self._fetch({"https://git3.zapret.moe/_sites/links.json": body})
+
+        document = mirrors.fetch_feed(fetch, "git3.zapret.moe")
+
+        self.assertEqual(asked, ["https://git3.zapret.moe/_sites/links.json"])
+        self.assertEqual(mirrors.ordered_hosts(document), ["git3.zapret.moe", "git.zapret.moe"])
+
+    def test_link_field_of_links_json_is_the_best_name(self) -> None:
+        body = json.loads(self._links(("git2.zapret.moe", False), ("git3.zapret.moe", False), link="git3.zapret.moe"))
+        self.assertEqual(mirrors.ordered_hosts(body)[0], "git3.zapret.moe")
+
+    def test_old_preferred_field_still_works(self) -> None:
+        body = _document(("git2.zapret.moe", False), ("git3.zapret.moe", False), preferred="git3.zapret.moe")
+        self.assertEqual(mirrors.ordered_hosts(body)[0], "git3.zapret.moe")
+
+    def test_mirrors_json_is_the_fallback_when_links_json_is_missing_or_not_a_feed(self) -> None:
+        old = json.dumps(_document(("git2.zapret.moe", False))).encode()
+        for broken in (None, OSError("reset"), b"<html>captive portal</html>", b"[]", b'{"no": "families"}'):
+            fetch, asked = self._fetch(
+                {"https://git2.zapret.moe/_sites/links.json": broken, "https://git2.zapret.moe/_sites/mirrors.json": old}
+            )
+            document = mirrors.fetch_feed(fetch, "git2.zapret.moe")
+            self.assertEqual(mirrors.ordered_hosts(document), ["git2.zapret.moe"], repr(broken))
+            self.assertEqual(
+                asked,
+                ["https://git2.zapret.moe/_sites/links.json", "https://git2.zapret.moe/_sites/mirrors.json"],
+            )
+
+    def test_both_failing_raises_with_both_reasons(self) -> None:
+        fetch, _asked = self._fetch({})
+        with self.assertRaises(ValueError) as caught:
+            mirrors.fetch_feed(fetch, "git2.zapret.moe")
+        self.assertIn("links.json", str(caught.exception))
+        self.assertIn("mirrors.json", str(caught.exception))
+
+    def test_the_race_uses_links_json_and_proves_the_name(self) -> None:
+        body = self._links(("git.zapret.moe", True), ("git3.zapret.moe", False), link="git3.zapret.moe")
+        fetch, asked = self._fetch({"https://git3.zapret.moe/_sites/links.json": body})
+        names = mirrors.MirrorList(fetch)
+
+        self.assertEqual(names.choose(), "git3.zapret.moe")
+        self.assertEqual(names.hosts()[0], "git3.zapret.moe")
+        self.assertNotIn("https://git3.zapret.moe/_sites/mirrors.json", asked)
+        self.assertEqual(names.link(), "git3.zapret.moe")
 
 
 class MirrorReportTests(unittest.TestCase):
@@ -224,8 +301,9 @@ class MirrorReportTests(unittest.TestCase):
 
         self.assertEqual(len(said), 1)
         self.assertIn("git4.zapret.moe ответило", said[0])
-        self.assertIn("git2.zapret.moe: OSError", said[0])
-        self.assertIn("git3.zapret.moe: ValueError", said[0])
+        # По каждому имени видно обе причины: и links.json, и запасной mirrors.json.
+        self.assertIn("git2.zapret.moe: ValueError: links.json: OSError: timed out; mirrors.json: OSError", said[0])
+        self.assertIn("git3.zapret.moe: ValueError: links.json: ValueError: пустой ответ; mirrors.json", said[0])
 
     def test_report_lists_all_causes_when_nothing_answers(self) -> None:
         said: list[str] = []
@@ -565,7 +643,7 @@ class RaceSpeedTests(unittest.TestCase):
 
         self.assertEqual(len(results), 6)
         self.assertEqual(len(set(results)), 1)
-        self.assertEqual(calls.count("https://git2.zapret.moe/_sites/mirrors.json"), 1)
+        self.assertEqual(calls.count("https://git2.zapret.moe/_sites/links.json"), 1)
 
     def test_good_name_expires_and_the_choice_is_made_again(self) -> None:
         now = [0.0]

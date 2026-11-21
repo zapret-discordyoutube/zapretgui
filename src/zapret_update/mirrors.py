@@ -42,6 +42,10 @@ from urllib.parse import quote, urlsplit
 
 CANONICAL_HOST = "git.zapret.moe"
 FAMILIES = ("git", "wiki")
+# Лента имён сайта: сначала лёгкий ``links.json`` (то, что нужно программам), затем ``mirrors.json`` — старый и
+# тяжёлый, его читают установленные ранее копии, поэтому сервер держит оба. Схемы совместимы по тому, что читает ядро:
+# ``families.<семейство>.names[]`` (``name``, ``blocked``), лучшее имя — ``link`` или ``preferred``, домены — ``domains``.
+LINKS_PATH = "/_sites/links.json"
 MIRRORS_PATH = "/_sites/mirrors.json"
 # Запасной список: сначала зеркала, основное имя в конце (пометка «заблокировано»
 # в списке сервера измерена из российских сетей, а не с этой машины, но на
@@ -241,7 +245,7 @@ def ordered_hosts(document: Any, family: str = "git") -> list[str]:
     try:
         entry = document["families"][family]
         items = [item for item in entry["names"] if isinstance(item, dict)]
-        preferred = str(entry.get("preferred") or "").strip().lower()
+        preferred = str(entry.get("link") or entry.get("preferred") or "").strip().lower()
     except (KeyError, TypeError, AttributeError):
         return []
     open_names: list[str] = []
@@ -306,6 +310,26 @@ def entry_hosts(document: Any, family: str = "git") -> list[str]:
     return ordered
 
 
+def fetch_feed(fetch: Callable[[str], bytes | None], host: str) -> dict:
+    """Лента имён с одного имени сайта: ``links.json``, а если он не вышел или не лента — ``mirrors.json``.
+
+    Бросает ошибку, если не вышло ни то ни другое (в тексте — обе причины, для журнала).
+    """
+    reasons: list[str] = []
+    for path in (LINKS_PATH, MIRRORS_PATH):
+        try:
+            body = fetch(f"https://{host}{path}")
+            if not body:
+                raise ValueError("пустой ответ")
+            document = json.loads(body)
+            if not isinstance(document, dict) or not isinstance(document.get("families"), dict):
+                raise ValueError("ответ не похож на список имён")
+            return document
+        except Exception as exc:  # noqa: BLE001 — любая причина идёт в журнал
+            reasons.append(f"{path.rsplit('/', 1)[-1]}: {type(exc).__name__}: {str(exc)[:80]}")
+    raise ValueError("; ".join(reasons))
+
+
 def reader_host(fetch: Callable[[str], bytes | None], family: str = "git") -> str:
     """Имя для ссылки в тексте, который читают люди (пост о выпуске, список изменений).
 
@@ -316,8 +340,7 @@ def reader_host(fetch: Callable[[str], bytes | None], family: str = "git") -> st
     """
     for host in bootstrap_hosts(family):
         try:
-            body = fetch(f"https://{host}{MIRRORS_PATH}")
-            ordered = ordered_hosts(json.loads(body), family) if body else []
+            ordered = ordered_hosts(fetch_feed(fetch, host), family)
         except Exception:
             continue
         if ordered:
@@ -562,12 +585,7 @@ class MirrorList:
                 answers.put((host, None, None))
                 return
             try:
-                body = self._fetch(f"https://{host}{MIRRORS_PATH}")
-                if not body:
-                    raise ValueError("пустой ответ")
-                document = json.loads(body)
-                if not isinstance(document, dict):
-                    raise ValueError("ответ не похож на список имён")
+                document = fetch_feed(self._fetch, host)
             except Exception as exc:  # noqa: BLE001 — любая причина идёт в журнал
                 answers.put((host, None, f"{host}: {type(exc).__name__}: {str(exc)[:120]}"))
                 return
@@ -608,6 +626,7 @@ __all__ = [
     "BOOTSTRAP_HOSTS",
     "CANONICAL_HOST",
     "FAMILIES",
+    "LINKS_PATH",
     "MIRRORS_PATH",
     "MirrorList",
     "WIKI_BOOTSTRAP_HOSTS",
@@ -620,6 +639,7 @@ __all__ = [
     "entry_page_for",
     "entry_page_url",
     "entry_hosts",
+    "fetch_feed",
     "family_of",
     "host_of",
     "is_git_host",
