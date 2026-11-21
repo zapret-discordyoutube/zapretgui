@@ -90,7 +90,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.11.01.1")
+        self.assertEqual(catalog.catalog_version, "2026.11.21.1")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -122,7 +122,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(catalog.service_icons["Grok"], ("own:grok:GR", None))
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 106)
-        self.assertEqual(len(catalog.dns_profiles), 7)
+        self.assertEqual(len(catalog.dns_profiles), 8)
         for removed in ("xbox_dns_old", "malw_dns", "malw_dns_v2"):
             self.assertNotIn(removed, catalog.dns_profiles)
         self.assertNotIn("fin_dns", catalog.dns_profiles)
@@ -140,7 +140,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 954)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6090)  # +58: Zapret DNS у Gemini AI и Fitbit (2026.11.01.1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6808)  # +718: профиль Malw.link (2026.11.21.1); до него 6090
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -321,10 +321,10 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         напрямую.
         """
         self.assertEqual(
-            self.proxy_domains.get_service_available_dns_profiles("Gemini AI"), ["zapret_dns", "comss_dns", "geohide"]
+            self.proxy_domains.get_service_available_dns_profiles("Gemini AI"), ["zapret_dns", "comss_dns", "geohide", "malw_link"]
         )
         self.assertEqual(
-            self.proxy_domains.get_service_available_dns_profiles("Fitbit"), ["zapret_dns", "astracat", "geohide"]
+            self.proxy_domains.get_service_available_dns_profiles("Fitbit"), ["zapret_dns", "astracat", "geohide", "malw_link"]
         )
         connection = sqlite3.connect(PRIVATE_DATABASE)
         try:
@@ -431,6 +431,53 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         for service in ("Gemini AI", "Claude", "Notion", "DeepL"):
             self.assertIn("geohide", self.proxy_domains.get_service_available_dns_profiles(service), service)
         self.assertIn("astracat", self.proxy_domains.get_service_available_dns_profiles("Spotify"))
+
+    def test_malw_link_profile_leads_through_its_relay_and_keeps_real_addresses_elsewhere(self) -> None:
+        """Malw.link (2026-11-21): ответы его DoH на все имена каталога; посредник проверен TLS с сертификатом имени."""
+        relay = "48.102.233.174"
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            services = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT DISTINCT d.service_id FROM dns_answers a JOIN domains d USING(domain_id)"
+                    " WHERE a.profile_id = 'malw_link'"
+                )
+            ]
+            self.assertIn("dns.chatgpt_and_sora_openai", services)
+            self.assertIn("dns.claude", services)
+            # Профиль предлагается, только когда покрывает каждое имя сервиса.
+            uncovered = connection.execute(
+                "SELECT COUNT(*) FROM domains d WHERE d.service_id IN"
+                " (SELECT DISTINCT d2.service_id FROM dns_answers a2 JOIN domains d2 USING(domain_id)"
+                "  WHERE a2.profile_id = 'malw_link')"
+                " AND NOT EXISTS (SELECT 1 FROM dns_answers a WHERE a.domain_id = d.domain_id"
+                "  AND a.profile_id = 'malw_link')"
+            ).fetchone()[0]
+            self.assertEqual(uncovered, 0)
+            # У каждого сервиса профиля хотя бы одно имя идёт через посредника.
+            without_relay = connection.execute(
+                "SELECT d.service_id FROM dns_answers a JOIN domains d USING(domain_id)"
+                " WHERE a.profile_id = 'malw_link' GROUP BY d.service_id HAVING SUM(a.ip_address = ?) = 0",
+                (relay,),
+            ).fetchall()
+            self.assertEqual(without_relay, [])
+            chatgpt = connection.execute(
+                "SELECT a.ip_address FROM dns_answers a JOIN domains d USING(domain_id)"
+                " WHERE d.hostname = 'chatgpt.com' AND a.profile_id = 'malw_link' ORDER BY a.priority"
+            ).fetchall()
+            self.assertEqual(chatgpt, [(relay,)])
+            # Выключенные сервисы профиль не получает.
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM dns_answers a JOIN domains d USING(domain_id)"
+                    " JOIN services s USING(service_id) WHERE a.profile_id = 'malw_link' AND s.enabled = 0"
+                ).fetchone()[0],
+                0,
+            )
+        finally:
+            connection.close()
+        self.assertIn("malw_link", self.proxy_domains.get_service_available_dns_profiles("ChatGPT & Sora (OpenAI)"))
 
     def test_dns_ai_profile_covers_only_services_its_node_opens(self) -> None:
         """DNS-AI ведёт через свой узел 27 имён; узел для Google из России не открывался."""

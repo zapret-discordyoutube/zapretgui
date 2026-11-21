@@ -23,6 +23,8 @@ class ProfileDnsTests(unittest.TestCase):
         self.assertIsNone(profile_dns.ask_profile("xbox_dns", "chatgpt.com", query=lambda *a, **k: self.fail("спрашивать некого")))
         self.assertFalse(profile_dns.has_server("xbox_dns"))
         self.assertTrue(profile_dns.has_server("comss_dns"))
+        # Профиль Malw.link (каталог 2026.11.21.1) тоже спрашивает свежие ответы у своего сервера.
+        self.assertTrue(profile_dns.has_server("malw_link"))
 
     def test_doh_name_address_is_asked_first_with_the_doh_name_for_tls(self) -> None:
         asked: list[tuple] = []

@@ -33,6 +33,7 @@ PROFILE_SERVERS: dict[str, str] = {
     "geohide": "GeoHide",
     "astracat": "AstraCat",
     "dns_ai": "DNS-AI",
+    "malw_link": "Malw.link",
 }
 
 TIMEOUT_S = 3.0
