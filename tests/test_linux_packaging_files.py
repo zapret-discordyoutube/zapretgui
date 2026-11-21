@@ -372,7 +372,7 @@ def test_the_appimage_installer_brings_the_same_libraries_the_deb_depends_on() -
     text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
     listed = re.search(r'^DEPENDENCIES="([^"]+)"', text, re.M)
     assert listed is not None
-    assert sorted(listed.group(1).split()) == sorted(name for name in _deb_depends() if name != "systemd")
+    assert sorted(listed.group(1).split()) == sorted(name for name in _deb_depends() if name != "systemd" and "(" not in name)
     # the window-system libraries whose absence on a lean desktop made "nothing happens"
     for needed in ("libxcb-icccm4", "libxcb-keysyms1", "libxcb-render-util0", "libxcb-cursor0", "libxkbcommon-x11-0"):
         assert needed in _deb_depends()
@@ -442,3 +442,43 @@ def test_a_window_that_dies_at_start_is_explained_instead_of_nothing_happening(t
     assert done.returncode == 134
     said = log.read_text(encoding="utf-8")
     assert "did not start" in said and "Could not load the Qt platform plugin xcb" in said
+
+
+def _run_appimage_with_glibc(tmp_path, glibc: str):
+    import shutil
+    import stat
+
+    app = tmp_path / "app"
+    (app / "zapretgui-root").mkdir(parents=True)
+    shutil.copy2(PACKAGING / "appimage" / "AppRun", app / "AppRun")
+    (app / "zapretgui-root" / "VERSION").write_text("21.1.7.999\n", encoding="utf-8")
+    log = tmp_path / "calls.log"
+    (app / "zapretgui-root" / "install.sh").write_text(f'#!/bin/sh\necho install >> "{log}"\n', encoding="utf-8")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    for name, body in (("getconf", f"echo glibc {glibc}"), ("zenity", f'echo "zenity $*" >> "{log}"'), ("pkexec", f'echo pkexec >> "{log}"')):
+        path = stubs / name
+        path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    env = {"PATH": f"{stubs}:/usr/bin:/bin", "DISPLAY": ":99", "HOME": str(tmp_path)}
+    done = subprocess.run(["/bin/sh", str(app / "AppRun")], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    return done, (log.read_text(encoding="utf-8").splitlines() if log.exists() else [])
+
+
+def test_the_deb_refuses_a_system_with_an_older_c_library_than_the_program_needs() -> None:
+    """Debian 12 (glibc 2.36) accepted the .deb, installed it, and the program then died with "GLIBC_2.38 not found"."""
+    assert "libc6 (>= 2.38)" in _deb_depends()
+
+
+def test_the_appimage_says_at_once_that_the_system_is_too_old_and_installs_nothing(tmp_path) -> None:
+    done, calls = _run_appimage_with_glibc(tmp_path, "2.36")
+    assert done.returncode == 1 and "2.36" in done.stderr and "2.38" in done.stderr
+    assert any(call.startswith("zenity") for call in calls) and "install" not in calls and "pkexec" not in calls
+    # a new enough C library (Ubuntu 24.04 has 2.39) goes on to the normal first start (root runs install.sh, a person pkexec)
+    done, calls = _run_appimage_with_glibc(tmp_path / "ok", "2.39")
+    assert "needs a newer system" not in done.stderr and ("install" in calls or "pkexec" in calls)
+
+
+def test_the_glibc_minimum_of_the_appimage_is_the_one_the_deb_depends_on() -> None:
+    minimum = re.search(r"^MIN_GLIBC=([0-9.]+)", (PACKAGING / "appimage" / "AppRun").read_text(encoding="utf-8"), re.M)
+    assert minimum is not None and f"libc6 (>= {minimum.group(1)})" in _deb_depends()

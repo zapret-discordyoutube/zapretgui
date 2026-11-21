@@ -27,6 +27,16 @@ say() {
   return 0
 }
 
+# The program is built on Debian 13 and needs its C library. On an older system (Debian 12 has 2.36) the first start would
+# install the system part and only then fail with "GLIBC_2.38 not found": say it at once instead. The number is the libc6
+# line of deb/control.in (a test keeps them equal).
+MIN_GLIBC=2.38
+have_glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | cut -d' ' -f2)"
+if [ -n "$have_glibc" ] && [ "$(printf '%s\n%s\n' "$MIN_GLIBC" "$have_glibc" | sort -V | head -n 1)" != "$MIN_GLIBC" ]; then
+  say "This Zapret build needs a newer system: the C library (glibc) here is $have_glibc, the program needs $MIN_GLIBC or newer (Debian 13, Ubuntu 24.04 or newer). Nothing was installed."
+  exit 1
+fi
+
 system_part_ready() {
   [ "$bundled" = "$installed" ] && [ -x "$PREFIX/bin/zapretgui" ] && getent group zapretgui >/dev/null \
     && systemctl is-active --quiet zapretgui-helper.service 2>/dev/null
