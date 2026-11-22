@@ -1,0 +1,46 @@
+# Maintainer: Zapret <noreply@zapret.moe>
+#
+# Zapret for Arch Linux: the Dev/Stable build of the Linux release, repackaged as a pacman package (a "-bin" package, like the
+# other prebuilt programs of the AUR). The release carries the files for Debian-like systems; this unpacks the .deb of the same
+# release and installs its files, so every system file (service, polkit rule, menu entry, icons) is the same as everywhere.
+#
+#   cd packaging/linux/arch
+#   updpkgsums                  # fills in the checksum of the .deb of pkgver
+#   makepkg -si                 # builds and installs; run as a normal user, not as root
+#
+# pkgver is the version of the release (21.1.7.NNN). The .deb is fetched from the release page; a file with the same name next to
+# this PKGBUILD is used instead of downloading (makepkg looks there first), e.g. one saved from the Telegram channel.
+pkgname=zapretgui-bin
+pkgver=21.1.7.305
+pkgrel=1
+pkgdesc='Zapret: bypass of network blocks with a window (nfqws2 + nftables), a small root helper and a tray icon'
+arch=('x86_64')
+url='https://wiki.zapret.moe/'
+license=('custom:zapret')
+depends=(
+  'glibc' 'nftables' 'luajit' 'zlib' 'libnetfilter_queue' 'libnfnetlink' 'libmnl' 'libcap'
+  'xcb-util-cursor' 'libxkbcommon-x11' 'libglvnd' 'fontconfig' 'dbus' 'libx11' 'libxcb'
+  'xcb-util' 'xcb-util-image' 'xcb-util-keysyms' 'xcb-util-renderutil' 'xcb-util-wm'
+  'libxkbcommon' 'wayland' 'glib2' 'systemd' 'shadow'
+)
+optdepends=(
+  'polkit: password dialog when the window asks to start the helper'
+  'libnotify: desktop notifications'
+  'xdg-utils: opening links'
+)
+provides=('zapretgui')
+conflicts=('zapretgui')
+install=zapretgui.install
+options=('!strip' '!debug')   # the program is a compiled bundle: stripping it again gains nothing
+noextract=("zapretgui_${pkgver}_amd64.deb")
+source=("zapretgui_${pkgver}_amd64.deb::https://git.zapret.moe/zapretdiscordyoutube/zapretgui/releases/download/${pkgver}/zapretgui_${pkgver}_amd64.deb")
+sha256sums=('SKIP')   # `updpkgsums` replaces it with the real checksum (the release has a .sha256 file next to the .deb)
+
+package() {
+  cd "$srcdir"
+  # a .deb is an `ar` archive that holds data.tar.* (the files) and control.tar.* (the scripts, not used here)
+  bsdtar -xf "zapretgui_${pkgver}_amd64.deb" 'data.tar.*'
+  bsdtar -xf data.tar.* -C "$pkgdir"
+  # the group of the helper's socket: pacman's sysusers hook creates it at install time
+  install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/zapretgui.conf" <<< 'g zapretgui -'
+}

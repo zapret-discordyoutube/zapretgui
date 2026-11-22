@@ -19,16 +19,52 @@ echo "== $(date '+%F %T') install.sh $*"
 # window-system libraries the window never opens and nothing says why. The list is the Depends line of deb/control.in
 # (a test keeps them equal).
 DEPENDENCIES="nftables libluajit-5.1-2 zlib1g libnetfilter-queue1 libnfnetlink0 libmnl0 libcap2 libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libfontconfig1 libdbus-1-3 libx11-6 libx11-xcb1 libxcb1 libxcb-glx0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon0 libwayland-client0 libwayland-cursor0 libglib2.0-0t64"
+# The same libraries under the names of Arch (pacman) and Fedora (dnf). Arch: the xcb-util-* packages hold the libxcb-* helper
+# libraries Qt's xcb plugin needs; Fedora names its libraries after the upstream project. A name that does not exist (a release
+# that renamed it) is skipped by dnf (strict=0) and shows up in the log instead of stopping everything.
+ARCH_PACKAGES="nftables luajit zlib libnetfilter_queue libnfnetlink libmnl libcap xcb-util-cursor libxkbcommon-x11 libglvnd fontconfig dbus libx11 libxcb xcb-util xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm libxkbcommon wayland glib2"
+FEDORA_PACKAGES="nftables luajit zlib-ng-compat libnetfilter_queue libnfnetlink libmnl libcap xcb-util-cursor libxkbcommon-x11 libglvnd-egl libglvnd-glx fontconfig dbus-libs libX11 libX11-xcb libxcb xcb-util xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm libxkbcommon libwayland-client libwayland-cursor glib2"
+
+# The package manager of this system (a test names one in ZG_PKG).
+package_manager() {
+  if [ -n "${ZG_PKG:-}" ]; then echo "$ZG_PKG"; return; fi
+  if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then echo apt
+  elif command -v pacman >/dev/null 2>&1; then echo pacman
+  elif command -v dnf >/dev/null 2>&1; then echo dnf
+  else echo none
+  fi
+}
+
 install_dependencies() {
-  command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1 || return 0
+  manager="$(package_manager)"
+  echo "package manager: $manager"
   missing=""
-  for pkg in $DEPENDENCIES; do dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"; done
-  [ -n "$missing" ] || return 0
-  echo "Installing the libraries and tools Zapret needs:$missing"
-  export DEBIAN_FRONTEND=noninteractive
-  # shellcheck disable=SC2086
-  apt-get install -y --no-install-recommends $missing || { apt-get update -qq && apt-get install -y --no-install-recommends $missing; } \
-    || echo "warning: apt-get could not install:$missing (no network?)"
+  case "$manager" in
+    apt)
+      for pkg in $DEPENDENCIES; do dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"; done
+      [ -n "$missing" ] || return 0
+      echo "Installing the libraries and tools Zapret needs:$missing"
+      export DEBIAN_FRONTEND=noninteractive
+      # shellcheck disable=SC2086
+      apt-get install -y --no-install-recommends $missing || { apt-get update -qq && apt-get install -y --no-install-recommends $missing; } \
+        || echo "warning: apt-get could not install:$missing (no network?)" ;;
+    pacman)
+      for pkg in $ARCH_PACKAGES; do pacman -Qq "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"; done
+      [ -n "$missing" ] || return 0
+      echo "Installing the libraries and tools Zapret needs:$missing"
+      # --needed: nothing is reinstalled; no -y/-u: a partial upgrade (new libraries on an old system) is how Arch breaks
+      # shellcheck disable=SC2086
+      pacman -S --noconfirm --needed $missing || echo "warning: pacman could not install:$missing (run  sudo pacman -Syu  first, then start Zapret again)" ;;
+    dnf)
+      for pkg in $FEDORA_PACKAGES; do rpm -q "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"; done
+      [ -n "$missing" ] || return 0
+      echo "Installing the libraries and tools Zapret needs:$missing"
+      # strict=0: a name this release of Fedora does not have is skipped (the log says which) instead of failing the lot
+      # shellcheck disable=SC2086
+      dnf install -y --setopt=strict=0 $missing || echo "warning: dnf could not install:$missing (no network?)" ;;
+    *)
+      echo "note: no known package manager (apt, pacman, dnf): install the libraries of Zapret yourself if the window does not open" ;;
+  esac
 }
 install_dependencies
 

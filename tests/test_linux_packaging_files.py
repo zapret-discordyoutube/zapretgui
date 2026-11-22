@@ -431,33 +431,96 @@ def test_the_appimage_installer_brings_the_same_libraries_the_deb_depends_on() -
     assert "/var/log/zapretgui-install.log" in text
 
 
-def test_install_dependencies_installs_only_what_is_missing(tmp_path) -> None:
+def _install_functions() -> str:
     import re
+
+    text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+    parts = [re.search(rf"^{name}\(\) \{{.*?^\}}", text, re.M | re.S).group(0) for name in ("package_manager", "install_dependencies")]
+    return "\n".join(parts) + "\n"
+
+
+def _run_install_dependencies(tmp_path, manager: str, stubs: dict, header: str):
     import stat
     import subprocess
 
-    text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
-    function = re.search(r"^install_dependencies\(\) \{.*?^\}", text, re.M | re.S).group(0)
-    stubs = tmp_path / "bin"
-    stubs.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    for name, body in stubs.items():
+        (bindir / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        (bindir / name).chmod((bindir / name).stat().st_mode | stat.S_IXUSR)
+    script = header + "\n" + _install_functions() + "install_dependencies\n"
+    return subprocess.run(
+        ["bash", "-c", script],
+        env={"PATH": f"{bindir}:/usr/bin:/bin", "ZG_PKG": manager},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_install_dependencies_installs_only_what_is_missing(tmp_path) -> None:
     log = tmp_path / "apt.log"
-
-    def stub(name: str, body: str) -> None:
-        (stubs / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
-        (stubs / name).chmod((stubs / name).stat().st_mode | stat.S_IXUSR)
-
-    stub("dpkg", 'case "$2" in libcap2|zlib1g) exit 0;; *) exit 1;; esac')
-    stub("apt-get", f'echo "apt-get $*" >> "{log}"')
-    script = 'DEPENDENCIES="zlib1g libxcb-icccm4 libcap2 libxcb-keysyms1"\n' + function + "\ninstall_dependencies\n"
-    done = subprocess.run(["bash", "-c", script], env={"PATH": f"{stubs}:/usr/bin:/bin"}, capture_output=True, text=True, timeout=30)
+    stubs = {
+        "dpkg": 'case "$2" in libcap2|zlib1g) exit 0;; *) exit 1;; esac',
+        "apt-get": f'echo "apt-get $*" >> "{log}"',
+    }
+    header = 'DEPENDENCIES="zlib1g libxcb-icccm4 libcap2 libxcb-keysyms1"'
+    done = _run_install_dependencies(tmp_path, "apt", stubs, header)
     assert done.returncode == 0, done.stderr
-    calls = log.read_text(encoding="utf-8").splitlines()
-    assert calls == ["apt-get install -y --no-install-recommends libxcb-icccm4 libxcb-keysyms1"]
+    assert log.read_text(encoding="utf-8").splitlines() == ["apt-get install -y --no-install-recommends libxcb-icccm4 libxcb-keysyms1"]
     # nothing missing: apt-get is not even called
     log.unlink()
-    stub("dpkg", "exit 0")
-    subprocess.run(["bash", "-c", script], env={"PATH": f"{stubs}:/usr/bin:/bin"}, capture_output=True, text=True, timeout=30)
+    stubs["dpkg"] = "exit 0"
+    _run_install_dependencies(tmp_path, "apt", stubs, header)
     assert not log.exists()
+
+
+def test_install_dependencies_uses_pacman_on_arch(tmp_path) -> None:
+    log = tmp_path / "pacman.log"
+    stubs = {
+        "pacman": f'case "$1" in -Qq) case "$2" in glibc|zlib) exit 0;; *) exit 1;; esac;; *) echo "pacman $*" >> "{log}";; esac',
+        "apt-get": f'echo "WRONG apt-get $*" >> "{log}"',
+    }
+    done = _run_install_dependencies(tmp_path, "pacman", stubs, 'ARCH_PACKAGES="glibc zlib libcap nftables"')
+    assert done.returncode == 0, done.stderr
+    # only the missing names; --needed and no -y/-u (a partial upgrade is how Arch breaks)
+    assert log.read_text(encoding="utf-8").splitlines() == ["pacman -S --noconfirm --needed libcap nftables"]
+
+
+def test_install_dependencies_uses_dnf_on_fedora(tmp_path) -> None:
+    log = tmp_path / "dnf.log"
+    stubs = {
+        "rpm": 'case "$2" in glibc) exit 0;; *) exit 1;; esac',
+        "dnf": f'echo "dnf $*" >> "{log}"',
+    }
+    done = _run_install_dependencies(tmp_path, "dnf", stubs, 'FEDORA_PACKAGES="glibc libcap nftables"')
+    assert done.returncode == 0, done.stderr
+    assert log.read_text(encoding="utf-8").splitlines() == ["dnf install -y --setopt=strict=0 libcap nftables"]
+
+
+def test_package_lists_of_arch_and_fedora_are_not_empty() -> None:
+    """Three lists describe the same needs (deb, Arch, Fedora): a library added to one is checked against the others."""
+    import re
+
+    text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+
+    def words(name: str) -> list:
+        return re.search(rf'^{name}="([^"]+)"', text, re.M | re.S).group(1).split()
+
+    for name in ("ARCH_PACKAGES", "FEDORA_PACKAGES"):
+        assert len(words(name)) >= 15, name
+        assert "nftables" in words(name) and "luajit" in words(name), name
+
+
+def test_arch_and_fedora_packages_repackage_the_deb() -> None:
+    pkgbuild = (PACKAGING / "arch" / "PKGBUILD").read_text(encoding="utf-8")
+    assert "pkgname=zapretgui-bin" in pkgbuild
+    assert "sysusers" in pkgbuild  # the group zapretgui is created by the package
+    install_script = (PACKAGING / "arch" / "zapretgui.install").read_text(encoding="utf-8")
+    assert "post_install" in install_script and "pre_remove" in install_script
+    spec = (PACKAGING / "rpm" / "zapretgui.spec").read_text(encoding="utf-8")
+    assert "groupadd" in spec and "%pre" in spec
+    assert "ar x" in spec  # the .deb is unpacked, so the two formats carry the same files
 
 
 def test_a_window_that_dies_at_start_is_explained_instead_of_nothing_happening(tmp_path) -> None:

@@ -1,0 +1,17 @@
+post_install() {
+  echo '==> Zapret: start the helper (the small root service) and add yourself to its group:'
+  echo '      sudo systemctl enable --now zapretgui-helper.service'
+  echo '      sudo usermod -aG zapretgui "$USER"'
+  echo '    The window starts inside the group at once; a new login makes it permanent. Then open "Zapret" from the menu.'
+}
+
+post_upgrade() {
+  # the files of the helper changed: the running one is replaced by the new one
+  if [ -d /run/systemd/system ]; then systemctl try-restart zapretgui-helper.service || true; fi
+}
+
+pre_remove() {
+  if [ -d /run/systemd/system ]; then systemctl disable --now zapretgui-helper.service || true; fi
+  # the helper removes its firewall table when it stops; this is the second net, so no rule outlives the program
+  command -v nft >/dev/null 2>&1 && nft delete table inet zapretgui 2>/dev/null || true
+}
