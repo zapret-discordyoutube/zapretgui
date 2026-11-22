@@ -90,6 +90,10 @@ cp -a "$HERE/packaging/linux/init" "$TARGET.new/init"
 rm -rf "$TARGET.old"; [ -d "$TARGET" ] && mv "$TARGET" "$TARGET.old"
 mv "$TARGET.new" "$TARGET"; rm -rf "$TARGET.old"
 # readable and enterable by everybody, writable by root only, whatever the source files or the umask were
+# root owns every file: the AppImage unpacks and copies the program as the PERSON, and cp -a keeps that owner. The helper runs
+# _internal/zapretgui as root, so a program folder that its user may rewrite would hand that user (or anything running as
+# them) root.
+chown -R root:root "$TARGET"
 chmod -R go+rX,go-w "$TARGET"; chmod 755 "$TARGET" "$TARGET/bin/"* 2>/dev/null || true
 # the way back stays with the program: sudo /opt/zapretgui/uninstall.sh
 [ -f "$HERE/uninstall.sh" ] && install -m 0755 "$HERE/uninstall.sh" "$TARGET/uninstall.sh"

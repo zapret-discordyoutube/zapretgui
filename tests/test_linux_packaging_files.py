@@ -765,3 +765,12 @@ def test_install_sh_really_leaves_an_open_folder_under_umask_077(tmp_path) -> No
     )
     done = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=20)
     assert done.stdout.split() == ["755", "755", "644"], done.stdout
+
+
+def test_install_sh_makes_root_the_owner_of_the_program_folder() -> None:
+    """The report (ls of /opt/zapretgui): the folders were owned by the person, copied from the AppImage with cp -a.
+    The helper runs that program as root, so the folder must belong to root before anything is started."""
+    text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+    assert 'chown -R root:root "$TARGET"' in text
+    assert text.index('chown -R root:root "$TARGET"') > text.index('mv "$TARGET.new" "$TARGET"')  # after the copy, before the service starts
+    assert text.index('chown -R root:root "$TARGET"') < text.index("zg_service_install")

@@ -207,14 +207,25 @@ class RealEnvironment:
             self._remove_probe_files()
             mark_external_winws_scan_active(False)
 
+    def _probe_folder(self) -> str:
+        """The writable folder of the temporary probe config of a helper-run engine (created on demand)."""
+        from config.runtime_layout import APPLICATION_PATHS
+
+        folder = str(APPLICATION_PATHS.tmp_dir)
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
     def _remove_probe_files(self) -> None:
-        for name in _STALE_PROBE_FILES:
-            path = os.path.join(self._root, name)
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError:
-                pass
+        from config.runtime_layout import APPLICATION_PATHS
+
+        for folder in {self._root, str(APPLICATION_PATHS.tmp_dir)}:
+            for name in _STALE_PROBE_FILES:
+                path = os.path.join(folder, name)
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except OSError:
+                    pass
 
     def _winws2_path(self) -> str:
         if not self._winws2:
@@ -255,7 +266,9 @@ class RealEnvironment:
         from blockcheck.strategy_search.helper_session import HelperSession
         from platforms import current as current_platform
 
-        path = os.path.join(self._root, PROBE_CONFIG_NAME)
+        # Not the program folder: on Linux it is /opt/zapretgui, read-only for the person ("Permission denied" in BlockCheck).
+        # Here the app itself reads the file and sends the arguments to the helper, so any writable folder will do.
+        path = os.path.join(self._probe_folder(), PROBE_CONFIG_NAME)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(config_text)
 

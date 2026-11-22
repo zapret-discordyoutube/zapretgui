@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from blockcheck.strategy_search.helper_session import HelperSession
 from blockcheck.strategy_search.winws_session import LUA_SETTLE_SECONDS
@@ -81,16 +82,24 @@ def test_environment_uses_the_helper_session_without_the_direct_engine_capabilit
 
     monkeypatch.setattr("platforms.current", lambda: make_platform(engine=Engine(), capabilities=frozenset()))
     env = environment.RealEnvironment.__new__(environment.RealEnvironment)
-    env._root = str(tmp_path)
+    program = tmp_path / "program"  # /opt/zapretgui on Linux: read-only for the person, nothing may be written there
+    program.mkdir()
+    scratch = tmp_path / "cache" / "tmp"
+    env._root = str(program)
+    monkeypatch.setattr("config.runtime_layout.APPLICATION_PATHS", SimpleNamespace(tmp_dir=scratch))
 
     class Cancel:
         cancelled = False
 
     env._cancel = Cancel()
     managed = env.start_session("--lua-init=@lua/x.lua\n")
-    assert (tmp_path / environment.PROBE_CONFIG_NAME).read_text(encoding="utf-8") == "--lua-init=@lua/x.lua\n"
-    assert managed.start().ok is True and runner.started[0][0] == str(tmp_path / environment.PROBE_CONFIG_NAME)
+    probe = scratch / environment.PROBE_CONFIG_NAME  # the report: "[Errno 13] Permission denied: '/opt/zapretgui/blockcheck_probe.txt'"
+    assert probe.read_text(encoding="utf-8") == "--lua-init=@lua/x.lua\n"
+    assert list(program.iterdir()) == []
+    assert managed.start().ok is True and runner.started[0][0] == str(probe)
     assert managed.stop() is True
+    env._remove_probe_files()  # the end of the whole search removes the probe config from the writable folder
+    assert not probe.exists()
 
 
 def test_recovery_after_a_crash_stops_the_helper_runner_not_windows_processes(monkeypatch):
