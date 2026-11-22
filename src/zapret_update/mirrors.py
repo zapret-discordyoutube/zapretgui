@@ -73,7 +73,11 @@ MAX_RACERS = 8
 # зеркал, адреса постоянные. Схема 1: {"families": {"git": {"hosts": [...]}, "wiki": {...}}}.
 # Постоянный адрес входной страницы (``stable`` в zapret-links, не меняется): в браузере человека она сама
 # находит открывающееся зеркало, поэтому это последний запас для ссылок (``entry_page_url``).
-ENTRY_PAGE = "https://script.google.com/macros/s/AKfycbzcEPk67WW6fYC0vPVm397QyDFHd4m-SrfKDBnfvG8jAD-n_HXVv8AqQnEHZ6A42oIh/exec"
+# Постоянным он оказался не навсегда: развёртывание страницы заменили (2026-11-22), прежний адрес стал отвечать 404, и кнопка
+# «Как это работает?» вела на пустую страницу Google Drive. Поэтому живой адрес программа берёт из списка сервера
+# (``/_sites/links.json``, ``families.<семейство>.templates.entry``, ``learn_entry_templates``), а эта строка — только запас
+# на случай, когда список ещё не получен; при смене страницы её тоже обновляют.
+ENTRY_PAGE = "https://script.google.com/macros/s/AKfycbxW1N9fe8QG4e0kemVM_uD9e3hnzNdx0fBSaVISyIsK_gG_O4FY1neDHAGUE3AHvDs4/exec"
 ENTRY_LISTS = (
     f"{ENTRY_PAGE}?format=json",
     "https://gist.githubusercontent.com/fuckyourkn/ecb9b6a03f53bddcdd47023ebc12d4f9/raw/targets.json",
@@ -242,6 +246,7 @@ def ordered_hosts(document: Any, family: str = "git") -> list[str]:
     российских домашних сетей, а с этой машины всё равно могут открываться.
     """
     learn_domains(document)
+    learn_entry_templates(document)
     try:
         entry = document["families"][family]
         items = [item for item in entry["names"] if isinstance(item, dict)]
@@ -263,6 +268,40 @@ def ordered_hosts(document: Any, family: str = "git") -> list[str]:
     return ordered
 
 
+# Шаблоны входной страницы из списка сервера (семейство -> адрес с ``{path}``), узнанные за время работы программы.
+_entry_templates: dict[str, str] = {}
+_ENTRY_TEMPLATE_MAX = 512
+
+
+def learn_entry_templates(document: Any) -> None:
+    """Запомнить входную ссылку каждого семейства из списка сервера (схема 1, ``families.<семейство>.templates.entry``).
+
+    Адрес и вид входной страницы знает только сервер (служба zapret-links), поэтому её смена доходит до программы
+    без новой сборки, как до подписей выпусков (``release_model._entry_template``). Принимается только https-адрес
+    с одним ``{path}`` без пробелов и кавычек; остальное молча пропускается и остаётся прежний шаблон.
+    """
+    try:
+        families = document["families"]
+    except (KeyError, TypeError):
+        return
+    if not isinstance(families, dict):
+        return
+    for family in FAMILIES:
+        try:
+            template = families[family]["templates"]["entry"]
+        except (KeyError, TypeError):
+            continue
+        if (
+            isinstance(template, str)
+            and len(template) <= _ENTRY_TEMPLATE_MAX
+            and template.startswith("https://")
+            and template.count("{path}") == 1
+            and not any(char in template for char in " \t\r\n\"'<>")
+        ):
+            with _learned_lock:
+                _entry_templates[family] = template
+
+
 def entry_page_url(path: str = "", family: str = "git") -> str:
     """Входная страница Zapret Links с путём нашего сайта (``?s=<семейство>&p=<путь>``).
 
@@ -273,7 +312,12 @@ def entry_page_url(path: str = "", family: str = "git") -> str:
     его могли закрыть, а человек получил бы пустую страницу.
     """
     family = family if family in FAMILIES else "git"
-    return f"{ENTRY_PAGE}?s={family}&p={quote(str(path or '').strip().lstrip('/'), safe='/')}"
+    quoted = quote(str(path or "").strip().lstrip("/"), safe="/")
+    with _learned_lock:
+        template = _entry_templates.get(family)
+    if template:
+        return template.replace("{path}", quoted)
+    return f"{ENTRY_PAGE}?s={family}&p={quoted}"
 
 
 def entry_page_for(url: str) -> str:
@@ -634,6 +678,7 @@ __all__ = [
     "canonical_host",
     "ENTRY_LISTS",
     "ENTRY_PAGE",
+    "learn_entry_templates",
     "blocked_hosts",
     "canonical_url",
     "entry_page_for",
