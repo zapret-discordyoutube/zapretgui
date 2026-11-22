@@ -39,8 +39,12 @@ _STRATEGY_CATALOGS_CACHE: dict[
 ] = {}
 
 def strategy_catalog_root(paths: AppPaths) -> Path:
-    """Каталог готовых стратегий рядом с программой, подготовленный установщиком."""
-    return paths.user_root / "system" / "strategy_catalogs"
+    """Каталог готовых стратегий рядом с программой, подготовленный установщиком.
+
+    Это папка самой программы (``local_root``), а не данных человека (``user_root``): в Linux программа лежит в
+    ``/opt/zapretgui``, а данные — в ``~/.local/share/zapretgui``; в Windows это одна папка.
+    """
+    return paths.local_root / "system" / "strategy_catalogs"
 
 
 def _tree_signature(root: Path, pattern: str = "*.txt") -> tuple[tuple[str, int, int], ...]:

@@ -169,3 +169,21 @@ class ProfileStrategyVisualTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_the_shipped_strategy_catalogs_are_read_from_the_program_folder_not_the_data_folder(tmp_path) -> None:
+    """Report 2026-11-22 (Dev 302 on Linux): the profile page showed no strategies. The catalogs ship in the program folder
+    (/opt/zapretgui/system), the person's data lives in ~/.local/share/zapretgui; both were taken for one folder."""
+    from core.paths import AppPaths
+    from profile.strategy_catalog import load_strategy_catalogs, strategy_catalog_root
+    from profile.template_catalog import profile_template_root
+
+    program, data = tmp_path / "opt", tmp_path / "data"
+    folder = program / "system" / "strategy_catalogs" / "winws2"
+    folder.mkdir(parents=True)
+    data.mkdir()
+    (folder / "tcp_all.txt").write_text("[one]\nname = One\nargs = --lua-desync=fake\n", encoding="utf-8")
+    paths = AppPaths(user_root=data, local_root=program)
+    assert strategy_catalog_root(paths) == program / "system" / "strategy_catalogs"
+    assert profile_template_root(paths) == program / "system" / "templates"
+    assert "tcp_all" in load_strategy_catalogs(paths, "winws2")

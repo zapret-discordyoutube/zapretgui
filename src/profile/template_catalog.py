@@ -11,7 +11,7 @@ from .parser import parse_preset_text
 
 def profile_template_root(paths: AppPaths) -> Path:
     """Каталог UI-шаблонов profile рядом с программой, подготовленный установщиком."""
-    return paths.user_root / "system" / "templates"
+    return paths.local_root / "system" / "templates"  # папка программы, не данных человека (см. strategy_catalog_root)
 
 
 def load_profile_templates(paths: AppPaths, engine: EngineName) -> dict[str, Profile]:

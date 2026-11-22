@@ -179,6 +179,53 @@ def _resolve_and_download(
     return download_and_stage(artifact, token=token, on_progress=on_progress)
 
 
+def _installs_system_packages() -> bool:
+    """Не Windows: программа себя не заменяет, а отдаёт пакет менеджеру пакетов системы."""
+    from platforms import current
+
+    return current().updates.platform_key != "windows"
+
+
+def _run_package_install(
+    requested_version: str,
+    *,
+    token: CancellationToken,
+    on_stage: Callable[[str], None],
+    on_progress: Callable[[int, int, int], None] | None,
+) -> None:
+    """Обновление в Linux: найти выпуск, скачать пакет, сверить сумму и поставить его через менеджер пакетов.
+
+    Подписанного списка выпуска здесь нет (он описывает установщик Windows): пакет проверяется по SHA-256 из ответа
+    источника, как и при установке из уведомления. Тот же путь, что у кнопки «Скачать и установить» в уведомлении.
+    """
+    from ..package_update import download_and_install
+
+    on_stage("Проверка выпуска…")
+    lookup = lookup_latest_release(CHANNEL)
+    if not lookup.ok:
+        raise ReleaseLookupError(lookup.error or "Не удалось получить данные выпуска")
+    release = lookup.release or {}
+    remote_version = normalize_version(ReleaseArtifactMetadata.from_mapping(release).version)
+    if compare_versions(APP_VERSION, remote_version) >= 0:
+        raise UpdateNotNeeded(f"Обновление v{remote_version} уже не требуется")
+    if requested_version and compare_versions(remote_version, requested_version) < 0:
+        raise ReleaseLookupError("Сервер вернул более старый выпуск")
+    token.checkpoint()
+    on_stage("Скачивание пакета…")
+
+    def progress(received: int, total: int) -> None:
+        if on_progress is not None and total > 0:
+            on_progress(int(received * 100 / total), int(received), int(total))
+        if total > 0 and received >= total:
+            on_stage("Установка пакета: система спросит пароль…")
+
+    done, text = download_and_install(release, progress=progress, cancelled=lambda: token.is_cancelled)
+    token.checkpoint()
+    if not done:
+        raise UpdatePipelineError(text)
+    on_stage(text)
+
+
 def run_update_install(
     requested_version: str,
     *,
@@ -201,6 +248,9 @@ def run_update_install(
     ``start_in_tray`` — новая версия откроется в трее: так ставится
     обновление, найденное, пока программа была свёрнута в трей.
     """
+    if _installs_system_packages():
+        _run_package_install(requested_version, token=token, on_stage=on_stage, on_progress=on_progress)
+        return
     launched = False
     try:
         # Сначала — по файлам: качается только изменившееся, новая версия
