@@ -5,7 +5,7 @@ from main.post_startup_gate import bind_startup_gate, is_startup_host_alive
 from main.post_startup_threading import enqueue_subsystem_task, schedule_after
 
 # Как часто спрашивать шлюз проб, не пора ли проверить адреса. Сам интервал проверки
-# (раз в шесть часов, и через перезапуск тоже) решает шлюз: utils.probe_gate.HOSTS_ADDRESSES.
+# (раз в шесть часов, и через перезапуск тоже; оборванную — через полчаса) решает шлюз: utils.probe_gate.HOSTS_ADDRESSES.
 HOSTS_ADDRESS_CHECK_TICK_MS = 3600 * 1000
 
 
@@ -59,6 +59,10 @@ def install_hosts_applied_selection_refresh(
                     return
                 with permit:
                     report = hosts_feature.check_addresses(why=Why.SCHEDULE)
+                    # «Сделано» — только если проверка дошла до конца и сеть была: без сети она ничего не проверила
+                    # (EngineReport.network), и повторить её нужно через полчаса, а не через шесть часов.
+                    if getattr(report, "network", True):
+                        permit.complete()
                 log_startup_metric(
                     "StartupHostsAddressCheckFinished",
                     f"checked={getattr(report, 'checked', 0)} changed={bool(getattr(report, 'changed', False))}",

@@ -92,6 +92,11 @@ class ProbeGateTests(unittest.TestCase):
         self.assertIsNotNone(kind.retry_after_s)
         self.assertNotEqual(kind.key, probe_gate.ZAPRET_DNS_ADDRESS.key)
 
+    def test_every_check_that_goes_to_the_network_for_long_has_the_retry_mode(self) -> None:
+        # Долгие проверки (минута и больше) нельзя отмечать при выдаче: оборванный запуск съест весь интервал.
+        for kind in (probe_gate.PROVIDER_ADDRESSES, probe_gate.HOSTS_ADDRESSES):
+            self.assertIsNotNone(kind.retry_after_s, kind.key)
+
     def test_no_background_check_while_a_button_run_is_going(self) -> None:
         clock = _Clock()
         with user_run("blockcheck"):

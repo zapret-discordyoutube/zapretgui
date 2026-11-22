@@ -148,5 +148,74 @@ class ZapretDnsWatchGateTests(unittest.TestCase):
         self.assertEqual(dns.migrations, 1)
 
 
+class HostsAddressCheckGateTests(unittest.TestCase):
+    """Проверка адресов hosts: то же правило — «сделано» только по окончании, оборванная повторяется через полчаса."""
+
+    def setUp(self) -> None:
+        self.gate = _Gate()
+        for item in self.gate.patches():
+            item.start()
+            self.addCleanup(item.stop)
+
+    def _launch(self, feature) -> None:
+        from main import post_startup_hosts_refresh as hosts_watch
+
+        host = SimpleNamespace(startup_interactive_ready=None, startup_state=SimpleNamespace(interactive_logged=True))
+        with (
+            patch.object(hosts_watch, "bind_startup_gate", lambda _signal, start, is_ready=None: start()),
+            patch.object(hosts_watch, "enqueue_subsystem_task", lambda _queue, _name, task: task()),
+            patch.object(hosts_watch, "schedule_after", lambda *_a, **_k: None),
+            patch.object(hosts_watch, "is_startup_host_alive", lambda _host: True),
+        ):
+            hosts_watch.install_hosts_applied_selection_refresh(
+                host, hosts_feature=feature, log_startup_metric=lambda *_a, **_k: None
+            )
+
+    class _Feature:
+        def __init__(self, *, network: bool = True, die: bool = False) -> None:
+            self.network, self.die, self.checks = network, die, 0
+
+        def check_addresses(self, *, why):
+            self.checks += 1
+            if self.die:
+                raise SystemExit("программу закрыли на середине проверки")
+            return SimpleNamespace(network=self.network, checked=3, changed=False)
+
+        def refresh_applied_selection(self):
+            return SimpleNamespace(changed=False, message="")
+
+    def test_launch_that_dies_mid_check_retries_in_half_an_hour_not_in_six_hours(self) -> None:
+        with self.assertRaises(SystemExit):
+            self._launch(self._Feature(die=True))
+        self.assertNotIn("hosts_addresses", self.gate.stored)
+        self.gate.now += 10
+        quick = self._Feature()
+        self._launch(quick)
+        self.assertEqual(quick.checks, 0)
+        self.gate.now += 1800
+        later = self._Feature()
+        self._launch(later)
+        self.assertEqual(later.checks, 1)
+        self.assertIn("hosts_addresses", self.gate.stored)
+
+    def test_finished_check_waits_six_hours(self) -> None:
+        self._launch(self._Feature())
+        self.gate.now += 3600
+        again = self._Feature()
+        self._launch(again)
+        self.assertEqual(again.checks, 0)
+        self.gate.now += 6 * 3600
+        self._launch(again)
+        self.assertEqual(again.checks, 1)
+
+    def test_no_internet_is_not_a_finished_check(self) -> None:
+        self._launch(self._Feature(network=False))
+        self.assertNotIn("hosts_addresses", self.gate.stored)
+        self.gate.now += 1800
+        retry = self._Feature()
+        self._launch(retry)
+        self.assertEqual(retry.checks, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

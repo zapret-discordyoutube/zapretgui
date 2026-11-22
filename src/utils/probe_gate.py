@@ -87,8 +87,10 @@ class BackgroundKind:
 
 
 # Адреса включённых сервисов hosts (hosts.address_engine): программа живёт в трее
-# сутками, а адрес может перестать отвечать в любой день.
-HOSTS_ADDRESSES = BackgroundKind("hosts_addresses", 6 * 3600.0)
+# сутками, а адрес может перестать отвечать в любой день. Проверка ходит в сеть десятки секунд,
+# поэтому «сделано» пишется по её окончании (``BackgroundPermit.complete``), а оборванная
+# перезапуском или закрытием повторяется через полчаса, а не через шесть часов.
+HOSTS_ADDRESSES = BackgroundKind("hosts_addresses", 6 * 3600.0, retry_after_s=1800.0)
 
 # Адрес своего сервера Zapret DNS по его имени (dns.zapret_dns_server.refresh): сервер
 # переезжает редко, поэтому — раз в сутки.
