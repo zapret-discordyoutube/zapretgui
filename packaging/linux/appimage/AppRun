@@ -27,7 +27,8 @@ log_file() { [ -s "$1" ] && sed 's/^/    | /' "$1" >> "$LOG" 2>/dev/null; return
 have() { command -v "$1" >/dev/null 2>&1 && echo "$1" ; return 0; }
 log "=== AppRun start: bundled=$bundled installed=${installed:-none} user=$(id -un 2>/dev/null) uid=$(id -u 2>/dev/null) args=[$*]"
 log "desktop: DISPLAY=${DISPLAY:-} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-} session=${XDG_SESSION_TYPE:-} desktop=${XDG_CURRENT_DESKTOP:-} tty_stdin=$([ -t 0 ] && echo yes || echo no)"
-log "tools found: $(for t in pkexec sudo zenity kdialog notify-send xmessage x-terminal-emulator gnome-terminal konsole xfce4-terminal xterm sg apt-get systemctl nft; do have "$t"; done | tr '\n' ' ')"
+log "tools found: $(for t in pkexec sudo zenity kdialog notify-send xmessage x-terminal-emulator gnome-terminal konsole xfce4-terminal xterm sg apt-get systemctl rc-service update-rc.d start-stop-daemon nft; do have "$t"; done | tr '\n' ' ')"
+[ -r "$ROOT/packaging/linux/initsys.sh" ] && log "init system: $(. "$ROOT/packaging/linux/initsys.sh"; zg_init_kind)"
 log "system: $(uname -sr 2>/dev/null) glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null) os=$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"
 
 say() {
@@ -55,11 +56,13 @@ if [ -n "$have_glibc" ] && [ "$(printf '%s\n%s\n' "$MIN_GLIBC" "$have_glibc" | s
   exit 1
 fi
 
+# The helper is "running" when its socket is there: the same answer under systemd, OpenRC, sysvinit and no init at all.
+HELPER_SOCKET="${ZAPRETGUI_SOCKET:-/run/zapretgui/helper.sock}"
 system_part_ready() {
   if [ "$bundled" != "$installed" ]; then log "system part: installed version '${installed:-none}' is not the bundled '$bundled'"; return 1; fi
   if [ ! -x "$PREFIX/bin/zapretgui" ]; then log "system part: $PREFIX/bin/zapretgui is missing"; return 1; fi
   if ! getent group zapretgui >/dev/null; then log "system part: the group zapretgui does not exist"; return 1; fi
-  if ! systemctl is-active --quiet zapretgui-helper.service 2>/dev/null; then log "system part: zapretgui-helper.service is not active"; return 1; fi
+  if [ ! -S "$HELPER_SOCKET" ]; then log "system part: the helper is not running (no socket $HELPER_SOCKET)"; return 1; fi
   log "system part: ready"
 }
 

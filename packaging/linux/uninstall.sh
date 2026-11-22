@@ -4,7 +4,15 @@
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run it with sudo" >&2; exit 1; }
 
-systemctl disable --now zapretgui-helper.service 2>/dev/null || true
+# the init-system code comes with the program (install.sh puts it next to this script)
+HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ -r "$HERE/initsys.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$HERE/initsys.sh"
+  zg_service_remove
+else
+  systemctl disable --now zapretgui-helper.service 2>/dev/null || true
+fi
 # the helper removes its table when it stops; this is the second net
 nft delete table inet zapretgui 2>/dev/null || true
 pkill -x nfqws2 2>/dev/null || true
@@ -13,7 +21,7 @@ rm -f /usr/lib/systemd/system/zapretgui-helper.service /usr/share/polkit-1/rules
       /usr/share/applications/zapretgui.desktop
 find /usr/share/icons/hicolor -name 'zapretgui.*' -delete 2>/dev/null || true
 rm -rf /opt/zapretgui /run/zapretgui
-systemctl daemon-reload
+command -v systemctl >/dev/null && systemctl daemon-reload 2>/dev/null || true
 command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
 
 getent group zapretgui >/dev/null && groupdel zapretgui 2>/dev/null || true

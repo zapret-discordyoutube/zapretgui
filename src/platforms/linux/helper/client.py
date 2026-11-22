@@ -6,10 +6,17 @@ import socket
 
 from platforms.linux.helper.protocol import SOCKET_PATH, ProtocolError, encode, read_message
 
-UNAVAILABLE_HINT = (
-    "The Zapret helper service is not running. Start it with: sudo systemctl start zapretgui-helper "
-    "(it is enabled for later starts with: sudo systemctl enable zapretgui-helper)."
-)
+
+
+def unavailable_hint() -> str:
+    """The words depend on the init system of this machine (systemd, OpenRC, sysvinit, none)."""
+    from platforms.linux import init_system
+
+    text = f"The Zapret helper service is not running. Start it with: {init_system.start_command()}"
+    enable = init_system.enable_command()
+    return text + (f" (it is enabled for later starts with: {enable})." if enable else ".")
+
+
 NOT_ALLOWED_HINT = "You are not in the zapretgui group. Add yourself with: sudo usermod -aG zapretgui $USER, then log in again."
 
 
@@ -33,7 +40,7 @@ class HelperClient:
         except PermissionError as exc:
             raise HelperUnavailable(NOT_ALLOWED_HINT) from exc
         except (FileNotFoundError, ConnectionRefusedError) as exc:
-            raise HelperUnavailable(UNAVAILABLE_HINT) from exc
+            raise HelperUnavailable(unavailable_hint()) from exc
         except (OSError, socket.timeout, ProtocolError) as exc:
             raise HelperUnavailable(f"The helper did not answer: {exc}") from exc
         if answer is None:

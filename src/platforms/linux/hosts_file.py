@@ -9,7 +9,12 @@ from __future__ import annotations
 from pathlib import Path
 
 HOSTS_PATH = "/etc/hosts"
-CHECK_SERVICE_HINT = "Check that the helper service runs: sudo systemctl status zapretgui-helper"
+
+
+def check_service_hint() -> str:
+    from platforms.linux import init_system
+
+    return f"Check that the helper service runs: {init_system.status_command()}"
 
 
 class LinuxHostsFile:
@@ -58,7 +63,7 @@ class LinuxHostsFile:
         except HelperUnavailable as exc:
             raise PermissionError(str(exc)) from exc
         if not answer.get("ok"):
-            raise PermissionError(CHECK_SERVICE_HINT)
+            raise PermissionError(check_service_hint())
 
     def restore_access(self, path: Path):
-        return False, "Nothing to restore here: /etc/hosts is written by the helper service. " + CHECK_SERVICE_HINT
+        return False, "Nothing to restore here: /etc/hosts is written by the helper service. " + check_service_hint()

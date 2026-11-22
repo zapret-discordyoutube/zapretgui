@@ -5,6 +5,8 @@ Files the Linux package installs (see the multi-platform task file, phases 3 and
 | File | Goes to | What it does |
 |---|---|---|
 | `systemd/zapretgui-helper.service` | `/usr/lib/systemd/system/` | the root helper (firewall table `inet zapretgui` + `nfqws2`) |
+| `init/zapretgui-helper.sysv`, `init/zapretgui-helper.openrc` | `/etc/init.d/zapretgui-helper` | the same helper for sysvinit (Devuan, Debian without systemd) and for OpenRC |
+| `initsys.sh` | `/opt/zapretgui/` | finds the init system by itself (systemd, OpenRC, sysvinit, else "none": start the helper by hand) and installs, starts, stops, removes the service for it; used by `install.sh`, `uninstall.sh` and the .deb scripts |
 | `zapretgui.desktop` | `/usr/share/applications/` | menu entry |
 | `install.sh`, `uninstall.sh` | package root | install into `/opt/zapretgui` + system files, enable the helper; remove all of it (user data only with `--purge-user-data NAME`) |
 | `polkit/50-zapretgui.rules` | `/usr/share/polkit-1/rules.d/` | group `zapretgui` may start/stop the helper unit without a password |

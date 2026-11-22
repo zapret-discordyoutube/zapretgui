@@ -74,17 +74,19 @@ def test_the_desktop_entry_is_valid_and_points_at_the_installed_program() -> Non
 def test_install_and_uninstall_put_and_remove_the_same_system_files() -> None:
     install = (PACKAGING / "install.sh").read_text(encoding="utf-8")
     uninstall = (PACKAGING / "uninstall.sh").read_text(encoding="utf-8")
+    initsys = (PACKAGING / "initsys.sh").read_text(encoding="utf-8")
     for path in (
         "/usr/lib/systemd/system/zapretgui-helper.service",
         "/usr/share/polkit-1/rules.d/50-zapretgui.rules",
         "/usr/share/applications/zapretgui.desktop",
     ):
-        assert path in install, path
+        assert path in install or path in initsys, path  # the service files are put by initsys.sh, found by the init system
         assert path in uninstall, path
+    assert "zg_service_install" in install and "zg_service_start" in install and "zg_service_remove" in uninstall
     # the icon theme tree (every size and the scalable one) goes in with one copy and comes out by name
     assert "/usr/share/icons/hicolor/" in install and "find /usr/share/icons/hicolor -name 'zapretgui.*'" in uninstall
     assert "/opt/zapretgui" in install and "rm -rf /opt/zapretgui" in uninstall
-    assert "systemctl enable --now zapretgui-helper.service" in install
+    assert "systemctl enable --now zapretgui-helper.service" in initsys
     assert f"nft delete table inet {capture_rules.TABLE_NAME}" in uninstall
     assert "groupadd --system zapretgui" in install and "groupdel zapretgui" in uninstall
 
@@ -487,8 +489,14 @@ def test_a_window_that_dies_at_start_is_explained_instead_of_nothing_happening(t
     }.items():
         (stubs / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
         (stubs / name).chmod(0o755)
-    env = {"PATH": f"{stubs}:/usr/bin:/bin", "DISPLAY": ":99", "HOME": str(tmp_path), "ZAPRETGUI_PREFIX": str(prefix)}
+    import socket
+
+    helper_socket = tmp_path / "helper.sock"  # "the helper is running" is its socket, under any init system
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(helper_socket))
+    env = {"PATH": f"{stubs}:/usr/bin:/bin", "DISPLAY": ":99", "HOME": str(tmp_path), "ZAPRETGUI_PREFIX": str(prefix), "ZAPRETGUI_SOCKET": str(helper_socket)}
     done = subprocess.run(["/bin/sh", str(app / "AppRun")], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    listener.close()
     assert done.returncode == 134
     said = log.read_text(encoding="utf-8")
     assert "did not start" in said and "Could not load the Qt platform plugin xcb" in said
@@ -534,3 +542,139 @@ def test_the_appimage_says_at_once_that_the_system_is_too_old_and_installs_nothi
 def test_the_glibc_minimum_of_the_appimage_is_the_one_the_deb_depends_on() -> None:
     minimum = re.search(r"^MIN_GLIBC=([0-9.]+)", (PACKAGING / "appimage" / "AppRun").read_text(encoding="utf-8"), re.M)
     assert minimum is not None and f"libc6 (>= {minimum.group(1)})" in _deb_depends()
+
+
+# --- the init system is found by itself (systemd, OpenRC, sysvinit) ------------------------------------------------------
+
+def _initsys(tmp_path, script: str, *, init: str | None, stubs: dict[str, str] | None = None):
+    """Runs a piece of shell with initsys.sh loaded, the init scripts and the init folder redirected into tmp_path."""
+    import os
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    calls = tmp_path / "calls.log"
+    for name, body in {
+        "systemctl": 'echo "systemctl $*" >> "$CALLS"',
+        "rc-service": 'echo "rc-service $*" >> "$CALLS"',
+        "rc-update": 'echo "rc-update $*" >> "$CALLS"',
+        "update-rc.d": 'echo "update-rc.d $*" >> "$CALLS"',
+        **(stubs or {}),
+    }.items():
+        (bin_dir / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin", "CALLS": str(calls), "ZG_SRC": str(PACKAGING),
+        "ZG_INIT_DIR": str(tmp_path / "init.d"), "ZG_UNIT_DIR": str(tmp_path / "units"), "ZG_PREFIX": str(tmp_path / "no-program"),
+    }
+    if init:
+        env["ZG_INIT"] = init
+    done = subprocess.run(["sh", "-c", f'. "{PACKAGING}/initsys.sh"; {script}'], env=env, capture_output=True, text=True, timeout=60)
+    return done, (calls.read_text(encoding="utf-8").splitlines() if calls.exists() else [])
+
+
+def test_each_init_system_gets_its_own_service_and_commands(tmp_path) -> None:
+    # systemd: the unit is copied, enabled and started by systemctl
+    done, calls = _initsys(tmp_path / "a", "zg_service_install; zg_service_start", init="systemd")
+    assert done.returncode == 0, done.stderr
+    assert (tmp_path / "a" / "units" / "zapretgui-helper.service").is_file()
+    assert "systemctl enable --now zapretgui-helper.service" in calls
+    # OpenRC: an openrc-run script in /etc/init.d, added to the default runlevel, started by rc-service
+    done, calls = _initsys(tmp_path / "b", "zg_service_install; zg_service_start", init="openrc")
+    script = tmp_path / "b" / "init.d" / "zapretgui-helper"
+    assert done.returncode == 0, done.stderr
+    assert script.read_text(encoding="utf-8").startswith("#!/sbin/openrc-run") and script.stat().st_mode & 0o111
+    assert "rc-update add zapretgui-helper default" in calls and "rc-service zapretgui-helper restart" in calls
+    assert not (tmp_path / "b" / "units").exists()
+    # sysvinit: an LSB script, registered by update-rc.d
+    done, calls = _initsys(tmp_path / "c", "zg_service_install; zg_service_start", init="sysv", stubs={})
+    script = tmp_path / "c" / "init.d" / "zapretgui-helper"
+    assert "### BEGIN INIT INFO" in script.read_text(encoding="utf-8") and script.stat().st_mode & 0o111
+    assert "update-rc.d zapretgui-helper defaults" in calls
+    # nothing known: no file is made, the person is told what to run
+    done, calls = _initsys(tmp_path / "d", "zg_service_install; zg_service_start; zg_start_hint", init="none")
+    assert done.returncode == 0 and "start the helper by hand" in done.stdout and not (tmp_path / "d" / "init.d").exists()
+    # removing takes an init script away and leaves it out of the runlevels
+    done, calls = _initsys(tmp_path / "e", "zg_service_install; zg_service_remove", init="openrc")
+    assert not (tmp_path / "e" / "init.d" / "zapretgui-helper").exists() and "rc-update del zapretgui-helper default" in calls
+
+
+def test_the_init_system_is_chosen_without_being_told(tmp_path) -> None:
+    """Detection reads the machine: /run/systemd/system, the name of process 1, OpenRC's state, then start-stop-daemon."""
+    text = (PACKAGING / "initsys.sh").read_text(encoding="utf-8")
+    assert "/run/systemd/system" in text and "/proc/1/comm" in text and "/run/openrc/softlevel" in text and "start-stop-daemon" in text
+    done, _ = _initsys(tmp_path, "zg_init_kind", init=None)
+    assert done.stdout.strip() in {"systemd", "openrc", "sysv", "none"}
+    for kind, hint in (("systemd", "systemctl start"), ("openrc", "rc-service zapretgui-helper start"), ("sysv", "service zapretgui-helper start"), ("none", "zapretgui-helper")):
+        done, _ = _initsys(tmp_path / kind, "zg_start_hint", init=kind)
+        assert hint in done.stdout
+
+
+def test_the_python_side_names_the_same_commands_as_the_shell_side(monkeypatch) -> None:
+    import sys
+
+    sys.path.insert(0, str(PACKAGING.parents[1] / "src"))
+    from platforms.linux import init_system
+
+    for kind, start in (("systemd", "systemctl start zapretgui-helper"), ("openrc", "rc-service zapretgui-helper start"), ("sysv", "service zapretgui-helper start")):
+        monkeypatch.setenv("ZG_INIT", kind)
+        assert init_system.detect() == kind and init_system.start_command().endswith(start)
+    monkeypatch.setenv("ZG_INIT", "none")
+    assert init_system.start_command() == "sudo /opt/zapretgui/bin/zapretgui-helper" and init_system.enable_command() == ""
+    from platforms.linux.helper import client
+
+    monkeypatch.setenv("ZG_INIT", "openrc")
+    assert "rc-service zapretgui-helper start" in client.unavailable_hint() and "rc-update add" in client.unavailable_hint()
+
+
+def test_the_deb_no_longer_demands_systemd_and_carries_the_init_scripts() -> None:
+    control = (PACKAGING / "deb" / "control.in").read_text(encoding="utf-8")
+    depends = next(row for row in control.splitlines() if row.startswith("Depends:"))
+    assert "systemd" not in depends.replace("libsystemd", "")  # Devuan has no systemd package installed
+    postinst = (PACKAGING / "deb" / "postinst").read_text(encoding="utf-8")
+    prerm = (PACKAGING / "deb" / "prerm").read_text(encoding="utf-8")
+    assert "initsys.sh" in postinst and "zg_service_start" in postinst and "zg_service_remove" in prerm
+    for name in ("zapretgui-helper.sysv", "zapretgui-helper.openrc"):
+        assert (PACKAGING / "init" / name).is_file()
+
+
+def test_the_sysvinit_script_really_starts_reports_and_stops_a_daemon(tmp_path) -> None:
+    """Runs the LSB script with the real start-stop-daemon and a stand-in helper that makes its socket, as the real one does."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("start-stop-daemon"):
+        import pytest
+
+        pytest.skip("start-stop-daemon is not installed here")
+    prefix = tmp_path / "opt"
+    (prefix / "bin").mkdir(parents=True)
+    socket_path = tmp_path / "run" / "helper.sock"
+    daemon = prefix / "bin" / "zapretgui-helper"
+    daemon.write_text(
+        "#!/bin/sh\necho started-by-test\n"
+        f'exec python3 -c "import socket,time,os;s=socket.socket(socket.AF_UNIX);s.bind(\\"{socket_path}\\");time.sleep(300)"\n',
+        encoding="utf-8",
+    )
+    daemon.chmod(0o755)
+    env = {
+        "PATH": "/usr/sbin:/sbin:/usr/bin:/bin", "ZAPRETGUI_PREFIX": str(prefix), "ZAPRETGUI_PIDFILE": str(tmp_path / "h.pid"),
+        "ZAPRETGUI_LOGFILE": str(tmp_path / "h.log"), "ZAPRETGUI_SOCKET": str(socket_path),
+    }
+    script = str(PACKAGING / "init" / "zapretgui-helper.sysv")
+
+    def run(action: str):
+        return subprocess.run(["sh", script, action], env=env, capture_output=True, text=True, timeout=60)
+
+    try:
+        assert run("status").returncode == 3
+        started = run("start")
+        assert started.returncode == 0, started.stderr
+        assert socket_path.exists() and run("status").returncode == 0
+        assert "started-by-test" in (tmp_path / "h.log").read_text(encoding="utf-8")  # its output goes to the log, there is no journal
+        assert run("start").returncode == 0  # a second start does not start a second helper
+        assert run("restart").returncode == 0 and socket_path.exists()
+        assert run("stop").returncode == 0
+        assert run("status").returncode == 3 and not socket_path.exists() and not (tmp_path / "h.pid").exists()
+    finally:
+        run("stop")

@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+# For OpenRC (Devuan with OpenRC, Alpine, Gentoo, Artix). packaging/linux/initsys.sh installs it as /etc/init.d/zapretgui-helper.
+
+description="Zapret helper: firewall rules and the nfqws2 engine for the Zapret window"
+command="${ZAPRETGUI_PREFIX:-/opt/zapretgui}/bin/zapretgui-helper"
+command_background=true
+pidfile="${ZAPRETGUI_PIDFILE:-/run/zapretgui-helper.pid}"
+output_log="${ZAPRETGUI_LOGFILE:-/var/log/zapretgui-helper.log}"
+error_log="${ZAPRETGUI_LOGFILE:-/var/log/zapretgui-helper.log}"
+socket="${ZAPRETGUI_SOCKET:-/run/zapretgui/helper.sock}"
+
+depend() {
+	use localmount logger
+}
+
+# The helper removes its own table on every way out; these two are the second net for a helper that was killed hard
+# (ExecStartPre / ExecStopPost of the systemd unit): the table is never left behind to cut the internet.
+start_pre() {
+	command -v nft >/dev/null 2>&1 && nft delete table inet zapretgui 2>/dev/null
+	checkpath --directory --mode 0755 "$(dirname "$socket")"
+	return 0
+}
+
+stop_post() {
+	rm -f "$socket"
+	command -v nft >/dev/null 2>&1 && nft delete table inet zapretgui 2>/dev/null
+	return 0
+}

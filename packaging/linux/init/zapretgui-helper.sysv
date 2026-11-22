@@ -1,0 +1,62 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          zapretgui-helper
+# Required-Start:    $local_fs $remote_fs
+# Required-Stop:     $local_fs $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Zapret helper: firewall rules and the nfqws2 engine for the Zapret window
+# Description:       The small root program that owns the firewall table "inet zapretgui" and the engine; the Zapret window
+#                    (which runs as a normal user) asks it over a socket. The service of systemd does the same for systemd.
+### END INIT INFO
+# For sysvinit (Devuan, Debian without systemd). packaging/linux/initsys.sh installs it as /etc/init.d/zapretgui-helper.
+
+NAME=zapretgui-helper
+PREFIX="${ZAPRETGUI_PREFIX:-/opt/zapretgui}"
+DAEMON="$PREFIX/bin/zapretgui-helper"
+PIDFILE="${ZAPRETGUI_PIDFILE:-/run/zapretgui-helper.pid}"
+LOGFILE="${ZAPRETGUI_LOGFILE:-/var/log/zapretgui-helper.log}"
+SOCKET="${ZAPRETGUI_SOCKET:-/run/zapretgui/helper.sock}"
+
+# The helper removes its own table on every way out; these two are the second net for a helper that was killed hard
+# (the same as ExecStartPre / ExecStopPost of the systemd unit): the table is never left behind to cut the internet.
+drop_table() { command -v nft >/dev/null 2>&1 && nft delete table inet zapretgui 2>/dev/null; return 0; }
+
+running() {
+  [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null
+}
+
+do_start() {
+  [ -x "$DAEMON" ] || { echo "$NAME: $DAEMON is missing" >&2; return 5; }
+  if running; then echo "$NAME is already running"; return 0; fi
+  drop_table
+  mkdir -p "$(dirname "$SOCKET")" && chmod 0755 "$(dirname "$SOCKET")"
+  # the shell makes the program write its messages to a log (there is no journal here) and then becomes the program
+  start-stop-daemon --start --quiet --background --make-pidfile --pidfile "$PIDFILE" \
+    --startas /bin/sh -- -c "exec \"$DAEMON\" >>\"$LOGFILE\" 2>&1" || return 1
+  waited=0
+  while [ ! -S "$SOCKET" ] && [ "$waited" -lt 20 ]; do
+    running || { echo "$NAME did not start (see $LOGFILE)" >&2; return 1; }
+    sleep 0.5; waited=$((waited + 1))
+  done
+  echo "$NAME started"
+}
+
+do_stop() {
+  if running; then
+    start-stop-daemon --stop --quiet --retry=TERM/15/KILL/5 --pidfile "$PIDFILE" || true
+  fi
+  rm -f "$PIDFILE" "$SOCKET"
+  drop_table
+  echo "$NAME stopped"
+}
+
+case "$1" in
+  start) do_start ;;
+  stop) do_stop ;;
+  restart|force-reload) do_stop; do_start ;;
+  status)
+    if running; then echo "$NAME is running"; exit 0; fi
+    echo "$NAME is not running"; exit 3 ;;
+  *) echo "Usage: $0 {start|stop|restart|force-reload|status}" >&2; exit 2 ;;
+esac

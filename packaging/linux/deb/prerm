@@ -1,7 +1,11 @@
 #!/bin/sh
 set -e
 if [ "$1" = remove ] || [ "$1" = upgrade ] || [ "$1" = deconfigure ]; then
-  if [ -d /run/systemd/system ]; then
+  if [ -r /opt/zapretgui/initsys.sh ]; then
+    . /opt/zapretgui/initsys.sh
+    # remove: stop and take the service out (init scripts included); upgrade: only stop, postinst starts it again
+    if [ "$1" = remove ]; then zg_service_remove || true; else zg_service_stop || true; fi
+  elif [ -d /run/systemd/system ]; then
     systemctl stop zapretgui-helper.service || true
     [ "$1" = remove ] && systemctl disable zapretgui-helper.service || true
   fi

@@ -13,7 +13,13 @@ if [ "$1" = configure ]; then
   fi
   command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
   command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
-  if [ -d /run/systemd/system ]; then
+  # The helper service goes to whatever init system runs this machine (systemd: the unit is a file of this package; OpenRC and
+  # sysvinit, e.g. Devuan: an init script from /opt/zapretgui/init). initsys.sh finds it by itself.
+  if [ -r /opt/zapretgui/initsys.sh ]; then
+    . /opt/zapretgui/initsys.sh
+    zg_service_install || true
+    zg_service_start || true
+  elif [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
     systemctl enable zapretgui-helper.service || true
     systemctl restart zapretgui-helper.service || true

@@ -6,6 +6,7 @@ if [ "$1" = remove ] || [ "$1" = purge ]; then
 fi
 if [ "$1" = purge ]; then
   rm -rf /run/zapretgui
+  rm -f /var/log/zapretgui-helper.log /run/zapretgui-helper.pid
   getent group zapretgui >/dev/null && groupdel zapretgui 2>/dev/null || true
   # the copy of /etc/hosts from before the first change made by the program: removed with the program, unless /etc/hosts
   # still differs from it (then it is the only way back, and it stays)

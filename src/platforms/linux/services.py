@@ -3,17 +3,27 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from platforms.linux import init_system
+
 
 class LinuxServices:
-    """systemd units. Starting a unit needs root, which is the helper service's job later."""
+    """Services of the init system found on this machine (systemd, OpenRC, sysvinit). Starting one needs root, which is the helper service's job."""
 
     def is_running(self, name: str) -> bool:
-        systemctl = shutil.which("systemctl")
-        if not systemctl:
+        commands = {
+            init_system.SYSTEMD: ["systemctl", "is-active", "--quiet", name],
+            init_system.OPENRC: ["rc-service", name, "status"],
+            init_system.SYSV: ["service", name, "status"],
+        }
+        command = commands.get(init_system.detect())
+        if not command:
+            return False
+        program = shutil.which(command[0])
+        if not program:
             return False
         try:
             done = subprocess.run(
-                [systemctl, "is-active", "--quiet", name],
+                [program, *command[1:]],
                 check=False,
                 timeout=5,
                 stdout=subprocess.DEVNULL,

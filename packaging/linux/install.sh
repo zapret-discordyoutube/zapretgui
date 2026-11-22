@@ -32,7 +32,12 @@ install_dependencies() {
 }
 install_dependencies
 
-for tool in nft systemctl; do command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 1; }; done
+command -v nft >/dev/null || { echo "missing: nft" >&2; exit 1; }
+# The init system is found by itself (systemd, OpenRC, sysvinit); initsys.sh says what each one gets.
+ZG_SRC="$HERE/packaging/linux"
+# shellcheck disable=SC1091
+. "$ZG_SRC/initsys.sh"
+echo "init system: $(zg_init_kind)"
 
 mkdir -p "$TARGET"
 # the program folder is replaced as a whole: a half-updated tree must not stay
@@ -40,6 +45,9 @@ rm -rf "$TARGET.new" && mkdir "$TARGET.new"
 for item in VERSION bin lua lists system presets windivert.filter _internal exe; do
   [ -e "$HERE/$item" ] && cp -a "$HERE/$item" "$TARGET.new/"
 done
+# uninstall.sh and the package scripts use the same init-system code and the init scripts from here
+install -m 0644 "$HERE/packaging/linux/initsys.sh" "$TARGET.new/initsys.sh"
+cp -a "$HERE/packaging/linux/init" "$TARGET.new/init"
 rm -rf "$TARGET.old"; [ -d "$TARGET" ] && mv "$TARGET" "$TARGET.old"
 mv "$TARGET.new" "$TARGET"; rm -rf "$TARGET.old"
 chmod -R go-w "$TARGET"; chmod 755 "$TARGET/bin/"* 2>/dev/null || true
@@ -49,13 +57,13 @@ chmod -R go-w "$TARGET"; chmod 755 "$TARGET/bin/"* 2>/dev/null || true
 getent group zapretgui >/dev/null || groupadd --system zapretgui
 [ -n "$WHO" ] && id "$WHO" >/dev/null 2>&1 && usermod -aG zapretgui "$WHO" && echo "added $WHO to the group zapretgui (log in again for it to apply)"
 
-install -m 0644 "$HERE/packaging/linux/systemd/zapretgui-helper.service" /usr/lib/systemd/system/zapretgui-helper.service
 install -d /usr/share/polkit-1/rules.d && install -m 0644 "$HERE/packaging/linux/polkit/50-zapretgui.rules" /usr/share/polkit-1/rules.d/50-zapretgui.rules
 install -d /usr/share/applications && install -m 0644 "$HERE/packaging/linux/zapretgui.desktop" /usr/share/applications/zapretgui.desktop
 [ -d "$TARGET/system/hicolor" ] && cp -a "$TARGET/system/hicolor/." /usr/share/icons/hicolor/
 command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 
-systemctl daemon-reload
-systemctl enable --now zapretgui-helper.service
+# the helper service in the words of the init system found here (/usr/lib/systemd/system/zapretgui-helper.service for systemd)
+zg_service_install
+zg_service_start
 echo "Zapret is installed. Start it from the application menu."

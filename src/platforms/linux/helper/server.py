@@ -80,6 +80,10 @@ def open_socket(path: str = SOCKET_PATH, *, group_name: str | None = SOCKET_GROU
     directory = Path(path).parent
     directory.mkdir(parents=True, exist_ok=True)
     try:
+        os.chmod(directory, 0o755)  # systemd makes /run/zapretgui this way (RuntimeDirectoryMode); an init script may have another umask
+    except OSError:
+        pass
+    try:
         os.unlink(path)
     except FileNotFoundError:
         pass
@@ -138,7 +142,7 @@ def serve(
 
 def main() -> int:
     if os.geteuid() != 0:
-        print("zapretgui-helper must run as root (it is started by systemd)", file=sys.stderr)
+        print("zapretgui-helper must run as root (the init system starts it: systemd, OpenRC or sysvinit)", file=sys.stderr)
         return 1
     stop = threading.Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
