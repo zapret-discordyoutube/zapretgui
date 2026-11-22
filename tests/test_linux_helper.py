@@ -199,6 +199,16 @@ def test_start_spawns_the_engine_first_and_installs_the_rules_second(world) -> N
     assert world.service.status()["running"] is True
 
 
+def test_a_program_folder_closed_by_umask_077_is_named_instead_of_a_bare_exit_code(world) -> None:
+    world.program.chmod(0o700)  # what an install under `umask 077` produced
+    answer = world.service.start(GOOD_ARGS, world.user)
+    assert not answer["ok"]
+    assert "closed to other users" in answer["error"] and "chmod -R go+rX" in answer["error"]
+    assert "spawn" not in world.recorder.events  # nothing was started, nothing to clean up
+    world.program.chmod(0o755)
+    assert world.service.start(GOOD_ARGS, world.user)["ok"]
+
+
 def test_the_rules_are_removed_before_the_engine_is_stopped(world) -> None:
     world.service.start(GOOD_ARGS, world.user)
     world.recorder.events.clear()

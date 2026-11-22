@@ -185,6 +185,9 @@ class HelperService:
             return answer_error("the preset captures no traffic (no --wf-* options)")
         if not os.access(self._engine_path, os.X_OK):
             return answer_error(f"the engine is not installed: {self._engine_path}")
+        hidden = self._closed_to_the_caller(caller)
+        if hidden:
+            return answer_error(hidden)
 
         with self._lock:
             self._stop_locked()  # a previous run is replaced, never stacked
@@ -218,6 +221,25 @@ class HelperService:
             self._running = _Running(process, self._clock(), label, old)
             self._write_state(process.pid, old)
             return answer_ok(pid=process.pid, ignored=list(translation.ignored))
+
+    def _closed_to_the_caller(self, caller: Caller) -> str:
+        """The engine continues as the person, so the program folder must be open to everybody. An install made under
+        `umask 077` left /opt/zapretgui as rwx------: the engine died at once with a bare "code 127". Say it in words."""
+        if caller.uid == 0:
+            return ""
+        root = Path(self._program_root)
+        engine = Path(self._engine_path)
+        for path, need in ((root, 0o005), (engine.parent, 0o005), (engine, 0o005)):
+            try:
+                mode = os.stat(path).st_mode
+            except OSError:
+                continue
+            if mode & need != need:
+                return (
+                    f"the folder or file {path} is closed to other users (mode {mode & 0o777:03o}), so the engine, which runs as you, "
+                    f"cannot start. Fix: sudo chmod -R go+rX {root}"
+                )
+        return ""
 
     def stop(self) -> dict:
         with self._lock:

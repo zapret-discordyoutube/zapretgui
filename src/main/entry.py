@@ -361,6 +361,14 @@ def main() -> None:
     from ui.ui_freeze_watchdog import install_ui_freeze_watchdog
 
     install_ui_freeze_watchdog()
+    from main.interrupt_signals import install_interrupt_handlers
+    from main.process_exit import finish_process
+
+    install_interrupt_handlers(
+        app,
+        ask_exit=lambda: window.request_exit(stop_dpi=False, farewell=False),
+        force_exit=finish_process,
+    )
     exit_code = app.exec()
     # Обычный sys.exit() здесь ронял процесс с нарушением доступа: уборка
     # PyQt при завершении интерпретатора ломалась об обработчики программы.

@@ -10,8 +10,9 @@ Type=simple
 ExecStart=/opt/zapretgui/bin/zapretgui-helper
 # The helper removes its own firewall table on every way out. These two lines are the second net, for the case
 # that the helper was killed (kill -9, out of memory): the table is never left behind to cut the internet.
-ExecStartPre=-/usr/sbin/nft delete table inet zapretgui
-ExecStopPost=-/usr/sbin/nft delete table inet zapretgui
+# The error text is thrown away: usually there is no table to delete, and a red "Error:" in the log looked like a crash.
+ExecStartPre=-/bin/sh -c '/usr/sbin/nft delete table inet zapretgui 2>/dev/null'
+ExecStopPost=-/bin/sh -c '/usr/sbin/nft delete table inet zapretgui 2>/dev/null'
 Restart=on-failure
 RestartSec=2
 # /run/zapretgui: the socket (root:zapretgui 0660, created by the helper), the state file and the engine log.

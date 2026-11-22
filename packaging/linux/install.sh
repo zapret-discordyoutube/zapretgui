@@ -5,6 +5,9 @@
 # program in ~/.config, ~/.local/share, ~/.local/state, ~/.cache. uninstall.sh removes it all again.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run it with sudo" >&2; exit 1; }
+# sudo and pkexec keep the umask of the person: with `umask 077` in their .bashrc /opt/zapretgui came out as rwx------, and the
+# engine (it continues as that person, not as root) then could not even enter the folder ("exited at once with code 127").
+umask 022
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TARGET=/opt/zapretgui
 WHO="${SUDO_USER:-}"
@@ -86,7 +89,8 @@ install -m 0644 "$HERE/packaging/linux/initsys.sh" "$TARGET.new/initsys.sh"
 cp -a "$HERE/packaging/linux/init" "$TARGET.new/init"
 rm -rf "$TARGET.old"; [ -d "$TARGET" ] && mv "$TARGET" "$TARGET.old"
 mv "$TARGET.new" "$TARGET"; rm -rf "$TARGET.old"
-chmod -R go-w "$TARGET"; chmod 755 "$TARGET/bin/"* 2>/dev/null || true
+# readable and enterable by everybody, writable by root only, whatever the source files or the umask were
+chmod -R go+rX,go-w "$TARGET"; chmod 755 "$TARGET" "$TARGET/bin/"* 2>/dev/null || true
 # the way back stays with the program: sudo /opt/zapretgui/uninstall.sh
 [ -f "$HERE/uninstall.sh" ] && install -m 0755 "$HERE/uninstall.sh" "$TARGET/uninstall.sh"
 

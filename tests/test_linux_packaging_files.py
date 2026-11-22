@@ -25,7 +25,9 @@ def _unit() -> configparser.ConfigParser:
 def test_the_unit_removes_the_same_table_the_code_creates() -> None:
     text = (PACKAGING / "systemd" / "zapretgui-helper.service").read_text(encoding="utf-8")
     command = f"nft delete table inet {capture_rules.TABLE_NAME}"
-    assert f"ExecStartPre=-/usr/sbin/{command}" in text and f"ExecStopPost=-/usr/sbin/{command}" in text
+    # "-" = a failure is ignored; 2>/dev/null = the harmless "no such table" is not printed into the journal as an error
+    assert f"ExecStartPre=-/bin/sh -c '/usr/sbin/{command} 2>/dev/null'" in text
+    assert f"ExecStopPost=-/bin/sh -c '/usr/sbin/{command} 2>/dev/null'" in text
 
 
 def test_the_unit_starts_the_helper_under_the_runtime_folder_of_the_socket() -> None:
@@ -741,3 +743,25 @@ def test_the_sysvinit_script_really_starts_reports_and_stops_a_daemon(tmp_path) 
         assert run("status").returncode == 3 and not socket_path.exists() and not (tmp_path / "h.pid").exists()
     finally:
         run("stop")
+
+
+def test_install_sh_ignores_the_umask_of_the_person_who_ran_sudo() -> None:
+    """The report: `umask 077` in .bashrc made /opt/zapretgui rwx------ and the engine (it runs as the person) died with code 127."""
+    text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+    assert "\numask 022\n" in text
+    assert text.index("\numask 022\n") < text.index('mkdir "$TARGET.new"')  # before the first folder is made
+    assert 'chmod -R go+rX,go-w "$TARGET"' in text  # and the result is open whatever the source files were
+
+
+def test_install_sh_really_leaves_an_open_folder_under_umask_077(tmp_path) -> None:
+    import subprocess
+
+    target = tmp_path / "opt"
+    script = (
+        "umask 077\numask 022\n"  # the same two lines as install.sh: the person's umask, then ours
+        f'mkdir -p "{target}.new/bin" && : > "{target}.new/bin/x" && mv "{target}.new" "{target}"\n'
+        f'chmod -R go+rX,go-w "{target}"; chmod 755 "{target}"\n'
+        f'stat -c %a "{target}" "{target}/bin" "{target}/bin/x"'
+    )
+    done = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=20)
+    assert done.stdout.split() == ["755", "755", "644"], done.stdout
