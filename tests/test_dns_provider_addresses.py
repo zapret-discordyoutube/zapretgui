@@ -237,6 +237,41 @@ class ProviderAddressesTests(unittest.TestCase):
         self.assertEqual(tuple(self.malw["ipv4"]), self.NEW)
 
 
+class RunCompletedTests(unittest.TestCase):
+    def _changes(self, answered: int, silent: int):
+        make = provider_addresses.ProviderChange
+        return [make(f"a{i}", ("1.1.1.1",), False, "адреса не изменились", answered=True) for i in range(answered)] + [
+            make(f"s{i}", ("2.2.2.2",), False, "сервер молчит") for i in range(silent)
+        ]
+
+    def test_a_run_where_most_servers_answered_counts_even_with_servers_that_are_always_silent(self) -> None:
+        # В жизни 3 из 33 молчат всегда (закрыты в стране): это не причина повторять проверку каждые полчаса.
+        self.assertTrue(provider_addresses.run_completed(self._changes(30, 3)))
+
+    def test_no_network_is_not_a_completed_run(self) -> None:
+        self.assertFalse(provider_addresses.run_completed(self._changes(0, 33)))
+        self.assertFalse(provider_addresses.run_completed(self._changes(3, 30)))
+
+    def test_empty_run_is_not_a_completed_run(self) -> None:
+        self.assertFalse(provider_addresses.run_completed([]))
+        self.assertFalse(provider_addresses.run_completed(None))
+
+
+class RefreshMarksAnsweredTests(ProviderAddressesTests):
+    def test_unchanged_and_changed_answer_but_a_silent_server_does_not(self) -> None:
+        (same,) = self._refresh(*self.shipped)
+        self.assertTrue(same.answered)
+
+        (new,) = self._refresh(*self.NEW)
+        self.assertTrue(new.changed)
+        self.assertTrue(new.answered)
+
+    def test_server_that_answers_nothing_is_not_answered(self) -> None:
+        self.alive.clear()
+        (change,) = self._refresh(error="имя не находится")
+        self.assertFalse(change.answered)
+
+
 class BuildBaselineTests(ProviderAddressesTests):
     """Адреса «на день сборки»: сборка узнаёт их по имени DoH и кладёт в файл, код править не нужно."""
 

@@ -39,6 +39,13 @@ def refresh_provider_addresses(names=None) -> list:
     return refresh(names=names)
 
 
+def provider_run_completed(changes) -> bool:
+    """Дошла ли проверка адресов чужих серверов до конца (ответило достаточно серверов): тогда плановая задача пишет «сделано»."""
+    from dns.provider_addresses import run_completed
+
+    return run_completed(changes)
+
+
 def refresh_provider_for_apply(name: str) -> tuple[str, ...]:
     """Свежие адреса одного сервера прямо сейчас, перед применением плитки (не дольше нескольких секунд)."""
     from dns.provider_addresses import refresh_for_apply

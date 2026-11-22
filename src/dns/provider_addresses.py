@@ -45,6 +45,7 @@ __all__ = [
     "current_ipv4",
     "is_tracked",
     "learn_baseline",
+    "run_completed",
     "read_baseline",
     "refresh",
     "refresh_for_apply",
@@ -68,14 +69,25 @@ _BASELINE: dict[str, tuple[str, ...]] | None = None
 _CHECKED: dict[str, float] = {}
 
 
+# Какая доля серверов должна ответить, чтобы проверку считать дошедшей до конца. Часть серверов молчит
+# всегда (закрыты в стране, не работают: BI.ZONE, AstraCat, DNS-AI), поэтому «все» требовать нельзя;
+# а если не ответил почти никто — это нет сети, и такая проверка не в счёт.
+COMPLETED_SHARE = 0.5
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderChange:
-    """Итог проверки адресов одного сервера: changed — нынешние адреса стали другими."""
+    """Итог проверки адресов одного сервера: changed — нынешние адреса стали другими.
+
+    ``answered`` — сервер ответил на проверку (адреса подтверждены или сменились). Не ответил — сети нет,
+    сервер закрыт на этой линии или проверка оборвалась: тогда адреса не менялись и вывода о них нет.
+    """
 
     name: str
     ipv4: tuple[str, ...]
     changed: bool
     detail: str = ""
+    answered: bool = False
 
 
 def _global_ipv4(values) -> tuple[str, ...]:
@@ -305,10 +317,12 @@ def _check_one(name: str, data: dict, stored: dict, *, cancel, lookup, verify) -
     if not verified:
         return _Verdict(ProviderChange(name, current, False, reason or "ни один адрес не прошёл проверку"))
     if set(verified) == set(current):
-        return _Verdict(ProviderChange(name, current, False, "адреса не изменились"), ipv4=None)
+        return _Verdict(ProviderChange(name, current, False, "адреса не изменились", answered=True), ipv4=None)
     former = _global_ipv4((stored.get(name) or {}).get("former_ipv4"))
     former = tuple(address for address in dict.fromkeys((*current, *former)) if address not in verified)
-    return _Verdict(ProviderChange(name, verified, True, "адреса сменились"), ipv4=verified, former=former[:MAX_FORMER])
+    return _Verdict(
+        ProviderChange(name, verified, True, "адреса сменились", answered=True), ipv4=verified, former=former[:MAX_FORMER]
+    )
 
 
 def refresh(*, names=None, cancel=None, lookup=None, verify=None, now: float | None = None) -> list[ProviderChange]:
@@ -350,12 +364,25 @@ def refresh(*, names=None, cancel=None, lookup=None, verify=None, now: float | N
                 checked_at=time.time() if now is None else now,
             )
             log(f"DNS: сервер {change.name} сменил адреса: {', '.join(change.ipv4)}", "INFO")
-        if change.changed or change.detail == "адреса не изменились":
+        if change.answered:
             _CHECKED[change.name] = moment
         results.append(change)
     if any(item.changed for item in results):
         adopt(_stored())
     return results
+
+
+def run_completed(changes) -> bool:
+    """Дошла ли проверка до конца: ответила не меньше ``COMPLETED_SHARE`` проверенных серверов.
+
+    Нужно плановой задаче, чтобы записать «сделано» (``utils.probe_gate``): без сети, на оборванной
+    или пустой проверке записывать нечего, и она повторится через полчаса, а не через сутки.
+    """
+    items = list(changes or ())
+    if not items:
+        return False
+    answered = sum(1 for item in items if getattr(item, "answered", False))
+    return answered / len(items) >= COMPLETED_SHARE
 
 
 # Сколько секунд ждать ответа, когда человек нажал плитку: дольше он ждать не должен.

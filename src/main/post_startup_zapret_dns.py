@@ -16,7 +16,7 @@ def install_zapret_dns_server_watch(
     hosts_feature=None,
     log_startup_metric,
 ) -> None:
-    """Свой сервер Zapret DNS после запуска: адрес по имени и адрес посредника.
+    """Свой сервер Zapret DNS после запуска: адрес по имени и адрес посредника; адреса чужих серверов.
 
     Раз в сутки (шлюз проб, и через перезапуск тоже) программа спрашивает адрес имени
     сервера и адрес его посредника (dns.zapret_dns_server.refresh). Сервер переехал —
@@ -32,14 +32,6 @@ def install_zapret_dns_server_watch(
             return
         with permit:
             change = dns_feature.refresh_zapret_dns_server()
-            # Чужие серверы с адресами по имени DoH: тот же пропуск, та же суточная проверка.
-            try:
-                provider_changes = dns_feature.refresh_provider_addresses() or []
-            except Exception as exc:
-                provider_changes = []
-                log(f"Адреса серверов DNS по имени не узнаны: {exc}", "WARNING")
-        if any(getattr(item, "changed", False) for item in provider_changes):
-            dns_feature.migrate_outdated_dns_addresses()
         changed = bool(getattr(change, "changed", False))
         log_startup_metric(
             "ZapretDnsAddressChecked",
@@ -51,6 +43,35 @@ def install_zapret_dns_server_watch(
         if (changed or relay_changed) and hosts_feature is not None:
             enqueue_subsystem_task("hosts", "ZapretDnsHostsRefresh", hosts_feature.refresh_applied_selection)
 
+    def _refresh_provider_addresses() -> None:
+        """Чужие серверы с адресами по имени DoH: своё разрешение шлюза и своя отметка «сделано».
+
+        Проверка идёт около минуты. Своё разрешение (а не общее с быстрой проверкой Zapret DNS) нужно,
+        чтобы быстрая проверка не расходовала сутки долгой; а «сделано» пишется только когда проверка
+        дошла до конца: запуск, оборванный на середине, повторит её через полчаса, а не через сутки.
+        """
+        from utils.probe_gate import PROVIDER_ADDRESSES, try_background
+
+        permit = try_background(PROVIDER_ADDRESSES)
+        if permit is None:
+            return
+        with permit:
+            try:
+                provider_changes = list(dns_feature.refresh_provider_addresses() or [])
+            except Exception as exc:
+                log(f"Адреса серверов DNS по имени не узнаны: {exc}", "WARNING")
+                return
+            completed = bool(dns_feature.provider_run_completed(provider_changes))
+            if completed:
+                permit.complete()
+        changed_names = [getattr(item, "name", "") for item in provider_changes if getattr(item, "changed", False)]
+        log_startup_metric(
+            "ProviderDnsAddressesChecked",
+            f"servers={len(provider_changes)} changed={len(changed_names)} completed={int(completed)}",
+        )
+        if changed_names:
+            dns_feature.migrate_outdated_dns_addresses()
+
     def _run() -> None:
         if not is_startup_host_alive(startup_host):
             return
@@ -58,6 +79,11 @@ def install_zapret_dns_server_watch(
             _refresh_address()
         except Exception as exc:
             log(f"Zapret DNS: плановая задача не выполнена: {exc}", "WARNING")
+        # Вторая проверка независима от первой: сбой одной не отменяет другую.
+        try:
+            _refresh_provider_addresses()
+        except Exception as exc:
+            log(f"Адреса чужих серверов DNS: плановая задача не выполнена: {exc}", "WARNING")
 
     def _enqueue() -> None:
         if is_startup_host_alive(startup_host):

@@ -40,6 +40,7 @@ from enum import StrEnum
 
 __all__ = [
     "HOSTS_ADDRESSES",
+    "PROVIDER_ADDRESSES",
     "ZAPRET_DNS_ADDRESS",
     "BackgroundKind",
     "BackgroundPermit",
@@ -63,10 +64,26 @@ class Why(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class BackgroundKind:
-    """Вид фоновой проверки. ``key`` — имя в настройках, ``min_interval_s`` — не чаще."""
+    """Вид фоновой проверки. ``key`` — имя в настройках, ``min_interval_s`` — не чаще.
+
+    Два режима отметки времени:
+
+    * ``retry_after_s`` не задан (быстрые проверки): время записывается сразу при выдаче разрешения.
+      Оборвалась проверка — перезапуск её не повторит до конца интервала. Для проверки на секунду это
+      правильно: пачка запросов при каждом запуске — тот самый узор, который замечает оборудование провайдера.
+    * ``retry_after_s`` задан (долгие проверки): при выдаче записывается только «попытка», а «сделано»
+      (``key``) — когда проверка дошла до конца и вызвала ``BackgroundPermit.complete()``. Оборвалась
+      (программу закрыли или перезапустили на середине) — следующая попытка через ``retry_after_s``,
+      а не через сутки. Без этого запуск, умерший за секунду до конца, лишал бы проверку целых суток.
+    """
 
     key: str
     min_interval_s: float
+    retry_after_s: float | None = None
+
+    @property
+    def attempt_key(self) -> str:
+        return f"{self.key}.attempt"
 
 
 # Адреса включённых сервисов hosts (hosts.address_engine): программа живёт в трее
@@ -76,6 +93,11 @@ HOSTS_ADDRESSES = BackgroundKind("hosts_addresses", 6 * 3600.0)
 # Адрес своего сервера Zapret DNS по его имени (dns.zapret_dns_server.refresh): сервер
 # переезжает редко, поэтому — раз в сутки.
 ZAPRET_DNS_ADDRESS = BackgroundKind("zapret_dns_address", 24 * 3600.0)
+
+# Адреса чужих DNS-серверов по именам DoH (dns.provider_addresses.refresh): проверка идёт около минуты
+# (33 сервера, настоящие запросы DoH), поэтому «сделано» пишется только по её окончании, а оборванная
+# повторяется через полчаса. Раз в сутки — когда она дошла до конца.
+PROVIDER_ADDRESSES = BackgroundKind("dns_provider_addresses", 24 * 3600.0, retry_after_s=1800.0)
 
 
 def may_search(why: Why) -> bool:
@@ -143,10 +165,20 @@ def _store_last_run(key: str, when: float) -> None:
 class BackgroundPermit:
     """Разрешение на одну фоновую проверку. Закрывается через ``with`` или ``release()``."""
 
-    def __init__(self, kind: BackgroundKind, why: Why) -> None:
+    def __init__(self, kind: BackgroundKind, why: Why, on_complete: Callable[[], None] | None = None) -> None:
         self.kind = kind
         self.why = why
         self._released = False
+        self._on_complete = on_complete
+
+    def complete(self) -> None:
+        """Проверка дошла до конца: у видов с ``retry_after_s`` только теперь записывается «сделано».
+
+        У остальных видов время уже записано при выдаче, и вызов ничего не меняет. Повторный вызов безвреден.
+        """
+        action, self._on_complete = self._on_complete, None
+        if action is not None:
+            action()
 
     def release(self) -> None:
         if not self._released:
@@ -171,8 +203,10 @@ def try_background(
 
     Нельзя, когда идёт прогон по кнопке, когда уже идёт другая фоновая
     проверка и когда прошлая плановая была меньше ``min_interval_s`` назад.
-    Время проверки записывается сразу при выдаче разрешения: даже если она
-    оборвётся, перезапуск программы не устроит её заново.
+    У видов без ``retry_after_s`` время записывается сразу при выдаче разрешения: даже если проверка
+    оборвётся, перезапуск программы не устроит её заново. У видов с ``retry_after_s`` при выдаче
+    записывается попытка (повтор не раньше чем через ``retry_after_s``), а «сделано» — когда проверка
+    вызвала ``BackgroundPermit.complete()``.
     """
     if user_run_active():
         return None
@@ -180,14 +214,23 @@ def try_background(
     previous = last_run(kind.key)
     if 0 < now - previous < kind.min_interval_s:
         return None
+    if kind.retry_after_s is not None:
+        attempt = last_run(kind.attempt_key)
+        if 0 < now - attempt < kind.retry_after_s:
+            return None
     if not _BACKGROUND.acquire(blocking=False):
         return None
     if user_run_active():
         _BACKGROUND.release()
         return None
+    on_complete: Callable[[], None] | None = None
     try:
-        store_last_run(kind.key, now)
+        if kind.retry_after_s is None:
+            store_last_run(kind.key, now)
+        else:
+            store_last_run(kind.attempt_key, now)
+            on_complete = lambda: store_last_run(kind.key, clock())  # noqa: E731
     except Exception:
         _BACKGROUND.release()
         raise
-    return BackgroundPermit(kind, Why.SCHEDULE)
+    return BackgroundPermit(kind, Why.SCHEDULE, on_complete)

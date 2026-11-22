@@ -27,6 +27,8 @@ class DnsFeature:
     # Адреса чужих серверов, узнанные по имени DoH (dns.provider_addresses): при запуске и раз в сутки.
     adopt_provider_addresses: Callable = lambda: {}
     refresh_provider_addresses: Callable = lambda: []
+    # Дошла ли такая проверка до конца: плановая задача тогда записывает «сделано» (utils.probe_gate).
+    provider_run_completed: Callable = lambda _changes: False
     # Текст прошлой проверки домена по пути из записи истории; пусто — файла нет.
     load_past_domain_lookup: Callable = lambda _log_file: ""
     load_past_domain_lookup_report: Callable = lambda _log_file: None
@@ -198,6 +200,7 @@ def build_dns_feature() -> DnsFeature:
         refresh_zapret_dns_server=lambda: _public().refresh_zapret_dns_server(),
         adopt_provider_addresses=lambda: _public().adopt_provider_addresses(),
         refresh_provider_addresses=lambda: _public().refresh_provider_addresses(),
+        provider_run_completed=lambda changes: _public().provider_run_completed(changes),
         warm_page_data_cache=lambda *args, **kwargs: _public().warm_state(*args, **kwargs),
         consume_warmed_page_data=lambda *args, **kwargs: _public().consume_warmed_state(*args, **kwargs),
         create_dns_check_worker=_create_dns_check_worker,
