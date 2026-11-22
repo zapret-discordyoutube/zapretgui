@@ -449,6 +449,7 @@ class LocalProxyApplyWorkerTests(unittest.TestCase):
             start_local_proxy=start_local_proxy,
             stop_local_proxy_if_unused=lambda: self.log.append(("stop_if_unused",)),
             lookup_doh_name=lambda _host: [],
+            engine_rejects=lambda _doh, _addresses: False,
         )
 
     def test_engine_answers_first_and_only_then_adapters_get_the_local_address(self) -> None:
@@ -549,6 +550,28 @@ class LocalProxyApplyWorkerTests(unittest.TestCase):
         )
         # Тот же признак, по которому страница пишет «DNS поставлен без шифрования».
         self.assertTrue(result["plan"].doh_closed)
+
+    def test_server_the_engine_refuses_by_its_answer_is_named_as_such(self) -> None:
+        """Malw.link и GeoHide (win10, 2026-11-22): сеть открыта, но на пробный вопрос движка ответ не «имени нет»."""
+        from dns.state import DnsCommandResult
+
+        worker = self._smart_worker(data=self.ZAPRET, started=DnsCommandResult(success=False, message="lying resolver"))
+        asked: list = []
+        worker._engine_rejects = lambda doh, addresses: asked.append((doh, list(addresses))) or True
+
+        result = worker._run_apply()
+
+        self.assertEqual(asked, [("https://dns.zapret.moe/dns-query", ["83.217.211.149"])])
+        self.assertTrue(result["plan"].doh_closed)
+        self.assertTrue(result["plan"].engine_refused)
+
+    def test_closed_network_is_not_blamed_on_the_server_answer(self) -> None:
+        from dns.state import DnsCommandResult
+
+        result = self._smart_worker(data=self.ZAPRET, started=DnsCommandResult(success=False, message="нет ответа"))._run_apply()
+
+        self.assertTrue(result["plan"].doh_closed)
+        self.assertFalse(result["plan"].engine_refused)
 
     def test_encrypted_only_tile_is_never_set_by_plain_address(self) -> None:
         from dns.state import DnsCommandResult

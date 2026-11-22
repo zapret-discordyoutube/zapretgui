@@ -25,6 +25,7 @@ class DnsPageLoadWorker(QThread):
         super().__init__(parent)
         self._request_id = int(request_id)
         self._load_state = load_state
+        self._engine_addresses: list[str] = []
 
     def run(self) -> None:
         try:
@@ -212,6 +213,7 @@ class DnsApplyWorker(QThread):
         stop_local_proxy_if_unused: Callable[[], Any],
         lookup_doh_name: Callable[[str], list[str]] | None = None,
         refresh_provider: Callable[[str], Any] | None = None,
+        engine_rejects: Callable[[str, list[str]], bool] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -219,6 +221,8 @@ class DnsApplyWorker(QThread):
         self._refresh_provider = refresh_provider
         # Адреса имени DoH; подмена нужна тестам, чтобы не ходить в сеть.
         self._lookup_doh_name = lookup_doh_name
+        # Пробный вопрос движка серверу (dns.engine_check); подмена нужна тестам, чтобы не ходить в сеть.
+        self._engine_rejects = engine_rejects
         self._start_local_proxy = start_local_proxy
         self._stop_local_proxy_if_unused = stop_local_proxy_if_unused
         self._request_id = int(request_id)
@@ -280,7 +284,29 @@ class DnsApplyWorker(QThread):
         if host:
             with timed_step(f"адреса имени DoH {host}"):
                 found = [item for item in lookup(host) if ":" not in item][:MAX_NAME_ADDRESSES]
+        # Адреса, что ушли движку: по ним же потом выясняется, почему он их отверг (dns.engine_check).
+        self._engine_addresses = list(dict.fromkeys([*found, *(str(item) for item in self._data.get("ipv4") or ())]))
         return proxy_upstreams(self._data, found)
+
+    def _engine_refused_server(self) -> bool:
+        """Движок не взял сервер из-за его ответа на пробный вопрос (а не из-за сети): да или нет."""
+        from dns.engine_check import engine_rejects as real_engine_rejects
+        from dns.step_log import timed_step
+
+        engine_rejects = self._engine_rejects or real_engine_rejects
+        try:
+            with timed_step(f"пробный вопрос движка к {self._name}"):
+                refused = engine_rejects(str(self._data.get("doh") or ""), self._engine_addresses)
+        except Exception as exc:
+            log(f"DnsApplyWorker: пробный вопрос движка к {self._name} не удался: {exc}", "WARNING")
+            return False
+        if refused:
+            log(
+                f"DnsApplyWorker: {self._name} отвечает на пробный вопрос движка (NS, имя test.dnscrypt) не «имени нет» — "
+                "движок такой сервер не берёт",
+                "WARNING",
+            )
+        return refused
 
     def _run_apply(self) -> dict[str, object]:
         from dns import page_plans as dns_page_plans
@@ -319,6 +345,7 @@ class DnsApplyWorker(QThread):
             # движок, когда Windows сама шифровать DNS не умеет, — и у неё есть запасной путь.
             own_mode = bool(self._data.get("local_proxy"))
             unencrypted = False
+            engine_refused = False
             if self._proxy_mode:
                 # Шифрованный DNS: сначала движок должен ответить на запрос, и только
                 # потом адаптеры получают 127.0.0.1 — иначе пропал бы весь интернет.
@@ -345,6 +372,7 @@ class DnsApplyWorker(QThread):
                     # Шифрованный путь не сложился: сервер ставится адресами, и об этом будет сказано.
                     log(f"DnsApplyWorker: {self._name} ставится без шифрования: {started.message}", "WARNING")
                     unencrypted = True
+                    engine_refused = self._engine_refused_server()
             command_result = self._apply_dns(self._adapters, ipv4, ipv6)
             if used_proxy and not int(command_result.affected_count or 0):
                 # Ни один адаптер не получил 127.0.0.1: движок никому не нужен,
@@ -357,6 +385,7 @@ class DnsApplyWorker(QThread):
                 ipv6=ipv6,
                 error=str(command_result.message or ""),
                 doh_closed=unencrypted or bool(getattr(command_result, "doh_closed", False)),
+                engine_refused=engine_refused,
             )
         else:
             raise ValueError(f"Неизвестное DNS действие: {self._action}")

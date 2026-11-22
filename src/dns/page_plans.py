@@ -25,6 +25,8 @@ class NetworkDnsApplyResultPlan:
     error: str = ""
     # DNS встал, но шифрование до сервера не доходит (DnsCommandResult.doh_closed).
     doh_closed: bool = False
+    # Причина «без шифрования» — ответ самого сервера на пробный вопрос движка, а не закрытая сеть.
+    engine_refused: bool = False
 
 
 @dataclass(slots=True)
@@ -94,10 +96,12 @@ def build_provider_dns_apply_result_plan(
     ipv6: list[str],
     error: str = "",
     doh_closed: bool = False,
+    engine_refused: bool = False,
 ) -> NetworkDnsApplyResultPlan:
     what = f"{name} (IPv4+IPv6)" if ipv6 else name
     plan = _apply_result(what, adapter_count=adapter_count, success_count=success_count, error=error)
     plan.doh_closed = bool(doh_closed)
+    plan.engine_refused = bool(engine_refused) and plan.doh_closed
     return plan
 
 

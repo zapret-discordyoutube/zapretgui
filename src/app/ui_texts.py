@@ -2234,6 +2234,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Шифрованный путь (DoH) до этого сервера из вашей сети закрыт, поэтому компьютер спрашивает его обычными запросами — провайдер их видит и может подменить. Нужно шифрование — выберите сервер из группы «Шифрованные».",
         "en": "The encrypted path (DoH) to this server is closed on your network, so Windows asks it with plain queries — your provider sees them and can replace them. If you need encryption, pick a server from the “Encrypted” group.",
     },
+    "page.network.doh_closed.engine.content": {
+        "ru": "Сервер доступен, но он отвечает на проверочный вопрос встроенного шифрованного DNS (dnscrypt-proxy) не так, как тот требует: на несуществующее имя нужно «имени нет», а сервер отвечает иначе. Движок такой сервер не берёт, поэтому Windows спрашивает его обычными запросами — провайдер их видит и может подменить. Нужно шифрование — выберите сервер из группы «Шифрованные».",
+        "en": "The server is reachable, but it answers the test question of the built-in encrypted DNS (dnscrypt-proxy) differently from what the engine requires: for a name that does not exist it must say “no such name”. The engine does not accept such a server, so Windows asks it with plain queries — your provider sees them and can replace them. If you need encryption, pick a server from the “Encrypted” group.",
+    },
     "page.network.doh.switch": {
         "ru": "Шифровать DNS (DoH)",
         "en": "Encrypt DNS (DoH)",
