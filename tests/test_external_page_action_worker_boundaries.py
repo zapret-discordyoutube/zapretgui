@@ -120,8 +120,10 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
 
         self.assertEqual(worker, ("forum_for_beginners", None))
         self.assertTrue(result.ok)
-        # Кнопка открывает вики под открытым именем сайта (основное режут по TLS).
-        self.assertEqual(opened_urls, ["https://wiki2.zapret.moe/Zapret/home"])
+        # Кнопка открывает вики через входную страницу Zapret Links (основное имя режут по TLS).
+        from zapret_update import mirrors
+
+        self.assertEqual(opened_urls, [mirrors.ENTRY_PAGE + "?s=wiki&p=Zapret/home"])
 
     def test_support_open_actions_are_queued_while_worker_runs(self) -> None:
         class _Runtime:
