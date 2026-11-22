@@ -36,6 +36,13 @@ class LinuxUpdates:
             return False, f"Это не файл пакета: {package}"
         if not self._which("pkexec"):
             return False, f"Не установлена программа pkexec. Установите пакет вручную: {manual}"
+        if not self._which("apt-get"):
+            # Arch, Fedora and others: the .deb is not their format. Say so instead of a password error that is not one.
+            return False, (
+                "Эта система ставит пакеты не через apt, а файл обновления — пакет .deb. "
+                "Скачайте со страницы выпуска свежий AppImage (запустите его — он обновит программу) "
+                "или архив zapretgui-…-linux-x86_64.tar.gz и выполните в нём sudo ./install.sh."
+            )
         code, text = self._run(["pkexec", "apt-get", "install", "-y", str(package)])
         if code == 0:
             return True, "Новая версия установлена. Закройте Zapret и запустите снова."

@@ -213,6 +213,15 @@ def test_linux_install_failures_always_say_how_to_do_it_by_hand(tmp_path, code, 
     assert done is False and needle in text and f"sudo apt install {package}" in text
 
 
+def test_linux_install_on_a_system_without_apt_says_what_to_do_instead_of_asking_for_a_password(tmp_path):
+    package = tmp_path / DEB
+    package.write_bytes(b"x")
+    calls = []
+    updates = LinuxUpdates(run=lambda command: calls.append(command) or (0, ""), which=lambda name: None if name == "apt-get" else "/usr/bin/" + name)
+    done, text = updates.install_package(package)
+    assert done is False and "AppImage" in text and "install.sh" in text and not calls
+
+
 def test_linux_install_refuses_other_files_and_a_missing_pkexec(tmp_path):
     other = tmp_path / "x.exe"
     other.write_bytes(b"x")
