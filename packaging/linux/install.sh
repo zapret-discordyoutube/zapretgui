@@ -26,6 +26,9 @@ DEPENDENCIES="nftables libluajit-5.1-2 zlib1g libnetfilter-queue1 libnfnetlink0 
 # libraries Qt's xcb plugin needs; Fedora names its libraries after the upstream project. A name that does not exist (a release
 # that renamed it) is skipped by dnf (strict=0) and shows up in the log instead of stopping everything.
 ARCH_PACKAGES="nftables luajit zlib libnetfilter_queue libnfnetlink libmnl libcap xcb-util-cursor libxkbcommon-x11 libglvnd fontconfig dbus libx11 libxcb xcb-util xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm libxkbcommon wayland glib2"
+# Void Linux (xbps): LuaJIT is spelled in capitals there; libglvnd holds libEGL and libGL; wayland holds both wayland libraries;
+# the names were looked up in the Void repository.
+XBPS_PACKAGES="nftables LuaJIT zlib libnetfilter_queue libnfnetlink libmnl libcap xcb-util-cursor xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm libxkbcommon libxkbcommon-x11 libglvnd wayland dbus fontconfig glib libX11 libxcb"
 FEDORA_PACKAGES="nftables luajit zlib-ng-compat libnetfilter_queue libnfnetlink libmnl libcap xcb-util-cursor libxkbcommon-x11 libglvnd-egl libglvnd-glx fontconfig dbus-libs libX11 libX11-xcb libxcb xcb-util xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm libxkbcommon libwayland-client libwayland-cursor glib2"
 
 # The package manager of this system (a test names one in ZG_PKG).
@@ -34,6 +37,7 @@ package_manager() {
   if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then echo apt
   elif command -v pacman >/dev/null 2>&1; then echo pacman
   elif command -v dnf >/dev/null 2>&1; then echo dnf
+  elif command -v xbps-install >/dev/null 2>&1; then echo xbps
   else echo none
   fi
 }
@@ -65,8 +69,15 @@ install_dependencies() {
       # strict=0: a name this release of Fedora does not have is skipped (the log says which) instead of failing the lot
       # shellcheck disable=SC2086
       dnf install -y --setopt=strict=0 $missing || echo "warning: dnf could not install:$missing (no network?)" ;;
+    xbps)
+      for pkg in $XBPS_PACKAGES; do xbps-query "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"; done
+      [ -n "$missing" ] || return 0
+      echo "Installing the libraries and tools Zapret needs:$missing"
+      # the package index may not be fetched yet on a fresh system: try without it first, then with it
+      # shellcheck disable=SC2086
+      xbps-install -y $missing || xbps-install -Sy $missing || echo "warning: xbps-install could not install:$missing (run  sudo xbps-install -Su  first, then start Zapret again)" ;;
     *)
-      echo "note: no known package manager (apt, pacman, dnf): install the libraries of Zapret yourself if the window does not open" ;;
+      echo "note: no known package manager (apt, pacman, dnf, xbps): install the libraries of Zapret yourself if the window does not open" ;;
   esac
 }
 install_dependencies
@@ -103,7 +114,11 @@ getent group zapretgui >/dev/null || groupadd --system zapretgui
 
 install -d /usr/share/polkit-1/rules.d && install -m 0644 "$HERE/packaging/linux/polkit/50-zapretgui.rules" /usr/share/polkit-1/rules.d/50-zapretgui.rules
 install -d /usr/share/applications && install -m 0644 "$HERE/packaging/linux/zapretgui.desktop" /usr/share/applications/zapretgui.desktop
-[ -d "$TARGET/system/hicolor" ] && cp -a "$TARGET/system/hicolor/." /usr/share/icons/hicolor/
+# icons are cosmetic: a minimal system (Void, a container) may not even have the folder, and that must not stop the install
+# before the helper service is set up
+if [ -d "$TARGET/system/hicolor" ]; then
+  { install -d /usr/share/icons/hicolor && cp -a "$TARGET/system/hicolor/." /usr/share/icons/hicolor/; } || echo "warning: the icons were not installed"
+fi
 command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 

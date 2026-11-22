@@ -500,6 +500,17 @@ def test_install_dependencies_uses_dnf_on_fedora(tmp_path) -> None:
     assert log.read_text(encoding="utf-8").splitlines() == ["dnf install -y --setopt=strict=0 libcap nftables"]
 
 
+def test_install_dependencies_uses_xbps_on_void(tmp_path) -> None:
+    log = tmp_path / "xbps.log"
+    stubs = {
+        "xbps-query": 'case "$1" in zlib|libcap) exit 0;; *) exit 1;; esac',
+        "xbps-install": f'echo "xbps-install $*" >> "{log}"',
+    }
+    done = _run_install_dependencies(tmp_path, "xbps", stubs, 'XBPS_PACKAGES="zlib LuaJIT libcap nftables"')
+    assert done.returncode == 0, done.stderr
+    assert log.read_text(encoding="utf-8").splitlines() == ["xbps-install -y LuaJIT nftables"]
+
+
 def test_package_lists_of_arch_and_fedora_are_not_empty() -> None:
     """Three lists describe the same needs (deb, Arch, Fedora): a library added to one is checked against the others."""
     import re
@@ -509,9 +520,9 @@ def test_package_lists_of_arch_and_fedora_are_not_empty() -> None:
     def words(name: str) -> list:
         return re.search(rf'^{name}="([^"]+)"', text, re.M | re.S).group(1).split()
 
-    for name in ("ARCH_PACKAGES", "FEDORA_PACKAGES"):
+    for name in ("ARCH_PACKAGES", "FEDORA_PACKAGES", "XBPS_PACKAGES"):
         assert len(words(name)) >= 15, name
-        assert "nftables" in words(name) and "luajit" in words(name), name
+        assert "nftables" in words(name) and "luajit" in {word.lower() for word in words(name)}, name
 
 
 def test_arch_and_fedora_packages_repackage_the_deb() -> None:
@@ -624,6 +635,7 @@ def _initsys(tmp_path, script: str, *, init: str | None, stubs: dict[str, str] |
         "rc-service": 'echo "rc-service $*" >> "$CALLS"',
         "rc-update": 'echo "rc-update $*" >> "$CALLS"',
         "update-rc.d": 'echo "update-rc.d $*" >> "$CALLS"',
+        "sv": 'echo "sv $*" >> "$CALLS"',
         **(stubs or {}),
     }.items():
         (bin_dir / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
@@ -631,7 +643,9 @@ def _initsys(tmp_path, script: str, *, init: str | None, stubs: dict[str, str] |
     env = {
         "PATH": f"{bin_dir}:/usr/bin:/bin", "CALLS": str(calls), "ZG_SRC": str(PACKAGING),
         "ZG_INIT_DIR": str(tmp_path / "init.d"), "ZG_UNIT_DIR": str(tmp_path / "units"), "ZG_PREFIX": str(tmp_path / "no-program"),
+        "ZG_SV_DIR": str(tmp_path / "sv"), "ZG_SERVICE_DIR": str(tmp_path / "service"), "ZG_WAIT_SECONDS": "0",
     }
+    (tmp_path / "service").mkdir(parents=True, exist_ok=True)
     if init:
         env["ZG_INIT"] = init
     done = subprocess.run(["sh", "-c", f'. "{PACKAGING}/initsys.sh"; {script}'], env=env, capture_output=True, text=True, timeout=60)
@@ -664,12 +678,63 @@ def test_each_init_system_gets_its_own_service_and_commands(tmp_path) -> None:
     assert not (tmp_path / "e" / "init.d" / "zapretgui-helper").exists() and "rc-update del zapretgui-helper default" in calls
 
 
+def test_runit_gets_a_service_folder_linked_into_the_folder_runsvdir_watches(tmp_path) -> None:
+    """Void Linux: /etc/sv/zapretgui-helper (run + finish); the link in /var/service is what enables and starts it."""
+    done, calls = _initsys(tmp_path, "zg_service_install; zg_service_start", init="runit")
+    assert done.returncode == 0, done.stderr
+    service = tmp_path / "sv" / "zapretgui-helper"
+    assert service.joinpath("run").read_text(encoding="utf-8").startswith("#!/bin/sh") and service.joinpath("run").stat().st_mode & 0o111
+    assert service.joinpath("finish").stat().st_mode & 0o111
+    link = tmp_path / "service" / "zapretgui-helper"
+    assert link.is_symlink() and link.resolve() == service.resolve()
+    assert not (tmp_path / "init.d").exists() and not (tmp_path / "units").exists()
+    # a second install (an update) restarts the running service instead of linking again
+    done, calls = _initsys(tmp_path, "zg_service_install; zg_service_start", init="runit")
+    assert done.returncode == 0 and any(call.startswith("sv restart") and call.endswith("zapretgui-helper") for call in calls)
+    # stopping with "disable" takes the link away, so the next boot does not start it; removing drops the folder too
+    done, calls = _initsys(tmp_path, "zg_service_stop disable", init="runit")
+    assert not link.exists() and not link.is_symlink() and any(call.startswith("sv stop") for call in calls)
+    done, _ = _initsys(tmp_path, "zg_service_remove", init="runit")
+    assert not service.exists()
+    done, _ = _initsys(tmp_path / "hint", "zg_start_hint", init="runit")
+    assert "sv start zapretgui-helper" in done.stdout
+
+
+def test_a_runit_machine_is_recognised_by_the_name_of_process_1_in_both_languages(monkeypatch) -> None:
+    import sys
+
+    sys.path.insert(0, str(PACKAGING.parents[1] / "src"))
+    from platforms.linux import init_system
+
+    text = (PACKAGING / "initsys.sh").read_text(encoding="utf-8")
+    assert "runit|runit-init) echo runit" in text  # Void's process 1 is called "runit"
+    monkeypatch.delenv("ZG_INIT", raising=False)
+    monkeypatch.setattr(init_system.os.path, "isdir", lambda path: False)
+    monkeypatch.setattr(init_system, "_read", lambda path: "runit" if path == "/proc/1/comm" else "")
+    assert init_system.detect() == "runit"
+    assert init_system.start_command() == "sudo sv start zapretgui-helper"
+    assert init_system.status_command() == "sudo sv status zapretgui-helper"
+    monkeypatch.setattr(init_system, "_read", lambda path: "s6-svscan" if path == "/proc/1/comm" else "")
+    assert init_system.detect() == "none"
+
+
+def test_the_runit_scripts_are_shell_that_parses_and_ship_with_the_program() -> None:
+    import subprocess
+
+    for name in ("zapretgui-helper.runit", "zapretgui-helper.runit-finish"):
+        path = PACKAGING / "init" / name
+        assert subprocess.run(["sh", "-n", str(path)], capture_output=True).returncode == 0, name
+        assert path.read_text(encoding="utf-8").startswith("#!/bin/sh")
+    run = (PACKAGING / "init" / "zapretgui-helper.runit").read_text(encoding="utf-8")
+    assert "exec \"$PREFIX/bin/zapretgui-helper\"" in run  # runsv supervises the helper itself, not a wrapper that forks
+
+
 def test_the_init_system_is_chosen_without_being_told(tmp_path) -> None:
     """Detection reads the machine: /run/systemd/system, the name of process 1, OpenRC's state, then start-stop-daemon."""
     text = (PACKAGING / "initsys.sh").read_text(encoding="utf-8")
     assert "/run/systemd/system" in text and "/proc/1/comm" in text and "/run/openrc/softlevel" in text and "start-stop-daemon" in text
     done, _ = _initsys(tmp_path, "zg_init_kind", init=None)
-    assert done.stdout.strip() in {"systemd", "openrc", "sysv", "none"}
+    assert done.stdout.strip() in {"systemd", "openrc", "sysv", "runit", "none"}
     for kind, hint in (("systemd", "systemctl start"), ("openrc", "rc-service zapretgui-helper start"), ("sysv", "service zapretgui-helper start"), ("none", "zapretgui-helper")):
         done, _ = _initsys(tmp_path / kind, "zg_start_hint", init=kind)
         assert hint in done.stdout
@@ -774,3 +839,12 @@ def test_install_sh_makes_root_the_owner_of_the_program_folder() -> None:
     assert 'chown -R root:root "$TARGET"' in text
     assert text.index('chown -R root:root "$TARGET"') > text.index('mv "$TARGET.new" "$TARGET"')  # after the copy, before the service starts
     assert text.index('chown -R root:root "$TARGET"') < text.index("zg_service_install")
+
+
+def test_missing_icon_folder_does_not_stop_the_install_before_the_service() -> None:
+    """Found in a Void chroot: /usr/share/icons/hicolor did not exist, cp failed, set -e ended the script before the helper service."""
+    text = (PACKAGING / "install.sh").read_text(encoding="utf-8")
+    icons = text.index('cp -a "$TARGET/system/hicolor/."')
+    assert "install -d /usr/share/icons/hicolor" in text[icons - 120 : icons]
+    assert "|| echo" in text[icons : icons + 160]  # not fatal
+    assert icons < text.index("zg_service_install")

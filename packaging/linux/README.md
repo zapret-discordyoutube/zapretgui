@@ -36,9 +36,11 @@ The build machine decides the oldest system the result runs on (glibc of the bui
 
 ## Other distributions
 
-`install.sh` (and so the AppImage, which calls it) finds the package manager itself and installs the libraries with the names of that system: `apt` (Debian, Ubuntu, Devuan), `pacman` (Arch, Manjaro, EndeavourOS) and `dnf` (Fedora and relatives). The three name lists are `DEPENDENCIES` (the same as `Depends:` of the .deb), `ARCH_PACKAGES` and `FEDORA_PACKAGES`: add a library to all three. Tested in chroots of Arch and Fedora 45 (dependencies, package build, install, removal); SELinux on Fedora is not tested.
+`install.sh` (and so the AppImage, which calls it) finds the package manager itself and installs the libraries with the names of that system: `apt` (Debian, Ubuntu, Devuan), `pacman` (Arch, Manjaro, EndeavourOS), `dnf` (Fedora and relatives) and `xbps` (Void Linux). The four name lists are `DEPENDENCIES` (the same as `Depends:` of the .deb), `ARCH_PACKAGES`, `FEDORA_PACKAGES` and `XBPS_PACKAGES`: add a library to all four. Tested in chroots of Arch and Fedora 45 (dependencies, package build, install, removal); SELinux on Fedora is not tested.
 
 - `arch/PKGBUILD` + `arch/zapretgui.install`: a "-bin" package that unpacks the .deb of the same release. `cd packaging/linux/arch && updpkgsums && makepkg -si`. Set `pkgver` to the release.
 - `rpm/zapretgui.spec`: the same for Fedora. Put the .deb into `~/rpmbuild/SOURCES/`, `rpmbuild -bb packaging/linux/rpm/zapretgui.spec`, `sudo dnf install ~/rpmbuild/RPMS/x86_64/zapretgui-*.rpm`.
 
 Both packages carry the same files as the .deb, create the group `zapretgui` and need systemd (the OpenRC and sysvinit scripts are only used by the .deb and `install.sh`).
+
+**Void Linux and runit.** Void has no `.deb` and starts services with `runit`, not systemd. A `.deb` converted with `xdeb`/`xbps` tools does not run the package's install scripts, so the service, the group and the user's membership are never set up: use the AppImage or `install.sh` instead. `initsys.sh` recognises runit (process 1 is called `runit`), installs `/etc/sv/zapretgui-helper/{run,finish}` from `init/zapretgui-helper.runit*` and enables it by linking that folder into the folder `runsvdir` watches (`/var/service`); `sv start|stop|status zapretgui-helper` control it. Tested in a Void chroot with the real `xbps` and `runsvdir`.

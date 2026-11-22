@@ -1,0 +1,6 @@
+#!/bin/sh
+# runit runs this after the helper has stopped (installed as /etc/sv/zapretgui-helper/finish): the second net for a helper that
+# was killed hard, so that no firewall table is left behind to cut the internet.
+command -v nft >/dev/null 2>&1 && nft delete table inet zapretgui >/dev/null 2>&1
+rm -f "${ZAPRETGUI_SOCKET:-/run/zapretgui/helper.sock}"
+exit 0

@@ -1,0 +1,12 @@
+#!/bin/sh
+# For runit (Void Linux and others). packaging/linux/initsys.sh installs it as /etc/sv/zapretgui-helper/run and enables the
+# service by linking that folder into the folder runsvdir watches (/var/service on Void).
+exec 2>&1
+PREFIX="${ZAPRETGUI_PREFIX:-/opt/zapretgui}"
+SOCKET="${ZAPRETGUI_SOCKET:-/run/zapretgui/helper.sock}"
+# A killed helper may have left its firewall table or socket behind; the table would cut the internet.
+command -v nft >/dev/null 2>&1 && nft delete table inet zapretgui >/dev/null 2>&1
+rm -f "$SOCKET"
+install -d -m 0755 "$(dirname "$SOCKET")"
+# runsv sends TERM when the service stops; the helper removes its own table on that.
+exec "$PREFIX/bin/zapretgui-helper" >>"${ZAPRETGUI_LOGFILE:-/var/log/zapretgui-helper.log}" 2>&1

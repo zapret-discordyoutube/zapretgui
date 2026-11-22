@@ -7,13 +7,14 @@ from platforms.linux import init_system
 
 
 class LinuxServices:
-    """Services of the init system found on this machine (systemd, OpenRC, sysvinit). Starting one needs root, which is the helper service's job."""
+    """Services of the init system found on this machine (systemd, OpenRC, sysvinit, runit). Starting one needs root, which is the helper service's job."""
 
     def is_running(self, name: str) -> bool:
         commands = {
             init_system.SYSTEMD: ["systemctl", "is-active", "--quiet", name],
             init_system.OPENRC: ["rc-service", name, "status"],
             init_system.SYSV: ["service", name, "status"],
+            init_system.RUNIT: ["sv", "check", name],
         }
         command = commands.get(init_system.detect())
         if not command:
