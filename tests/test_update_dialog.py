@@ -458,3 +458,27 @@ class FunTextsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_release_notes_show_bold_code_and_links_instead_of_the_markdown_marks() -> None:
+    """The report: the 'What is new' tab printed **bold** and `code` marks as typed."""
+    from updater.ui.plans import release_notes_body_html
+
+    html = release_notes_body_html(
+        "# Linux\n\n- **Установка.** Команда `sudo chmod -R go+rX /opt/zapretgui`, см. [вики](https://wiki.zapret.moe/x) и https://a.b/c.\n",
+        accent_hex="#00ccff",
+    )
+    assert "**" not in html and "`" not in html
+    assert "<b>Установка.</b>" in html
+    assert "sudo chmod -R go+rX /opt/zapretgui</span>" in html or "sudo chmod -R go+rX /opt/zapretgui&nbsp;</span>" in html
+    assert html.count('href="https://wiki.zapret.moe/x"') == 1 and ">вики</a>" in html  # the address is not linked a second time
+    assert 'href="https://a.b/c"' in html
+
+
+def test_release_notes_markup_does_not_leak_into_code_or_let_html_through() -> None:
+    from updater.ui.plans import release_notes_body_html
+
+    html = release_notes_body_html("- `a **b** c` <script>x</script> 2 * 3 * 4", accent_hex="#000")
+    assert "<b>" not in html  # inside code nothing is interpreted
+    assert "<script>" not in html and "&lt;script&gt;" in html
+    assert "<i>" not in html  # "2 * 3 * 4" is arithmetic, not italics

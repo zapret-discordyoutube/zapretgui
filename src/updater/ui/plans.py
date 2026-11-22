@@ -114,6 +114,37 @@ def _linkify(escaped: str, accent_hex: str) -> str:
     return _URL_RE.sub(replace_url, escaped)
 
 
+def _inline_html(escaped: str, accent_hex: str) -> str:
+    """Разметка внутри строки заметок: `код`, **жирный**, *курсив*, [текст](ссылка) и голые ссылки.
+
+    Текст уже экранирован. Код и ссылки сначала прячутся под метки: внутри кода ничего не разбирается, а адрес из
+    ``[текст](адрес)`` не превращается второй раз в ссылку ``_linkify``.
+    """
+    import re
+
+    stash: list[str] = []
+
+    def hide(fragment: str) -> str:
+        stash.append(fragment)
+        return f"\x00{len(stash) - 1}\x00"
+
+    def code(match) -> str:
+        return hide(
+            "<span style=\"font-family: 'Cascadia Mono', 'DejaVu Sans Mono', monospace; "
+            f"background-color: rgba(128, 128, 128, 0.28);\">&nbsp;{match.group(1)}&nbsp;</span>"
+        )
+
+    def link(match) -> str:
+        return hide(f'<a href="{match.group(2)}" style="color: {accent_hex}; text-decoration: none;">{match.group(1)}</a>')
+
+    text = re.sub(r"`([^`\n]+)`", code, escaped)
+    text = re.sub(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)", link, text)
+    text = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"(?<![\w*])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![\w*])", r"<i>\1</i>", text)
+    text = _linkify(text, accent_hex)
+    return re.sub("\x00(\\d+)\x00", lambda m: stash[int(m.group(1))], text)
+
+
 def versions_word(count: int, language: str) -> str:
     """«2 версии», «5 версий», «21 версию» — по правилам русского языка."""
     n = abs(int(count))
@@ -165,14 +196,14 @@ def release_notes_body_html(notes: str, *, accent_hex: str) -> str:
                 bullet = line[len(marker):].strip()
                 break
         if bullet is not None:
-            items.append(f"<li style='margin-bottom: 3px;'>{_linkify(html.escape(bullet), accent_hex)}</li>")
+            items.append(f"<li style='margin-bottom: 3px;'>{_inline_html(html.escape(bullet), accent_hex)}</li>")
             continue
         flush_items()
         if line.startswith("#"):
             heading = line.lstrip("#").strip()
-            blocks.append(f"<p style='margin: 8px 0 2px 0;'><b>{_linkify(html.escape(heading), accent_hex)}</b></p>")
+            blocks.append(f"<p style='margin: 8px 0 2px 0;'><b>{_inline_html(html.escape(heading), accent_hex)}</b></p>")
         else:
-            blocks.append(f"<p style='margin: 2px 0 4px 0;'>{_linkify(html.escape(line), accent_hex)}</p>")
+            blocks.append(f"<p style='margin: 2px 0 4px 0;'>{_inline_html(html.escape(line), accent_hex)}</p>")
     flush_items()
     return "".join(blocks)
 
