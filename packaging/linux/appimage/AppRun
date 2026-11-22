@@ -163,9 +163,13 @@ start_window() {
   log_file "$log"
   if [ "$code" != 0 ]; then
     lacking="$(for f in "$PREFIX/_internal/zapretgui" $(find "$PREFIX/_internal" -name libqxcb.so 2>/dev/null); do ldd "$f" 2>/dev/null | grep 'not found'; done | sort -u | tr -s '\t ' ' ' | head -8)"
-    log "missing libraries: ${lacking:-none found}"
+    nodisplay=
+    [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && nodisplay=1
+    log "missing libraries: ${lacking:-none found}; graphical session: ${nodisplay:+none}"
     say "Zapret did not start (exit code $code).
-$(tail -n 8 "$log" 2>/dev/null)${lacking:+
+$(tail -n 8 "$log" 2>/dev/null)${nodisplay:+
+
+There is no graphical session in this terminal (DISPLAY is empty: a text console or ssh?). Start Zapret from the desktop: the application menu or a double click in the file manager.}${lacking:+
 
 Libraries that are missing on this system:
 $lacking}

@@ -371,6 +371,44 @@ def test_the_appimage_start_leaves_a_log_file_the_person_can_send(tmp_path) -> N
     assert "appimage-start.log" in refused  # the message to the person names the file
 
 
+def test_the_window_wrapper_starts_inside_the_new_group_without_a_new_login(tmp_path) -> None:
+    """Report 2026-11-22: after the first install the window opened from the menu, but every engine start said
+    "You are not in the zapretgui group" until the next login. The wrapper re-runs the window through sg, arguments intact."""
+    import subprocess
+
+    wrapper = tmp_path / "zapretgui"
+    program = tmp_path / "program"
+    wrapper.write_text(
+        (PACKAGING / "bin" / "zapretgui").read_text(encoding="utf-8").replace("/opt/zapretgui/_internal/zapretgui", str(program)),
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    program.write_text('#!/bin/sh\necho "group=${ZAPRETGUI_IN_GROUP:-no}"; for a in "$@"; do echo "arg=[$a]"; done\n', encoding="utf-8")
+    program.chmod(0o755)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "sg").write_text('#!/bin/sh\necho "via sg $1"; shift 2; exec /bin/sh -c "$1"\n', encoding="utf-8")
+    (stubs / "id").write_text('#!/bin/sh\ncase "$1" in -un) echo tester;; -nG) echo "tester";; *) exec /usr/bin/id "$@";; esac\n', encoding="utf-8")
+    (stubs / "getent").write_text('#!/bin/sh\necho "zapretgui:x:983:other,tester"\n', encoding="utf-8")
+    for stub in stubs.iterdir():
+        stub.chmod(0o755)
+    env = {"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path), "XDG_STATE_HOME": str(tmp_path / "state")}
+    done = subprocess.run([str(wrapper), "it's a file.json", "two words"], env=env, capture_output=True, text=True, timeout=30)
+    lines = done.stdout.splitlines()
+    assert lines == ["via sg zapretgui", "group=1", "arg=[it's a file.json]", "arg=[two words]"], done
+    # already in the group (this session has it): no sg, no loop
+    (stubs / "id").write_text('#!/bin/sh\ncase "$1" in -un) echo tester;; -nG) echo "tester zapretgui";; *) exec /usr/bin/id "$@";; esac\n', encoding="utf-8")
+    done = subprocess.run([str(wrapper), "x"], env=env, capture_output=True, text=True, timeout=30)
+    assert done.stdout.splitlines() == ["group=no", "arg=[x]"], done
+
+
+def test_a_window_without_a_graphical_session_is_explained_as_such(tmp_path) -> None:
+    import subprocess
+
+    text = (PACKAGING / "appimage" / "AppRun").read_text(encoding="utf-8")
+    assert "There is no graphical session in this terminal" in text
+
+
 def _deb_depends() -> list[str]:
     control = (PACKAGING / "deb" / "control.in").read_text(encoding="utf-8")
     line = next(row for row in control.splitlines() if row.startswith("Depends:"))

@@ -30,4 +30,18 @@ desktop_shortcut_once() {
 }
 desktop_shortcut_once || true
 
+# Right after the first install the person is in the group zapretgui in /etc/group, but THIS session does not have it until the
+# next login (a menu entry or the tray start without it), and the helper talks only to members of the group: the window opened
+# and every engine start failed with "You are not in the zapretgui group". sg starts the window inside the group at once.
+if [ -z "${ZAPRETGUI_IN_GROUP:-}" ] && command -v sg >/dev/null 2>&1 \
+   && ! id -nG | tr ' ' '\n' | grep -qx zapretgui \
+   && getent group zapretgui | cut -d: -f4 | tr ',' '\n' | grep -qx "$(id -un)"; then
+  export ZAPRETGUI_IN_GROUP=1
+  command_line="exec /opt/zapretgui/_internal/zapretgui"
+  for argument in "$@"; do
+    command_line="$command_line '$(printf '%s' "$argument" | sed "s/'/'\\\\''/g")'"
+  done
+  exec sg zapretgui -c "$command_line"
+fi
+
 exec /opt/zapretgui/_internal/zapretgui "$@"
